@@ -1,0 +1,14 @@
+*.bin
+*.o
+*.lst
+build/
+# KiCad
+*-backups/
+*.kicad_prl
+fp-info-cache
+# FPGA
+*.json
+*.asc
+*.config
+*.bit
+*.svf
