@@ -185,7 +185,7 @@ Anything else, including the system area at `0xF00000` (interrupt controller, ti
 | Port | Device |
 |------|--------|
 | 0 | SD card data FIFO, paced by the card |
-| 1 | USB FIFO (FT2232H channel B), paced by the USB chip |
+| 1 | USB serial FIFOs (spec 14), paced by the link |
 | 2–7 | Reserved |
 
 When a port isn't ready, that channel waits and the other channels keep running. Port addresses don't increment.

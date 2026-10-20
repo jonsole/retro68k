@@ -60,7 +60,7 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 | 12 | 76 | TIMER1 | Timer 1 underflow | 6 |
 | 13 | 77 | TIMER2 | Timer 2 underflow | 6 |
 | 14 | 78 | TIMER3 | Timer 3 underflow | 6 |
-| 15 | 79 | SERIAL | USB serial: data received, or room to send | 3 |
+| 15 | 79 | SERIAL | USB serial: data received, timeout, room to send, overflow (spec 14) | 3 |
 | 16 | 80 | SD | SD card: transfer done or card inserted/removed | 2 |
 | 17 | 81 | KEYB | Keyboard: key event | 2 |
 | 18 | 82 | SOFT | Software interrupt (SOFTINT) | 1 |
@@ -75,7 +75,7 @@ The video flags that share one source (VIDERR) and the audio flags (AUDSTR, AUDC
 Level 7 cannot be masked by the 68000. It is kept for getting control back from a hung or misbehaving program:
 
 - **NMI button:** a button on a spare header pin, debounced in the FPGA.
-- **USB break:** a "break" request from the computer at the other end of the USB link (spec 7), so a debug monitor on the PC can stop the 68000 at any moment.
+- **USB break:** a BREAK command from the PC over the USB link (spec 14, section 3), so a debugger on the PC can stop the 68000 at any moment.
 
 Both use vector 31, the 68000's usual level 7 vector; the controller supplies it during the acknowledge like any other vector. NMISTAT says which one it was. NMIEN can turn each off, for example so the USB break only works while debugging. NMI is edge-triggered on the 68000, so each press or break gives exactly one interrupt.
 
@@ -116,7 +116,6 @@ After reset everything except NMI is off, so the boot ROM can set up its vector 
 | # | Item |
 |---|------|
 | I1 | Which header pins carry the NMI button and any GPIO interrupts (spec 7) |
-| I2 | Whether the USB break should also be able to reset the machine (a "hard break") |
 | I3 | Use of the reserved sources 19–23 |
 
 ## 10. Tests
