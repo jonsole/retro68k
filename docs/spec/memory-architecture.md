@@ -2,7 +2,7 @@
 
 Status: **draft for review**
 
-This spec describes how the CPU, video, audio and other DMA engines share the SDRAM. It follows the Amiga's model: memory time is cut into fixed **slots**, and the slots alternate between the CPU (even slots) and DMA (odd slots). Each DMA engine owns fixed slots in every 32 µs period, so its bandwidth is guaranteed, and the CPU never waits for video or audio.
+This spec describes how the CPU, video, audio and other DMA engines share the SDRAM. It follows the Amiga's model: memory time is cut into fixed **slots**, and the slots alternate between the CPU (even slots) and DMA (odd slots). Each DMA engine owns fixed slots in every scan line, so its bandwidth is guaranteed, and the CPU never waits for video or audio.
 
 ## 1. Summary
 
@@ -11,9 +11,9 @@ This spec describes how the CPU, video, audio and other DMA engines share the SD
 | Memory | One Winbond W9825G6JH SDRAM, 16M × 16 bit (32 MB), on the miniSpartan6+ |
 | SDRAM clock | 100 MHz, CAS latency 2 |
 | Slot length | 80 ns = 8 SDRAM clocks = one 68000 clock at 12.5 MHz |
-| Slot period | 400 slots = 32 µs; the odd-slot table repeats every period. Independent of the video mode |
+| Slots per line | Every scan line is a whole, even number of slots (260–400 depending on the video mode). The slot counter restarts each line, so DMA is locked to the beam |
 | Even slots | CPU first; blitter gets the ones the CPU does not use |
-| Odd slots | DMA: half for display fetch (layers and sprites), a few fixed ones for refresh, audio and storage, the rest to copper and blitter |
+| Odd slots | DMA, at fixed beam positions: half for display fetch (layers and sprites), a few for refresh, audio and storage, the rest to copper and blitter |
 | Page policy | Closed page: every slot opens a row, transfers, and precharges. No slot depends on the one before it |
 | CPU waits | **None** in normal running (see section 5) |
 
@@ -23,7 +23,7 @@ This spec describes how the CPU, video, audio and other DMA engines share the SD
 |------|-------|-------------------|
 | **Chip RAM** | The 32 MB SDRAM | CPU and every DMA engine |
 | **Fast RAM** | 2 MB SRAM on the later CPU board | CPU only, never slowed by DMA |
-| **Block RAM** | Inside the FPGA: boot ROM, text screen, font, palette, line buffers, FIFOs | CPU through registers/windows; never uses SDRAM slots |
+| **Block RAM** | Inside the FPGA: boot ROM, text screen, font, palette, FIFOs | CPU through registers/windows; never uses SDRAM slots |
 
 On the main path (fx68k inside the FPGA) there is no Fast RAM, so all RAM is Chip RAM. Because the CPU has its own guaranteed slots, Chip RAM is still zero-wait for the CPU. On the Amiga that was only true when no high-bandwidth display mode was on.
 
@@ -48,16 +48,15 @@ On the main path (fx68k inside the FPGA) there is no Fast RAM, so all RAM is Chi
 
 ### 4.1 Clocks
 
-All clocks come from one PLL and are phase-locked:
+Everything comes from one 300 MHz master clock divided by whole numbers (spec 4, section 3.1):
 
-| Clock | Frequency | Per slot |
-|-------|-----------|----------|
-| System / SDRAM | 100 MHz | 8 |
-| fx68k master clock | 25 MHz with alternating phase enables → 12.5 MHz 68000 | 1 CPU clock |
+| Clock | Master ÷ | Frequency | Per slot |
+|-------|----------|-----------|----------|
+| System / SDRAM | 3 | 100 MHz | 8 |
+| fx68k master clock | 12 | 25 MHz with alternating phase enables → 12.5 MHz 68000 | 1 CPU clock |
+| Pixel clock | N = 4–12 | 75–25 MHz | 6–2 pixels |
 
-A counter `slot` (0–399) runs continuously, and bit 0 decides even or odd. The 400-slot period is 32 µs.
-
-The video pixel clock is **not** tied to this grid. Video runs on its own programmable clock and hands data over through dual-port line buffers (spec 4, section 3.1). The memory side never changes when the video mode changes.
+The video timing rule (HTOTAL × N a multiple of 48) makes every scan line a whole, even number of slots. The slot counter `hslot` restarts at 0 at the start of every line, and bit 0 decides even or odd. Because every line has an even number of slots, the even/odd pattern carries on unbroken across lines and across video mode changes.
 
 ### 4.2 SDRAM operations that fit in one slot
 
@@ -143,51 +142,60 @@ For each even slot, in order:
 3. **Copper**, if it has work
 4. Idle
 
-Because the CPU uses at most one even slot in two, the blitter always gets at least 100 even slots per 32 µs period, even with the CPU running flat out from Chip RAM.
+Because the CPU uses at most one even slot in two, the blitter always gets at least a quarter of all slots, even with the CPU running flat out from Chip RAM.
 
 A future "blitter priority" bit (like the Amiga's BLTPRI) could let the blitter take CPU slots too, slowing the CPU. It is left out of version 1.
 
 ## 7. Odd-slot table (DMA)
 
-Odd slots are given out by a fixed pattern that repeats every 400-slot period (32 µs). It does not follow the video lines, so it is the same in every video mode.
+Odd slots are given out by a fixed pattern that starts again at the beginning of every scan line, so every DMA engine gets its slots at the same beam positions on every line. A line has S slots (400 at 640×480; 260–396 in other modes, see spec 4, section 3.5).
 
-### 7.1 Fixed allocation per 32 µs period
+### 7.1 Fixed allocation per line
 
-| Owner | Odd slots per period | Which slots | Notes |
-|-------|----------------------|-------------|-------|
-| Display fetch (layers and sprites) | 100 | `slot % 4 == 1` | 25 MB/s. Demand-driven: the video fetch engine uses them when a line buffer needs filling (spec 4, section 5) |
-| Refresh | 5 | Fixed `slot % 4 == 3` positions | SDRAM needs 8192 refreshes per 64 ms = 4.1 per 32 µs; 5 gives margin |
-| Audio | 8 (one per channel; 4 channels in version 1) | Fixed `slot % 4 == 3` positions | One 4-word burst per channel per period |
-| Storage (SD / USB) | 2 guaranteed | Fixed `slot % 4 == 3` positions | More from the free pool |
-| **Free pool** | **85** | The other `slot % 4 == 3` slots | Display fetch first if wide fetch is on (spec 4), then copper, blitter, extra storage |
-| **Total** | **200** | | |
+**Visible part of the line:**
 
-If an owner doesn't need its slot (audio FIFO full, no line waiting to be fetched), the slot drops to the free pool.
+| Slots | Owner |
+|-------|-------|
+| `hslot % 4 == 1` | Display fetch: layers, just in time (spec 4, section 5) |
+| `hslot % 4 == 3` | Display fetch if wide fetch is on; otherwise free pool |
 
-Free odd slots go, in order, to:
+**Horizontal blanking** (all odd slots, in this order):
 
-1. **Display fetch**, if wide fetch is on
+| Owner | Odd slots | Notes |
+|-------|-----------|-------|
+| Layer prefetch | 2 per bitmap layer whose window starts at the left edge | Fills each layer's buffer before the line starts |
+| Refresh | R = 4 or 5 | The SDRAM needs one refresh per 7.8 µs. R = ceil(1.2 × line time ÷ 7.8 µs): 5 for lines over 26 µs, 4 for shorter ones |
+| Audio | 8 (one per channel; 4 channels in version 1) | One 4-word burst per channel per line |
+| Storage (SD / USB) | 2 guaranteed | |
+| Free pool | The rest | |
+
+At 640×480 the blanking has 40 odd slots. Even with 4 layers prefetching, 17 are left for the free pool.
+
+If an owner doesn't need its slot this line (audio FIFO full, layer off), the slot drops to the free pool.
+
+Free-pool slots go, in order, to:
+
+1. **Sprites**, fetching data for the next line (2 slots per sprite; spec 4, section 5.4)
 2. **Copper**, the display-list coprocessor (version 2)
 3. **Blitter**
 4. **Storage**, beyond its 2 guaranteed slots
 5. Idle
 
-The fixed refresh, audio and storage slots are spread evenly through the period, so none of them is ever more than a few microseconds late.
-
 ### 7.2 What each owner gets
 
 | Owner | Needs | Gets | Margin |
 |-------|-------|------|--------|
-| Display fetch | Depends on the video mode and layers (spec 4, section 5.2) | 25 MB/s normal, ~46 MB/s wide | Spec 4 has per-mode budgets |
-| Audio channel at 48 kHz, 16-bit | 96 KB/s | 250 KB/s (8 bytes every 32 µs) | Pitch can go up about 2.6× before it runs short |
-| Refresh | 4.1 per 32 µs | 5 | 22% |
-| Blitter (worst case: wide fetch fully used, CPU flat out) | – | ≥ 100 even slots per period: ~25 MB/s of reads or ~12 MB/s of writes | More whenever display fetch or the CPU leave slots unused |
+| Display fetch | Depends on the video mode and layers | Spec 4, section 5.2 lists the budget per mode | |
+| Audio channel at 48 kHz, 16-bit | 96 KB/s | 8 bytes per line: 250 KB/s at 640×480, more in modes with shorter lines | Pitch can go up at least 2.6× before it runs short |
+| Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
+| Sprites | 2 slots per sprite per line | 8 sprites in every mode with wide fetch off; fewer with it on (spec 4, section 5.4) | |
+| Blitter (worst case: wide fetch on, CPU flat out) | – | At least a quarter of all slots (the even ones the CPU leaves): ~25 MB/s of reads or ~12 MB/s of writes | More whenever display fetch or the CPU leave slots unused |
 
-Display fetch only uses slots while a line buffer is waiting to be filled. During vertical blanking, and whenever a frame's layers need less than the full budget, its slots go to the free pool.
+During vertical blanking, display fetch has nothing to do, so its slots go to the free pool.
 
-### 7.3 Line buffers
+### 7.3 No line buffers
 
-Video and sprites are fetched one line ahead into block RAM line buffers. These are dual-port: the fetch engine writes them on the memory clock and the display reads them on the pixel clock. Two buffers per layer swap each line, so the pixel output never waits for SDRAM.
+Display data is fetched just in time into a 32-byte buffer per layer, as the Amiga fetches bitplane data into its data registers. Nothing is stored for a whole line. The pixel output only depends on DMA keeping each small buffer topped up, and the fixed slot pattern guarantees that whenever the setup is within budget.
 
 ### 7.4 Higher-bandwidth modes (not in version 1)
 
@@ -232,7 +240,7 @@ With the real 68SEC000:
 
 ## 11. Tests
 
-- **Slot-table check in simulation:** count slot owners per 32 µs period and assert each fixed owner gets its share, in every video mode.
+- **Slot-table check in simulation:** for every video preset, count slot owners per line and assert each fixed owner gets its share at the same `hslot` on every line.
 - **CPU zero-wait test:** run fx68k from Chip RAM with all DMA on; assert that /DTACK is never delayed once the CPU is aligned.
 - **Misalignment test:** force a cycle to start in an odd slot; assert exactly one extra clock, then realignment.
 - **SDRAM model:** run against a Winbond/Micron SDRAM simulation model with timing checks on, at the -75 timings.

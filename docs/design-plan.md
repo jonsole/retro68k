@@ -18,7 +18,7 @@ Sections marked *(CPU board)* only apply to stage 2.
 | R1 | CPU is a 68000: the fx68k core inside the FPGA first, a real MC68SEC000 (3.3 V, 16-bit bus) as a later upgrade | decided |
 | R2 | Main memory runs with zero wait states: Chip RAM (SDRAM) with Amiga-style even/odd slots on the main path, plus fast SRAM (Fast RAM) on the CPU board | project goal |
 | R3 | Video, audio and glue logic are done by an FPGA | project goal |
-| R4 | Video output is HDMI/DVI with a programmable pixel clock and timing: 640×480 up to 1280×720, 50 or 60 Hz | decided |
+| R4 | Video output is HDMI/DVI; pixel clock is a whole-number division of one master clock, timing programmable: 640×480 up to 1280×720, 50 or 60 Hz; DMA locked to the beam | decided |
 | R5 | Audio is 4–8 PCM sample channels (Amiga-style) | decided |
 | R6 | Usable as a home computer: boots to a monitor, then BASIC; keyboard; SD card | decided ("both") |
 | R7 | Usable as a game/demo machine: sprites, scrolling, later a blitter | decided ("both") |
@@ -43,7 +43,7 @@ What the board provides, checked against Scarab's Rev B schematic and pin file (
 | Other | 8 LEDs, 4 switches, 8-channel ADC, SPI config flash | Debug |
 
 Consequences compared to the earlier ECP5 plan:
-- **Block RAM is only ~117 KB**, so a full 640×480×8bpp frame buffer (300 KB) cannot live inside the FPGA. Video memory goes in the **SDRAM**. The text mode, fonts, palette and line buffers stay in block RAM.
+- **Block RAM is only ~117 KB**, so a full 640×480×8bpp frame buffer (300 KB) cannot live inside the FPGA. Video memory goes in the **SDRAM**. The text mode, fonts and palette stay in block RAM. Video data is fetched by DMA just in time as the beam scans, with no line buffers.
 - **Toolchain is Xilinx ISE 14.7 WebPACK** (free, supports the LX25). It is old and closed-source, and is best run in a Linux VM; AMD supplies a ready-made ISE VM. There are no open-source place-and-route tools for Spartan-6.
 
 ### D2. The FPGA is the glue logic
@@ -76,11 +76,15 @@ The FPGA decodes addresses, drives `/DTACK`, encodes interrupts and generates th
 
 ### D4. Clocks
 
-- The 50 MHz oscillator feeds the FPGA PLLs.
-- **System clock: 100 MHz.** Bus logic, SDRAM controller and most registers run on it.
-- **Pixel clock: programmable, about 25–74.25 MHz** (spec 4, section 3), made by a DCM_CLKGEN that can be reprogrammed at run time plus a PLL. The HDMI bit clock is 10× the pixel clock, made with the Spartan-6 OSERDES2 serialisers (the XAPP495 method, which Scarab's HDMI example also uses). Video runs in its own clock domain, separate from the memory slot grid.
-- **CPU speed: 12.5 MHz first**, the speed of a fast 1980s 68000. fx68k is driven by a master clock plus two "phase enable" inputs, so its speed is set by those enables. Spec 1 confirms the exact clocking and how fast fx68k meets timing on the LX25; 16–20 MHz may be possible later.
-- *(CPU board)* The external CPU gets a 12.5 MHz clock from the PLL, rising to 20 MHz (the 68SEC000's rating) once the bus is proven. The FPGA samples its bus at 100 MHz through two-flop synchronisers. This adds about 20 ns, well inside the ~100 ns a zero-wait-state cycle at 20 MHz allows before `/DTACK` must be seen.
+- **One master clock, as on the Amiga.** A PLL, set once at power-on, makes a 300 MHz master from the 50 MHz oscillator. Everything else is the master divided by a whole number:
+  - **System / SDRAM: 100 MHz** (÷ 3)
+  - **68000: 12.5 MHz** (fx68k clocked at 25 MHz, ÷ 12, with alternating phase enables)
+  - **Memory slot: 80 ns** (÷ 24)
+  - **Pixel clock: ÷ N, N = 4–12 (75–25 MHz)**, programmable
+- Every scan line is a whole, even number of slots, so DMA is locked to the beam in every video mode (spec 4, section 3.2).
+- A second PLL works only as a ×10 multiplier for the HDMI serialisers (OSERDES2, XAPP495 method), following the divided pixel clock.
+- Spec 1 confirms the exact fx68k clocking and how fast it meets timing on the LX25. 16–20 MHz may be possible later.
+- *(CPU board)* The external CPU gets a 12.5 MHz clock from the master, rising to 20 MHz (the 68SEC000's rating) once the bus is proven. The FPGA samples its bus at 100 MHz through two-flop synchronisers. This adds about 20 ns, well inside the ~100 ns a zero-wait-state cycle at 20 MHz allows before `/DTACK` must be seen.
 
 ### D5. Memory architecture and memory map
 
@@ -106,11 +110,11 @@ Before the SDRAM controller exists (phase 3), the first 16 KB of Chip RAM is tem
 
 Defined in [spec 4: video](spec/video.md). In short:
 
-- DVI over HDMI with a **programmable pixel clock and timing**: presets from 640×480 to 1280×720 at 50 or 60 Hz, including standard 576p and 720p
+- DVI over HDMI; **pixel clock = 300 MHz ÷ N** with programmable timing: presets from 640×480 to 1280×720 at 50 or 60 Hz. DMA is locked to the beam in every mode
 - **4 layers + sprites + background colour**, in any priority order. Each layer has its own display window, source address, stride, scroll, scale and palette block
 - Layer types: chunky bitmaps at 1/2/4/8 bits per pixel from Chip RAM, or a text layer from block RAM
 - Free scaling in 1/256-pixel steps (2×, 4×, odd sizes)
-- Fetch is worked out automatically from the windows: 640 bytes per line normally, 1280 with wide fetch, using only DMA slots, so the CPU is never slowed
+- Video memory is fetched on demand by DMA as the beam scans, Amiga-style, with no line buffers. Fetch timing is worked out from the windows; the budget is a rate in bytes per pixel (1 normally at 640×480, 2 with wide fetch). Only DMA slots are used, so the CPU is never slowed
 - 1024-entry palette of 24-bit colours; beam position registers; vertical-blank and line interrupts
 
 ### D7. Audio
@@ -171,13 +175,12 @@ The LX25 has 52 blocks of 18 Kb (2 KB each).
 |------|--------|-------|
 | fx68k microcode | 3 | From the trial synthesis (D10) |
 | Boot ROM, 32 KB | 16 | |
-| Video: line buffers, palette, text buffer and font | 12 | Spec 4, section 7 |
-| Sprite line buffers | 2 | Estimate; sprite spec to confirm |
+| Video: palette, text buffer and font | 8 | Spec 4, section 7. No line buffers; layer buffers and sprite registers are built from logic |
 | Audio FIFOs | 1 | Estimate |
 | SDRAM and USB FIFOs | 2 | Estimate |
-| **Subtotal** | **36** | |
+| **Subtotal** | **30** | |
 | Temporary 16 KB RAM (phase 3 only) | 8 | Removed once Chip RAM is in SDRAM |
-| **Total in phase 3** | **44 of 52** | |
+| **Total in phase 3** | **38 of 52** | |
 
 If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.g. BASIC) from the SD card.
 
