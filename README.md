@@ -1,17 +1,17 @@
 # retro68k
 
-A homebrew Motorola 68000 computer with fast, zero-wait-state SRAM and an FPGA handling video and audio.
+A homebrew Motorola 68000 computer with zero-wait-state memory and an FPGA handling video and audio. It starts as a 68000 core inside the FPGA and later gains a real 68SEC000 CPU board.
 
 ## Goals
 
-- **CPU:** MC68SEC000 (3.3 V) at 12.5–20 MHz
-- **Memory:** fast asynchronous SRAM, no wait states, no DRAM refresh logic
-- **ROM:** flash boot ROM with a monitor
+- **CPU:** 68000 at 12.5 MHz: the fx68k core inside the FPGA first, then a real MC68SEC000 (3.3 V, up to 20 MHz)
+- **Memory:** main RAM with no wait states: SDRAM time-slotted for the CPU at first, fast SRAM on the CPU board
+- **ROM:** boot ROM with a monitor, held in FPGA block RAM
 - **Video + audio:** one FPGA that the CPU sees as memory-mapped registers and VRAM
 - **I/O:** UART, SD card, PS/2 or USB keyboard, timers, interrupts
 - Easy to build: 2–4 layer PCB, parts you can still buy
 
-## Block diagram
+## Block diagram (with the later CPU board)
 
 ```
             +-----------+       address / data / control bus        +------------------+
@@ -28,7 +28,7 @@ A homebrew Motorola 68000 computer with fast, zero-wait-state SRAM and an FPGA h
 
 ## Design plan
 
-Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Main choices so far: **MC68SEC000** CPU, **Xilinx Spartan-6 LX25** FPGA on a Scarab miniSpartan6+ dev board first, HDMI 640×480, PCM sample audio, aimed at both a home computer and a game machine.
+Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Main choices so far: a **68000 core inside the FPGA** first, a real **MC68SEC000** later, **Xilinx Spartan-6 LX25** FPGA on a Scarab miniSpartan6+ dev board first, HDMI 640×480, PCM sample audio, aimed at both a home computer and a game machine.
 
 ## Repository layout
 
@@ -49,13 +49,17 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 
 ## Roadmap
 
-1. [ ] Minimal board: 68000, ROM, SRAM, UART — blink an LED and print "hello"
-2. [ ] Boot monitor: memory dump, load over serial, jump
-3. [ ] FPGA bus interface: CPU can read/write FPGA registers
-4. [ ] Text-mode video, then bitmap modes and sprites
-5. [ ] Audio: PCM channels and/or a synthesizer
-6. [ ] SD card, file system, keyboard
-7. [ ] Final PCB
+The 68000 starts as a core inside the FPGA, so the whole computer runs on the miniSpartan6+ board alone. A real 68SEC000 board comes later. Details are in [`docs/design-plan.md`](docs/design-plan.md).
+
+1. [ ] FPGA bring-up: HDMI test pattern, USB serial echo
+2. [ ] Whole computer in simulation: prints "hello"
+3. [ ] Computer on the board: "hello" on an HDMI monitor
+4. [ ] SDRAM main memory and a boot monitor
+5. [ ] Video: bitmap modes, palette, scrolling, sprites
+6. [ ] Audio: PCM sample channels
+7. [ ] Home computer: SD card, keyboard, BASIC
+8. [ ] Upgrade: real 68SEC000 CPU board with fast SRAM
+9. [ ] Final PCB
 
 ## License
 
