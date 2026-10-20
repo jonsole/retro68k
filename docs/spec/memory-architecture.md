@@ -205,7 +205,7 @@ If an owner doesn't need its slot this line (audio FIFO full, layer off), the sl
 | Display fetch | Depends on the video mode and layers | Spec 4, section 5.2 lists the budget per mode | |
 | Audio channel at 48 kHz, 16-bit | 96 KB/s | 12 bytes per line: 375 KB/s at 640×480, more in modes with shorter lines | Pitch can go up about 3.9× before it runs short |
 | Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
-| Sprites | 2 slots per sprite per line, just before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 4, section 5.4) | 8 sprites always fit |
+| Sprites | 1–3 slots per sprite per line, in the 64 slots before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 9, section 5) | 16 sprites per line fit (spec 9 lists the limits) |
 | Blitter | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves | Little when wide fetch is on and the CPU is running flat out from Chip RAM (section 6) |
 
 During vertical blanking, display fetch has nothing to do, so its slots go to the free pool.
@@ -252,7 +252,6 @@ With the real 68SEC000:
 | M3 | Choose the final register addresses (spec 3) |
 | M4 | Blitter design: its data path and how it splits read and write slots (spec to follow) |
 | M5 | Copper instruction set (spec to follow; version 2) |
-| M6 | Whether sprite count/width should trade off against each other (e.g. 4 wide sprites vs 8 narrow) |
 | M7 | Bank interleaving for longer bursts (section 4.4): only if a later mode needs more bandwidth |
 | M8 | Check the sprite scheduler's "take a CPU slot only when needed" decision fits in one 100 MHz clock |
 | M9 | Measure in simulation how often the 20 MHz CPU waits, running typical code from Chip RAM with busy screens |

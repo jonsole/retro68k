@@ -12,7 +12,7 @@ Status: **draft for review**
 - Fully programmable horizontal and vertical timing, with presets for standard modes at 50 and 60 Hz; beam position registers, vertical-blank and line interrupts
 - **Everything runs from one master clock, as on the Amiga.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line, in every mode. Layers only use DMA slots (spec 5), so they never slow the CPU. Sprites can borrow a CPU slot when they would otherwise be late (section 5.4)
 
-Sprites, the copper and the blitter get their own specs. This spec defines how sprites slot into the layer priority order.
+Sprites ([spec 9](sprites.md)), the copper and the blitter get their own specs.
 
 ## 2. Comparison with the Amiga (OCS/ECS)
 
@@ -221,9 +221,8 @@ The PRIO register lists the order of the four layers and where sprites sit:
 | 3–2 | SECOND | |
 | 5–4 | THIRD | |
 | 7–6 | BACK | Layer number at the back |
-| 10–8 | SPRPOS | Sprites go in front of position 0–4 (0 = in front of everything, 4 = behind all layers) |
 
-Any order is allowed, unlike the Amiga's fixed playfield-pair rules. The sprite spec may add per-sprite priority later.
+Any order is allowed, unlike the Amiga's fixed playfield-pair rules. Each sprite sets its own depth among the layers (spec 9, section 6).
 
 ## 5. Fetch
 
@@ -290,20 +289,11 @@ Windows help: a status bar that sits below a game area, not on top of it, adds n
 
 ### 5.4 Sprites: fetched just before they are drawn
 
-Sprite data is fetched on demand, just before the beam reaches each sprite, in the same way as layer data. Nothing is fetched a line ahead.
+Sprite data is fetched on demand, just before the beam reaches each sprite, using the same slots as layers plus, when needed, the CPU's. Nothing is fetched a line ahead. [Spec 9](sprites.md), section 5 has the details:
 
-- **Which sprites are on the next line:** at the start of horizontal blanking, the sprite unit checks every sprite's Y position and height (held in registers, so no memory access) and sorts the active ones by X.
-- **Fetch window:** each active sprite's line of data (16 bytes, 2 bursts; the sprite spec will confirm the size) is fetched into its **sprite data register** (16 bytes, built from logic) during the **32 slots before its first pixel**. That is 80 pixels ahead at 640×480. Sprites near the left edge are fetched at the end of the blanking before the line.
-- **Slots a sprite can use, in order of preference:**
-  1. Free odd slots (`hslot % 4 == 3`, when wide fetch and the CPU are not using them)
-  2. Display-fetch slots that no layer needs at that moment (its buffer is full)
-  3. Even slots the CPU is not using
-  4. **Even slots the CPU wants: taken only when the sprite would otherwise miss its deadline**
-- The scheduler takes a CPU slot as late as possible: only when the slots left before the deadline, not counting the CPU's, are fewer than the bursts the sprite still needs. With a given screen setup and program, the pattern is the same every time.
-- **Cost to the CPU:** each slot taken delays the CPU by 2 clocks (100 ns), and only if it wanted that slot (spec 5, section 5).
-  - Sprites spread out across the line, with wide fetch off: the free slots are enough, so the CPU is not slowed.
-  - Several sprites starting at the same X, or wide fetch on: some CPU slots are taken. The worst case is 8 sprites on one line, each taking both its bursts from the CPU: 16 slots = 32 CPU clocks, 5% of a 640×480 line. This only happens on lines with sprites, and only when the CPU is accessing Chip RAM at those moments.
-- **Always fits:** the 32-slot window holds 8 `hslot % 4 == 1` slots (for layers), 8 `hslot % 4 == 3` slots and 16 even slots. Even 8 sprites starting at the same X (16 bursts) fit without touching the layers' slots. Fixed blanking slots (refresh, audio, storage) are never taken. If a sprite still misses its deadline (e.g. an unusual setup that crowds blanking), that sprite's line is transparent and SPRMISS is set in VIDSTAT.
+- Each sprite's line of data is fetched in the 64 slots before its first pixel.
+- It uses free odd slots and spare display slots first, then even slots the CPU isn't using, and takes a slot the CPU wants only when the sprite would otherwise be late (2 CPU clocks each).
+- Sprites never take the layers' slots, so they don't count towards the layer budget in section 5.2.
 
 ### 5.5 When a layer runs short
 
@@ -332,14 +322,14 @@ Addresses are offsets in the custom register block at `0xE00000`. Spec 3 sets th
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `0x000` | VIDCON | EN (0), WIDE (1), BLANKALL (2) | Video on, wide fetch, force background only |
-| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L3 (4–7), INVBLANK (8, read-only), PCLKLOCK (9, read-only), BADTIMING (10), SPRMISS (11) | Sticky flags, write 1 to clear |
+| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L3 (4–7), INVBLANK (8, read-only), PCLKLOCK (9, read-only), BADTIMING (10), SPRMISS (11), SPROVF (12) | Sticky flags, write 1 to clear |
 | `0x008` | VIDINTEN | Same bit layout as VIDSTAT | Interrupt enables |
 | `0x00C` | BEAMPOS | `vline` 26–16, `hpixel` 10–0 | Read-only |
 | `0x010` | FRAMECOUNT | 15–0 | Read-only |
 | `0x048` | SLOTPOS | `vline` 26–16, `hslot` 8–0 | Read-only |
 | `0x014` | LINECMP | `vline` 26–16, `hpixel` 10–0 | LINE interrupt position |
 | `0x018` | BGCOLOR | 23–0 RGB | Background colour |
-| `0x01C` | PRIO | See 4.8 | Layer and sprite order |
+| `0x01C` | PRIO | See 4.8 | Layer order |
 | `0x020` | HVISIBLE | 10–0 | Timing (video off only) |
 | `0x024` | HSYNCSTART | 10–0 | |
 | `0x028` | HSYNCEND | 10–0 | |
@@ -385,7 +375,7 @@ Layer *n* is at `0x100 + n × 0x40`.
 | Text buffer 8 KB + font 4 KB | 6 |
 | **Total for video** | **8** |
 
-The layer buffers (4 × 48 bytes) and sprite data registers (8 × 2 × 16 bytes) are small enough to build from FPGA logic.
+The layer buffers (4 × 48 bytes) and sprite data registers (spec 9) are small enough to build from FPGA logic. The sprite table takes 1 more block RAM (spec 9).
 
 Clocks use two of the LX25's four PLLs: one for the fixed master clocks, one as the HDMI ×10 multiplier.
 
@@ -393,8 +383,6 @@ Clocks use two of the LX25's four PLLs: one for the fixed master clocks, one as 
 
 | # | Item |
 |---|------|
-| V1 | Sprite spec: size, formats, collision detection; section 5.4 sets how they are fetched |
-| V11 | Reusing a sprite's hardware further right on the same line once it has been drawn, to show more than 8 sprites per line. The just-in-time fetch makes this possible |
 | V2 | Test 50 Hz modes (640×480 @ 50 and the standard 576p/720p50) on real HDMI monitors and TVs |
 | V3 | Whether 4 layers is the right number; each extra layer costs one block RAM and a little logic |
 | V4 | 16-bit direct-colour and tile-map layer types (version 2) |
@@ -412,7 +400,7 @@ Clocks use two of the LX25's four PLLs: one for the fixed master clocks, one as 
 - **Beam lock:** for every preset, assert that each fixed DMA slot falls at the same `hslot` on every line, and that the CPU's even slots stay even across line boundaries.
 - **Fetch budget:** for every example in 5.3, assert no layer buffer runs empty; for over-budget setups, assert OVERRUN is set on the right layer only.
 - **Fetch pattern:** assert the DMA pattern is identical on every line for a fixed screen setup.
-- **Sprites:** 8 sprites at the same X with wide fetch on: all are drawn, the CPU loses at most 16 slots on that line, and it stays on even slots afterwards. Sprites spread across the line with wide fetch off: the CPU loses none.
+- **Sprites:** see spec 9, section 11.
 - **Golden images:** render test screens in simulation (windows, scroll, scale, priority, transparency, palette) and compare frame dumps with images made by a Python reference model.
 - **Register timing:** a write during line L−1's visible part changes line L exactly; a write during its blanking changes line L+1.
 - **CPU slowdown:** with all layers on and wide fetch, layers never take an even slot; the CPU only waits on busy odd slots (spec 5 CPU wait test).

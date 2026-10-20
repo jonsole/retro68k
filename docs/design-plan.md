@@ -111,7 +111,7 @@ Before the SDRAM controller exists (phase 3), the first 16 KB of Chip RAM is tem
 Defined in [spec 4: video](spec/video.md). In short:
 
 - DVI over HDMI; **pixel clock = 200 MHz ÷ N** with programmable timing: presets from 640×480 to 1280×720 at 50 or 60 Hz. DMA is locked to the beam in every mode
-- **4 layers + sprites + background colour**, in any priority order. Each layer has its own display window, source address, stride, scroll, scale and palette block
+- **4 layers + 64 sprites (16 per line) + background colour**, in any priority order. Each layer has its own display window, source address, stride, scroll, scale and palette block
 - Layer types: chunky bitmaps at 1/2/4/8 bits per pixel from Chip RAM, or a text layer from block RAM
 - Free scaling in 1/256-pixel steps (2×, 4×, odd sizes)
 - Video memory is fetched on demand by DMA as the beam scans, Amiga-style, with no line buffers. Fetch timing is worked out from the windows; the budget is a rate in bytes per pixel (1 normally at 640×480, 2 with wide fetch). Layers only use DMA slots, so they never slow the CPU. Sprites are also fetched just before their X position, and borrow a CPU slot only when needed
@@ -176,11 +176,12 @@ The LX25 has 52 blocks of 18 Kb (2 KB each).
 | fx68k microcode | 3 | From the trial synthesis (D10) |
 | Boot ROM, 32 KB | 16 | |
 | Video: palette, text buffer and font | 8 | Spec 4, section 7. No line buffers; layer buffers and sprite registers are built from logic |
+| Sprite table | 1 | Spec 9 |
 | Audio FIFOs | 1 | Estimate |
 | SDRAM and USB FIFOs | 2 | Estimate |
-| **Subtotal** | **30** | |
+| **Subtotal** | **31** | |
 | Temporary 16 KB RAM (phase 3 only) | 8 | Removed once Chip RAM is in SDRAM |
-| **Total in phase 3** | **38 of 52** | |
+| **Total in phase 3** | **39 of 52** | |
 
 If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.g. BASIC) from the SD card.
 
@@ -196,6 +197,9 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 6. `docs/spec/audio.md`: channel registers, mixer, sample format
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
+9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
+10. `docs/spec/copper.md`: the display-list coprocessor
+11. `docs/spec/blitter.md`: the blitter
 
 ## 4. Phases
 
