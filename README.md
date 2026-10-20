@@ -28,7 +28,7 @@ A homebrew Motorola 68000 computer with fast, zero-wait-state SRAM and an FPGA h
 
 ## Design plan
 
-Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Main choices so far: **MC68SEC000** CPU, **Lattice ECP5** FPGA (ULX3S dev board first), HDMI 640×480, PCM sample audio, aimed at both a home computer and a game machine.
+Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Main choices so far: **MC68SEC000** CPU, **Xilinx Spartan-6 LX25** FPGA on a Scarab miniSpartan6+ dev board first, HDMI 640×480, PCM sample audio, aimed at both a home computer and a game machine.
 
 ## Repository layout
 
@@ -43,7 +43,7 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 ## Toolchain
 
 - **68000 code:** `vasm` (Motorola syntax) or `m68k-elf-gcc`
-- **FPGA:** Yosys + nextpnr (open source) for iCE40 / ECP5, or the vendor tools
+- **FPGA:** Xilinx ISE 14.7 WebPACK (Spartan-6); simulation with Verilator and Icarus Verilog
 - **PCB:** KiCad 8+
 - **Emulation:** MAME or a custom emulator to test firmware before hardware
 

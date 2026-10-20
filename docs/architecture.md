@@ -1,5 +1,7 @@
 # Architecture notes
 
+> Early notes. The current decisions are in [design-plan.md](design-plan.md), which wins where the two differ.
+
 ## CPU
 
 The MC68000 has a 24-bit address bus (16 MB), a 16-bit data bus, and an asynchronous bus: every cycle ends when the device pulls `/DTACK` low. That makes mixing fast SRAM with a slower FPGA simple: SRAM gets `/DTACK` right away, the FPGA holds it off until it is ready.

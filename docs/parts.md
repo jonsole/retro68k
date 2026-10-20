@@ -6,7 +6,7 @@
 | Main SRAM            | IS61WV51216 (1 MB, 10 ns)  | 3.3 V, needs level care       |
 | Boot ROM             | SST39SF010 ×2              | 5 V flash, 8-bit each         |
 | Glue logic           | ATF1508 CPLD               | or put it in the FPGA         |
-| FPGA                 | ECP5 LFE5U-25F / GW2A      | open toolchain on ECP5        |
+| FPGA                 | XC6SLX25 (miniSpartan6+)   | dev board; final PCB TBD      |
 | Video SRAM           | IS61WV25616                | FPGA side                     |
 | UART                 | MC68681 DUART or FT232 + FPGA |                            |
 | Audio DAC            | PCM5102A                   | I2S                           |
