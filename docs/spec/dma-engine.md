@@ -10,11 +10,11 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 |------|-------|
 | Channels | 4, running at the same time and taking turns burst by burst |
 | Programming | Chains of 32-byte **descriptors** (job descriptions) in Chip RAM or in a small descriptor RAM inside the FPGA |
-| Jobs | Copy, fill, transparent copy (colour key), logic operations, in 1D (linear) or 2D (rectangles with a stride) |
+| Jobs | Copy, fill, transparent copy (colour key), logic operations and add, in 1D (linear) or 2D (rectangles with a stride) |
 | Pixel formats | Bytes, or 1, 2, 4 or 8 bits per pixel, positioned to the pixel |
 | Sources and destinations | Chip RAM, the FPGA's block RAM areas (palette, sprite table, text screen, font, ROM), or a peripheral port (SD card, USB) |
 | Memory slots | Normally only spare ones, so the CPU is never slowed. A **HIGH** bit per job lets it take CPU slots, like the Amiga's "blitter nasty" |
-| Speed at 640×480 | Copy 10–34 MB/s, fill 16–56 MB/s, depending on how busy the CPU is (section 6). A 68000 at 20 MHz copies about 4.5 MB/s |
+| Speed at 640×480 | Copy 10–34 MB/s, fill 16–56 MB/s, depending on how busy the CPU is (section 7). A 68000 at 20 MHz copies about 4.5 MB/s |
 | Finishing | Interrupt per descriptor if asked, status flags per channel |
 
 ## 2. Comparison with the Amiga
@@ -26,6 +26,7 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 | Pixel layout | Bitplanes: one blit per plane, with shifts and masks | Chunky pixels: one blit for all colour depths |
 | Masked (cookie-cut) drawing | Uses a separate mask plane and the minterm logic | Colour-key copy: source pixels of the key colour are skipped. No mask needed |
 | Logic | Any function of 3 sources (minterms) | Any function of source and destination (4-bit truth table) |
+| Arithmetic | None | ADD per pixel, wrapping or saturating, signed or unsigned |
 | Peripherals | Separate disk DMA | The same engine, through peripheral ports |
 | Priority | BLTPRI ("blitter nasty") for all blits | HIGH bit per job |
 | Line drawing, area fill | Yes | Not in version 1 (open point D3) |
@@ -49,13 +50,13 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 
 | Bits | Name | Meaning |
 |------|------|---------|
-| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC |
-| 7–4 | FN | Truth table for LOGIC: result bit = FN[src × 2 + dst]. For example `0x8` = AND, `0xE` = OR, `0x6` = XOR, `0x5` = NOT destination |
+| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC, 4 ADD |
+| 7–4 | FN | LOGIC: truth table, result bit = FN[src × 2 + dst]. For example `0x8` = AND, `0xE` = OR, `0x6` = XOR, `0x5` = NOT destination. ADD: bit 4 = saturate, bit 5 = signed (see below) |
 | 9–8 | BPP | 0 = 1, 1 = 2, 2 = 4, 3 = 8 bits per pixel |
 | 10 | DESC | Run backwards (last byte first), for overlapping copies |
 | 11 | HIGH | May take CPU slots (section 5) |
 | 12 | IRQ | Raise the channel's interrupt when this descriptor finishes |
-| 14–13 | SRCKIND | 0 = memory, 1 = port, 2 = none (FILL) |
+| 14–13 | SRCKIND | 0 = memory, 1 = port, 2 = none (FILL), 3 = VALUE (ADD a constant) |
 | 16–15 | DSTKIND | 0 = memory, 1 = port |
 
 **Operations:**
@@ -66,6 +67,20 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 | FILL | dst = VALUE, repeated | Same |
 | KEYCOPY | dst = src, except where the source pixel equals the key colour, which is left alone | At 8bpp no: byte write masks skip key pixels. At 1, 2 and 4bpp yes |
 | LOGIC | dst = FN(src, dst), bit by bit | Yes |
+| ADD | dst = dst + src, pixel by pixel | Yes |
+
+**ADD:**
+
+- Each pixel is added separately, at the job's colour depth (1, 2, 4 or 8 bits). Carries never spill into the next pixel.
+- **Wrap** (FN bit 4 = 0): the result wraps round, e.g. 250 + 10 = 4 at 8bpp.
+- **Saturate** (FN bit 4 = 1): the result sticks at the limit instead. Unsigned (FN bit 5 = 0): 0 to the top value, e.g. 250 + 10 = 255. Signed (FN bit 5 = 1): pixels are two's complement, e.g. −128 to +127 at 8bpp.
+- The source can be memory, a port, or a constant (SRCKIND = 3, taking the pixel value from the low bits of VALUE, repeated).
+- Uses:
+  - Shading and lighting with palettes laid out as ramps: add a constant to darken or brighten an area, or add a light map image.
+  - Moving an area to another palette block by adding 16, 32 and so on.
+  - Additive effects such as glows and explosions.
+  - Mixing 8-bit signed audio samples with signed saturation (linear job, BPP = 8).
+- To subtract, add the two's complement, e.g. add 0xFF to subtract 1 at 8bpp with wrap.
 
 **Linear jobs** (memcpy, memset, port transfers): BPP = 8, HEIGHT = 1, WIDTH = length in bytes (up to 16 MB).
 
@@ -99,7 +114,26 @@ The engine replaces "blitter" and "storage" in the slot lists of spec 5.
 - **Between channels:** ready channels take turns, one burst each.
 - **Descriptors** in Chip RAM take 3 read slots each to load. Descriptors in the descriptor RAM take none, which suits short, frequent jobs.
 
-## 6. Speed
+## 6. How a blit works
+
+Each burst goes through the same four steps:
+
+1. **Read:** a burst of up to 12 bytes from the source into the engine's 64-byte buffer. Jobs that read the destination (LOGIC, ADD, and edge bytes at 1, 2 or 4bpp) also read the matching destination burst.
+2. **Shift** (1, 2 and 4bpp only): when the source and destination start at different pixels within a byte (SRCBIT ≠ DSTBIT), the data is shifted by the difference. Bits carry from one word into the next, as in the Amiga's barrel shifter. At 8bpp there is never any shifting, because every pixel starts on a byte.
+3. **Combine:** key compare (KEYCOPY), logic function (LOGIC) or per-pixel add (ADD).
+4. **Write:** up to 8 bytes, using the SDRAM's byte write masks to leave untouched bytes alone.
+
+**Edge masks are automatic.** The engine works out which pixels of the first and last bytes in each row belong to the job from DSTBIT and WIDTH. There are no mask registers to set, unlike the Amiga's first-word and last-word masks.
+
+**Read-modify-write:** the SDRAM can only skip whole bytes when writing. When a write would change only some pixels in a byte, the engine reads the destination, merges, and writes it back. This happens:
+
+- at the row edges of 1, 2 and 4bpp jobs that don't start or end on a byte,
+- for every byte of KEYCOPY at 1, 2 and 4bpp (two or more pixels share a byte),
+- always for LOGIC and ADD.
+
+At 8bpp, COPY, FILL and KEYCOPY never need it: a skipped key pixel is simply a byte not written. **8bpp is the fastest format for game graphics.**
+
+## 7. Speed
 
 At 640×480, wide fetch off (65 free odd slots and 160 even slots per line):
 
@@ -109,11 +143,13 @@ At 640×480, wide fetch off (65 free odd slots and 160 even slots per line):
 | CPU busy, HIGH job (+ 3 of every 4 even slots) | 28 MB/s | 46 MB/s | 69 MB/s |
 | CPU idle, waiting or running from ROM/block RAM (all spare slots) | 34 MB/s | 56 MB/s | 84 MB/s |
 
+Jobs that read the destination are slower: LOGIC and ADD at 8bpp need 7 slots per 24 bytes instead of 5, so they run at about 70% of the copy speed.
+
 For comparison, a 68000 at 20 MHz copies about 4–4.5 MB/s (`MOVE.L (A0)+,(A1)+` or `MOVEM.L`). Clearing a 640×480 8bpp screen (300 KB) takes about 5–19 ms with the engine. That fits in one 60 Hz frame (16.7 ms) unless the CPU is busy in Chip RAM and the job is not HIGH.
 
 With wide fetch on, the free odd slots in the visible area go to video, so normal jobs mostly run during blanking and in the CPU's unused slots.
 
-## 7. Channels and registers
+## 8. Channels and registers
 
 Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addresses.
 
@@ -146,7 +182,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 
 The copper can also start channels, for example to change a screen area at a set beam position.
 
-## 8. Suggested channel use
+## 9. Suggested channel use
 
 Software decides, but a sensible default:
 
@@ -157,15 +193,15 @@ Software decides, but a sensible default:
 | 2 | General memory copies and fills |
 | 3 | Graphics (blits) |
 
-## 9. FPGA resources
+## 10. FPGA resources
 
 | Item | Resource |
 |------|----------|
 | Descriptor RAM, 2 KB | 1 block RAM |
 | Data buffer between reads and writes (64 bytes) | Logic |
-| 4 channel state machines, 2D address units, pixel shifter, colour key compare, logic function | Estimate 1,200–2,000 LUTs; to confirm by synthesis |
+| 4 channel state machines, 2D address units, pixel shifter, colour key compare, logic function, per-pixel adder | Estimate 1,300–2,100 LUTs; to confirm by synthesis |
 
-## 10. Open points
+## 11. Open points
 
 | # | Item |
 |---|------|
@@ -175,12 +211,13 @@ Software decides, but a sensible default:
 | D4 | Writes to custom registers from a descriptor (a "mini copper"): left out of version 1 for safety |
 | D5 | Should audio also be able to stream through a port (e.g. for long samples from SD card)? |
 
-## 11. Tests
+## 12. Tests
 
 - **Copy and fill:** linear and 2D, every BPP, starting and ending part-way through a byte, positive and negative strides, forwards and backwards (DESC) with overlapping areas. Compare with a Python reference model.
 - **KEYCOPY and LOGIC:** every BPP, with key pixels at the edges.
+- **ADD:** every BPP, wrap and saturate, signed and unsigned, memory and constant sources; check carries never cross pixels.
 - **Chains:** a chain of mixed jobs in Chip RAM and in descriptor RAM; IRQ only on the marked ones.
 - **Channels:** all 4 running at once; a stalled port channel does not hold up the others.
 - **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least 1 in 4 even slots, and every CPU delay is 2 clocks.
 - **Errors:** a bad address stops only that channel, sets ERR and CHERR, and raises its interrupt.
-- **Speed:** measure the figures in section 6 in simulation.
+- **Speed:** measure the figures in section 7 in simulation.

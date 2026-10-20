@@ -204,7 +204,7 @@ If an owner doesn't need its slot this line (audio FIFO full, layer off), the sl
 | Audio channel at 48 kHz, 16-bit | 96 KB/s | 12 bytes per line: 375 KB/s at 640×480, more in modes with shorter lines | Pitch can go up about 3.9× before it runs short |
 | Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
 | Sprites | 1–3 slots per sprite per line, in the 64 slots before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 9, section 5) | 16 sprites per line fit (spec 9 lists the limits) |
-| DMA engine (blitter) | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves; HIGH jobs also 3 in 4 of the CPU's | Spec 11, section 6 |
+| DMA engine (blitter) | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves; HIGH jobs also 3 in 4 of the CPU's | Spec 11, section 7 |
 
 During vertical blanking, display fetch has nothing to do, so its slots go to the free pool.
 
