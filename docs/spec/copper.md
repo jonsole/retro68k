@@ -117,7 +117,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 | `0x710` | COPSTAT | WAITING (0), STOPPED (1), ERR (2) | ERR is sticky, write 1 to clear |
 | `0x714` | COPERR | 22–0 | Address of the instruction that caused an error |
 
-**Interrupts:** the IRQ instruction and ERR raise the video interrupt (level 5) through a COPIRQ flag in VIDSTAT (bit 13) with its enable in VIDINTEN. Interrupts are vectored, so it can have its own handler.
+**Interrupts:** the IRQ instruction and ERR set COPIRQ in VIDSTAT (bit 13), with its enable in VIDINTEN. This is the COPPER source in the interrupt controller (spec 13), with its own vector. Default level 5.
 
 **Double-buffered lists:** software builds next frame's list in a second buffer and writes its address to COPLC. The copper switches at the start of the next vertical blanking, so a half-built list is never run.
 

@@ -265,7 +265,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 
 **DMACON** (spec 5, section 8): bit 6 becomes **DMXEN** (DMA engine), and bit 4 (STOEN) is no longer needed, because storage transfers go through the engine.
 
-**Interrupts:** the DMA engine shares interrupt level 4 with audio (design plan D8). Interrupts are vectored, so each has its own handler.
+**Interrupts:** each channel is its own source in the interrupt controller (spec 13), DMA0–DMA3, with its own vector. Default level 4.
 
 **Typical use:**
 1. Write descriptors to the descriptor RAM (`0xE06000`) or Chip RAM.

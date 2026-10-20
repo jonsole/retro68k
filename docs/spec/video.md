@@ -116,7 +116,7 @@ Low-resolution looks (320×240, 360×288 etc.) are made with layer scaling (sect
 
 ### 3.7 Video interrupts
 
-All go through the interrupt controller at level 5 (design plan D8).
+They reach the CPU through the interrupt controller (spec 13) as four sources with their own vectors: VBLANK, LINE, COPPER and VIDERR (OVERRUN, SPRMISS, SPROVF, BADTIMING). Default level 5.
 
 | Source | When |
 |--------|------|

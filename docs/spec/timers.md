@@ -110,7 +110,7 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 | `0x1C8` | WDKICK | 15–0 | Write `0x5A5A` to restart the time; any other value resets at once |
 | `0x1CC` | RESETWHY | POWER (0), WATCHDOG (1), BUTTON (2), SOFTWARE (3) | Cause of the last reset; read-only |
 
-**Interrupts:** each timer has its own vector at interrupt level 6 (design plan D8). Starting a DMA channel works like a CPU write of START to that channel's CHCTRL (spec 11, section 8), and is independent of the interrupt.
+**Interrupts:** each timer is its own source in the interrupt controller (spec 13), TIMER0–TIMER3, with its own vector. Default level 6. Starting a DMA channel works like a CPU write of START to that channel's CHCTRL (spec 11, section 8), and is independent of the interrupt.
 
 ## 7. FPGA resources
 

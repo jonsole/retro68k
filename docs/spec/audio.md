@@ -183,7 +183,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 
 **DMACON** (spec 5, section 8): bit 3 becomes **AUDEN** (the hardware channels; each also has its own CTRL.EN), bit 4 is **STREN** (the stream). Bits 2–0 are unused.
 
-**Interrupts:** level 4, shared with the DMA engine; vectored, so each source has its own handler.
+**Interrupts:** three sources in the interrupt controller (spec 13), each with its own vector: AUDSTR (stream half/end), AUDCH (AUDCHEND) and AUDERR (STARVED). Default level 4.
 
 ## 7. FPGA resources
 
