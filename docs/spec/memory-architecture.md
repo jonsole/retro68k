@@ -94,6 +94,17 @@ Byte writes from the CPU use the SDRAM's UDQM/LDQM byte masks, driven from the 6
 - Odd-slot DMA, reading: up to 50 MB/s
 - CPU: a 68000 at 12.5 MHz makes at most one memory access every 4 clocks (320 ns), which is 6.25 MB/s. That uses at most **one even slot in two**.
 
+### 4.4 Bursts and why slots close their row
+
+SDRAM keeps the RAS/CAS idea of older DRAM under new names: **ACTIVE** opens a row (RAS), **READ/WRITE** picks a column (CAS), and **PRECHARGE** closes the row. Once a row is open, a new column can be read or written every clock.
+
+- **DMA slots already burst:** one ACTIVE, then 4 column reads back to back (8 bytes). This is the same idea as the Amiga AGA chipset's wider fetch modes (FMODE), which used page mode to fetch 32 or 64 bits per memory cycle.
+- **4 words is the most that fits in a slot.** A 5th read would push the precharge to clock 7, and the bank would not be ready again until clock 9. That is past the start of the next slot, which may need the same bank.
+- **Why each slot closes its row:** if a row stayed open into the next slot, that slot's timing would depend on which bank and row it needs. Closing the row every time keeps every slot independent and its timing fixed. That is what guarantees the CPU never waits.
+- **Cost:** opening and closing a row takes about half of each slot, so a DMA slot moves data on 4 of its 8 clocks. Even so, the odd slots give up to 50 MB/s, and video uses at most 40% of them in version 1.
+
+**Possible later upgrade: bank interleaving.** The SDRAM has 4 independent banks, and a row can be opened in one bank while another is bursting. Keeping frame buffers in their own bank would let video stream long bursts at close to the full 200 MB/s. The CPU can touch any bank at any time, so this needs a careful worst-case design. It is worth doing only if 16-bit colour modes or a faster blitter need the bandwidth.
+
 ## 5. CPU access: even slots and zero wait states
 
 A 68000 bus cycle takes 4 CPU clocks = 4 slots. Its states S0–S7 map onto slots like this, for a cycle starting in slot *k*:
@@ -214,6 +225,7 @@ With the real 68SEC000:
 | M4 | Blitter design: its data path and how it splits read and write slots (spec to follow) |
 | M5 | Copper instruction set (spec to follow; version 2) |
 | M6 | Whether sprite count/width should trade off against each other (e.g. 4 wide sprites vs 8 narrow) |
+| M7 | Bank interleaving for longer bursts (section 4.4): only if a later mode needs more bandwidth |
 
 ## 11. Tests
 
