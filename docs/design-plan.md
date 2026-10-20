@@ -132,7 +132,7 @@ Defined in [spec 6: audio](spec/audio.md). In short:
 |-------|--------|
 | 7 | NMI button |
 | 6 | System timer |
-| 5 | Video (vblank, raster line) |
+| 5 | Video (vblank, raster line), copper |
 | 4 | Audio (channel end / FIFO low), DMA engine (job done, error) |
 | 3 | USB serial |
 | 2 | Keyboard, SD |
@@ -201,7 +201,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
-10. `docs/spec/copper.md`: the display-list coprocessor
+10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Beam-following coprocessor: MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX
 11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic/add in 1D and 2D, MIX for audio voices (on hold), peripheral ports
 
 ## 4. Phases

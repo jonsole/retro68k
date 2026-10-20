@@ -322,7 +322,7 @@ Addresses are offsets in the custom register block at `0xE00000`. Spec 3 sets th
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `0x000` | VIDCON | EN (0), WIDE (1), BLANKALL (2) | Video on, wide fetch, force background only |
-| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L3 (4–7), INVBLANK (8, read-only), PCLKLOCK (9, read-only), BADTIMING (10), SPRMISS (11), SPROVF (12) | Sticky flags, write 1 to clear |
+| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L3 (4–7), INVBLANK (8, read-only), PCLKLOCK (9, read-only), BADTIMING (10), SPRMISS (11), SPROVF (12), COPIRQ (13: copper IRQ instruction or error, spec 10) | Sticky flags, write 1 to clear |
 | `0x008` | VIDINTEN | Same bit layout as VIDSTAT | Interrupt enables |
 | `0x00C` | BEAMPOS | `vline` 26–16, `hpixel` 10–0 | Read-only |
 | `0x010` | FRAMECOUNT | 15–0 | Read-only |

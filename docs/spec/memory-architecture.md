@@ -153,23 +153,25 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 **Even slots**, in order:
 
 1. **Sprite fetch**, only if a sprite would otherwise miss its deadline (spec 4, section 5.4)
-2. **DMA engine, HIGH jobs**, except the CPU's share (1 in 2, 1 in 4 or 1 in 8 even slots, set per channel), which is always left for the CPU (spec 11, section 5)
-3. **CPU**
-4. **Sprite fetch**, in its fetch window
-5. **DMA engine** (blitter), normal jobs
-6. **Copper**
-7. Idle
+2. **Copper, urgent**: when its prefetch queue is less than half full (spec 10, section 6)
+3. **DMA engine, HIGH jobs**, except the CPU's share (1 in 2, 1 in 4 or 1 in 8 even slots, set per channel), which is always left for the CPU (spec 11, section 5)
+4. **CPU**
+5. **Sprite fetch**, in its fetch window
+6. **DMA engine** (blitter), normal jobs
+7. **Copper**
+8. Idle
 
 **Odd slots**, in order:
 
 1. **The slot's fixed owner** (section 7), if it needs the slot
 2. **Sprite fetch**, only if a sprite would otherwise miss its deadline
-3. **CPU**, if its access lands here
-4. **Sprite fetch**, in its fetch window
-5. **Audio fetch**, when a channel's sample cache is running low (spec 6, section 4.7)
-6. **Copper**
-7. **DMA engine** (blitter, copies, peripheral transfers)
-8. Idle
+3. **Copper, urgent**: when its prefetch queue is less than half full
+4. **CPU**, if its access lands here
+5. **Sprite fetch**, in its fetch window
+6. **Audio fetch**, when a channel's sample cache is running low (spec 6, section 4.7)
+7. **Copper**
+8. **DMA engine** (blitter, copies, peripheral transfers)
+9. Idle
 
 **The DMA engine's share:** a 20 MHz CPU running flat out from Chip RAM can use every even slot. Normal DMA jobs then get the free odd slots: at 640×480 with wide fetch off, 65 per line, about 24 MB/s of reads. Whenever the CPU is doing internal work, or running from ROM or block RAM, the engine gets the even slots too. A job with the HIGH bit set (like the Amiga's BLTPRI) can take the CPU's even slots too, leaving it 1 in 2, 1 in 4 or 1 in 8 of them. Spec 11 has the details and speeds.
 
@@ -251,7 +253,6 @@ With the real 68SEC000:
 | M1 | Confirm fx68k's exact bus timing (when address and write data are valid) in simulation; section 5 assumes real-68000 timing |
 | M2 | Read the speed grade off the board's SDRAM chip (W9825G6JH-6, -6I or -75) |
 | M3 | Choose the final register addresses (spec 3) |
-| M5 | Copper instruction set (spec to follow; version 2) |
 | M7 | Bank interleaving for longer bursts (section 4.4): only if a later mode needs more bandwidth |
 | M8 | Check the sprite scheduler's "take a CPU slot only when needed" decision fits in one 100 MHz clock |
 | M9 | Measure in simulation how often the 20 MHz CPU waits, running typical code from Chip RAM with busy screens |
