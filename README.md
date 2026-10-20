@@ -4,7 +4,7 @@ A homebrew Motorola 68000 computer with fast, zero-wait-state SRAM and an FPGA h
 
 ## Goals
 
-- **CPU:** MC68000 (or 68HC000 / 68SEC000) at 12–20 MHz
+- **CPU:** MC68SEC000 (3.3 V) at 12.5–20 MHz
 - **Memory:** fast asynchronous SRAM, no wait states, no DRAM refresh logic
 - **ROM:** flash boot ROM with a monitor
 - **Video + audio:** one FPGA that the CPU sees as memory-mapped registers and VRAM
@@ -26,17 +26,9 @@ A homebrew Motorola 68000 computer with fast, zero-wait-state SRAM and an FPGA h
                                                        +-------+
 ```
 
-## Memory map (draft)
+## Design plan
 
-| Range                   | Size  | Device                          |
-|-------------------------|-------|---------------------------------|
-| `0x000000`–`0x0FFFFF`   | 1 MB  | Boot ROM (mirrored at reset)    |
-| `0x100000`–`0x8FFFFF`   | 8 MB  | Main SRAM                       |
-| `0xC00000`–`0xDFFFFF`   | 2 MB  | FPGA: VRAM window               |
-| `0xE00000`–`0xEFFFFF`   | 1 MB  | FPGA: video/audio registers     |
-| `0xF00000`–`0xFFFFFF`   | 1 MB  | I/O (UART, SD, keyboard, timer) |
-
-At reset the 68000 reads its stack pointer and start address from `0x000000`, so ROM is mapped there first. The glue logic can switch SRAM in at low addresses after boot so the vector table can live in RAM.
+Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Main choices so far: **MC68SEC000** CPU, **Lattice ECP5** FPGA (ULX3S dev board first), HDMI 640×480, PCM sample audio, aimed at both a home computer and a game machine.
 
 ## Repository layout
 
