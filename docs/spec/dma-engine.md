@@ -87,6 +87,16 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 
 **2D jobs** (blits): WIDTH × HEIGHT pixels, with each row starting STRIDE bytes after the last. Source and destination can have different strides, so an image can be copied out of a sprite sheet into a screen.
 
+**Clipping is done by software, with no extra hardware.** To draw only part of an image (for example an object partly off the screen), trim the job before starting it, keeping both strides the same:
+
+- **Left edge:** skip k pixels: add k pixels to SRC and DST (bytes, plus SRCBIT/DSTBIT for 1, 2 and 4bpp), and subtract k from WIDTH.
+- **Right edge:** subtract the pixels past the edge from WIDTH.
+- **Top edge:** skip r rows: add r × SRCSTRIDE to SRC and r × DSTSTRIDE to DST, and subtract r from HEIGHT.
+- **Bottom edge:** subtract the rows past the edge from HEIGHT.
+- If WIDTH or HEIGHT reaches 0, the object is fully off-screen: skip the job.
+
+Because the stride is separate from the width, the trimmed rows still line up with the image and the screen.
+
 ### 3.1 MIX: one audio voice
 
 > **On hold.** Stepping through a sample and taking the nearest value sounds poor when mixing at a fixed 48 kHz rate (a metallic buzz when pitched down, off-key aliasing when pitched up). MIX needs proper resampling, for example 8-tap windowed-sinc interpolation with pre-filtered octave copies, before it is worth building. Parked until then.
@@ -148,7 +158,7 @@ The engine replaces "blitter" and "storage" in the slot lists of spec 5.
   - free odd slots, after the CPU, sprites and the copper,
   - even slots the CPU is not using.
   The CPU is never slowed.
-- **HIGH jobs** may also take the CPU's even slots, but always leave the CPU **1 even slot in every 4**, so it can still run interrupts and code from Chip RAM, slowly. Each slot taken costs the CPU 2 clocks, as for sprites. Use HIGH when the CPU would only be waiting for the job anyway.
+- **HIGH jobs** may also take the CPU's even slots, but always leave the CPU a share of them, so it can still run interrupts and code from Chip RAM. The share is set per channel by CPUSHARE in CHCTRL: **1 in 2, 1 in 4 (default) or 1 in 8** of its even slots. Each slot taken costs the CPU 2 clocks, as for sprites. Use HIGH when the CPU would only be waiting for the job anyway.
 - **Peripheral transfers** also get the **2 fixed odd slots per line** that spec 5 reserved for storage, so SD and USB always get at least 24 bytes per line (about 750 KB/s at 640×480), however busy the screen is.
 - **Between channels:** ready channels take turns, one burst each.
 - **Descriptors** in Chip RAM take 3 read slots each to load. Descriptors in the descriptor RAM take none, which suits short, frequent jobs.
@@ -179,7 +189,9 @@ At 640×480, wide fetch off (65 free odd slots and 160 even slots per line):
 | Situation | Copy | Fill | Chip RAM → block RAM |
 |-----------|------|------|----------------------|
 | CPU busy in Chip RAM, normal job (free odd slots only) | 9.8 MB/s | 16 MB/s | 24 MB/s |
-| CPU busy, HIGH job (+ 3 of every 4 even slots) | 28 MB/s | 46 MB/s | 69 MB/s |
+| CPU busy, HIGH job, CPU keeps 1 in 2 | 22 MB/s | 36 MB/s | 54 MB/s |
+| CPU busy, HIGH job, CPU keeps 1 in 4 (default) | 28 MB/s | 46 MB/s | 69 MB/s |
+| CPU busy, HIGH job, CPU keeps 1 in 8 | 31 MB/s | 51 MB/s | 77 MB/s |
 | CPU idle, waiting or running from ROM/block RAM (all spare slots) | 34 MB/s | 56 MB/s | 84 MB/s |
 
 Jobs that read the destination are slower: LOGIC and ADD at 8bpp need 7 slots per 24 bytes instead of 5, so they run at about 70% of the copy speed.
@@ -197,7 +209,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
 | `+0x0` | CHDESC | 24–0 | Write: first descriptor of a chain. Read: the descriptor now running |
-| `+0x4` | CHCTRL | START (0), STOP (1), PAUSE (2) | START begins the chain at CHDESC. STOP ends it after the current burst. PAUSE holds it |
+| `+0x4` | CHCTRL | START (0), STOP (1), PAUSE (2), CPUSHARE (5–4) | START begins the chain at CHDESC. STOP ends it after the current burst. PAUSE holds it. CPUSHARE: even slots the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
 | `+0x8` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | DONE and ERR are sticky, write 1 to clear |
 | `+0xC` | CHERR | 24–0 | Address that caused an error |
 
@@ -245,7 +257,6 @@ Software decides, but a sensible default:
 | # | Item |
 |---|------|
 | D1 | Check the engine fits and meets timing at 100 MHz |
-| D2 | Should HIGH leave the CPU 1 in 4 even slots, or be adjustable (1 in 2, 1 in 8)? |
 | D3 | Line drawing and area fill (Amiga blitter features), and scaling or rotating blits: version 2 |
 | D4 | Writes to custom registers from a descriptor (a "mini copper"): left out of version 1 for safety |
 
@@ -257,6 +268,6 @@ Software decides, but a sensible default:
 - **MIX:** 8- and 16-bit voices, looping and one-shot, OVER and MONO, pitches from 1/16× to 4×; positions written back and continuing exactly across blocks; compare with a Python reference mixer.
 - **Chains:** a chain of mixed jobs in Chip RAM and in descriptor RAM; IRQ only on the marked ones.
 - **Channels:** all 4 running at once; a stalled port channel does not hold up the others.
-- **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least 1 in 4 even slots, and every CPU delay is 2 clocks.
+- **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least its CPUSHARE of even slots (check all three settings), and every CPU delay is 2 clocks.
 - **Errors:** a bad address stops only that channel, sets ERR and CHERR, and raises its interrupt.
 - **Speed:** measure the figures in section 7 in simulation.

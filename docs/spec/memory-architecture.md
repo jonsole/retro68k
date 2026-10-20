@@ -153,7 +153,7 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 **Even slots**, in order:
 
 1. **Sprite fetch**, only if a sprite would otherwise miss its deadline (spec 4, section 5.4)
-2. **DMA engine, HIGH jobs**, except 1 even slot in every 4, which is always left for the CPU (spec 11, section 5)
+2. **DMA engine, HIGH jobs**, except the CPU's share (1 in 2, 1 in 4 or 1 in 8 even slots, set per channel), which is always left for the CPU (spec 11, section 5)
 3. **CPU**
 4. **Sprite fetch**, in its fetch window
 5. **DMA engine** (blitter), normal jobs
@@ -170,7 +170,7 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 6. **DMA engine** (blitter, copies, peripheral transfers)
 7. Idle
 
-**The DMA engine's share:** a 20 MHz CPU running flat out from Chip RAM can use every even slot. Normal DMA jobs then get the free odd slots: at 640×480 with wide fetch off, 65 per line, about 24 MB/s of reads. Whenever the CPU is doing internal work, or running from ROM or block RAM, the engine gets the even slots too. A job with the HIGH bit set (like the Amiga's BLTPRI) can take 3 of every 4 even slots ahead of the CPU. Spec 11 has the details and speeds.
+**The DMA engine's share:** a 20 MHz CPU running flat out from Chip RAM can use every even slot. Normal DMA jobs then get the free odd slots: at 640×480 with wide fetch off, 65 per line, about 24 MB/s of reads. Whenever the CPU is doing internal work, or running from ROM or block RAM, the engine gets the even slots too. A job with the HIGH bit set (like the Amiga's BLTPRI) can take the CPU's even slots too, leaving it 1 in 2, 1 in 4 or 1 in 8 of them. Spec 11 has the details and speeds.
 
 ## 7. Odd-slot table (DMA)
 
@@ -205,7 +205,7 @@ If an owner doesn't need its slot this line (audio FIFO full, layer off), the sl
 | Audio stream, 48 kHz 16-bit stereo | 192 KB/s | 24 bytes per line: 750 KB/s | ~4× |
 | Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
 | Sprites | 1–3 slots per sprite per line, in the 64 slots before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 9, section 5) | 16 sprites per line fit (spec 9 lists the limits) |
-| DMA engine (blitter) | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves; HIGH jobs also 3 in 4 of the CPU's | Spec 11, section 7 |
+| DMA engine (blitter) | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves; HIGH jobs also most of the CPU's | Spec 11, section 7 |
 
 During vertical blanking, display fetch has nothing to do, so its slots go to the free pool.
 
