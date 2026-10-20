@@ -1,11 +1,11 @@
 # retro68k
 
-A homebrew Motorola 68000 computer with zero-wait-state memory and an FPGA handling video and audio. It starts as a 68000 core inside the FPGA and later gains a real 68SEC000 CPU board.
+A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA handling video and audio. It starts as a 68000 core inside the FPGA and later gains a real 68SEC000 CPU board.
 
 ## Goals
 
-- **CPU:** 68000 at 12.5 MHz: the fx68k core inside the FPGA first, then a real MC68SEC000 (3.3 V, up to 20 MHz)
-- **Memory:** main RAM with no wait states: SDRAM time-slotted for the CPU at first, fast SRAM on the CPU board
+- **CPU:** 68000 at 20 MHz: the fx68k core inside the FPGA first (16.7 MHz fallback), then a real MC68SEC000 (3.3 V, 20 MHz)
+- **Memory:** Amiga-style Chip RAM (SDRAM shared with DMA in fixed slots), plus CPU-only Fast RAM on the later CPU board
 - **ROM:** boot ROM with a monitor, held in FPGA block RAM
 - **Video + audio:** one FPGA that the CPU sees as memory-mapped registers and VRAM
 - **I/O:** UART, SD card, PS/2 or USB keyboard, timers, interrupts

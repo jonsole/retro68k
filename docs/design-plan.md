@@ -16,7 +16,7 @@ Sections marked *(CPU board)* only apply to stage 2.
 | # | Requirement | Source |
 |---|-------------|--------|
 | R1 | CPU is a 68000: the fx68k core inside the FPGA first, a real MC68SEC000 (3.3 V, 16-bit bus) as a later upgrade | decided |
-| R2 | Main memory runs with zero wait states: Chip RAM (SDRAM) with Amiga-style even/odd slots on the main path, plus fast SRAM (Fast RAM) on the CPU board | project goal |
+| R2 | Fast main memory: Chip RAM (SDRAM) with Amiga-style even/odd slots, where the CPU rarely waits; plus zero-wait Fast RAM (SRAM) on the CPU board | project goal |
 | R3 | Video, audio and glue logic are done by an FPGA | project goal |
 | R4 | Video output is HDMI/DVI; pixel clock is a whole-number division of one master clock, timing programmable: 640×480 up to 1280×720, 50 or 60 Hz; DMA locked to the beam | decided |
 | R5 | Audio is 4–8 PCM sample channels (Amiga-style) | decided |
@@ -76,22 +76,22 @@ The FPGA decodes addresses, drives `/DTACK`, encodes interrupts and generates th
 
 ### D4. Clocks
 
-- **One master clock, as on the Amiga.** A PLL, set once at power-on, makes a 300 MHz master from the 50 MHz oscillator. Everything else is the master divided by a whole number:
-  - **System / SDRAM: 100 MHz** (÷ 3)
-  - **68000: 12.5 MHz** (fx68k clocked at 25 MHz, ÷ 12, with alternating phase enables)
-  - **Memory slot: 80 ns** (÷ 24)
-  - **Pixel clock: ÷ N, N = 4–12 (75–25 MHz)**, programmable
+- **One master clock, as on the Amiga.** A PLL, set once at power-on, makes a 200 MHz master from the 50 MHz oscillator. Everything else is the master divided by a whole number:
+  - **System / SDRAM: 100 MHz** (÷ 2)
+  - **68000: 20 MHz** (fx68k clocked at 40 MHz, ÷ 5, with alternating phase enables)
+  - **Memory slot: 100 ns = 2 CPU clocks** (÷ 20), the Amiga's ratio
+  - **Pixel clock: ÷ N, N = 3–8 (66.7–25 MHz)**, programmable
 - Every scan line is a whole, even number of slots, so DMA is locked to the beam in every video mode (spec 4, section 3.2).
 - A second PLL works only as a ×10 multiplier for the HDMI serialisers (OSERDES2, XAPP495 method), following the divided pixel clock.
-- Spec 1 confirms the exact fx68k clocking and how fast it meets timing on the LX25. 16–20 MHz may be possible later.
-- *(CPU board)* The external CPU gets a 12.5 MHz clock from the master, rising to 20 MHz (the 68SEC000's rating) once the bus is proven. The FPGA samples its bus at 100 MHz through two-flop synchronisers. This adds about 20 ns, well inside the ~100 ns a zero-wait-state cycle at 20 MHz allows before `/DTACK` must be seen.
+- **Fallback:** 40 MHz is near fx68k's top speed (Q1). If the LX25 can't reach it, fx68k runs at 33.3 MHz (÷ 6) for a 16.7 MHz 68000, with 120 ns slots. Spec 1 confirms the exact fx68k clocking.
+- *(CPU board)* The external CPU gets a 20 MHz clock (master ÷ 10), its rated speed. The FPGA samples its bus at 100 MHz through two-flop synchronisers. This adds about 20 ns, well inside the ~100 ns a zero-wait-state cycle at 20 MHz allows before `/DTACK` must be seen.
 
 ### D5. Memory architecture and memory map
 
 Defined in [spec 5: memory architecture](spec/memory-architecture.md). In short:
 
-- **Amiga-style slots.** SDRAM time is cut into 80 ns slots (one 68000 clock). Even slots belong to the CPU, odd slots to DMA. Each DMA engine (refresh, audio, sprites, video, storage) owns fixed odd slots in every scan line. Unused slots go to the copper and blitter.
-- **The CPU never waits** for video layers, audio or refresh, and runs at full speed from Chip RAM. Sprites, fetched just before they are drawn, may borrow a CPU slot when they would otherwise be late (2 CPU clocks each).
+- **Amiga-style slots.** SDRAM time is cut into 100 ns slots (two 68000 clocks). Even slots belong to the CPU, odd slots to DMA; the CPU may also use odd slots DMA leaves free. Each DMA engine (refresh, audio, sprites, video, storage) owns fixed odd slots in every scan line. Unused slots go to the copper and blitter.
+- **The 20 MHz CPU rarely waits.** It loses 2 clocks only when an access lands on a busy DMA slot, or when a sprite about to be late borrows its slot, as on the Amiga.
 - **Chip RAM** = the 32 MB SDRAM, shared with DMA. **Fast RAM** = 2 MB SRAM on the later CPU board, CPU-only.
 
 | Range | Size | Device |
@@ -110,7 +110,7 @@ Before the SDRAM controller exists (phase 3), the first 16 KB of Chip RAM is tem
 
 Defined in [spec 4: video](spec/video.md). In short:
 
-- DVI over HDMI; **pixel clock = 300 MHz ÷ N** with programmable timing: presets from 640×480 to 1280×720 at 50 or 60 Hz. DMA is locked to the beam in every mode
+- DVI over HDMI; **pixel clock = 200 MHz ÷ N** with programmable timing: presets from 640×480 to 1280×720 at 50 or 60 Hz. DMA is locked to the beam in every mode
 - **4 layers + sprites + background colour**, in any priority order. Each layer has its own display window, source address, stride, scroll, scale and palette block
 - Layer types: chunky bitmaps at 1/2/4/8 bits per pixel from Chip RAM, or a text layer from block RAM
 - Free scaling in 1/256-pixel steps (2×, 4×, odd sizes)
@@ -192,7 +192,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 2. `docs/spec/memory-map.md`: the final version of D5
 3. `docs/spec/registers.md`: every register, its address and bit layout
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
-5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU zero-wait scheme, DMA slot table, DMACON
+5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
 6. `docs/spec/audio.md`: channel registers, mixer, sample format
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
@@ -207,19 +207,19 @@ Each phase ends with a test that shows it is done.
 | **1. FPGA bring-up** | ISE VM and scripted build, CI for simulation, blinky, HDMI test pattern, USB FIFO echo | Test pattern on a monitor; characters echo over USB |
 | **2. Simulated computer** | fx68k + bus interface + boot ROM + 16 KB block-RAM main RAM + text layer + USB serial, in Verilator | Boot ROM prints "hello" on the simulated screen and serial port |
 | **3. Computer on the board** | The same design built for the LX25 | "hello" on a real HDMI monitor and over USB |
-| **4. SDRAM + monitor** | SDRAM controller with the even/odd slot scheduler; Chip RAM moves to SDRAM; boot monitor (memory dump/edit, load over USB, run) | Full RAM test passes with zero wait states; programs load and run over USB |
+| **4. SDRAM + monitor** | SDRAM controller with the even/odd slot scheduler; Chip RAM moves to SDRAM; boot monitor (memory dump/edit, load over USB, run) | Full RAM test passes at 20 MHz; programs load and run over USB |
 | **5. Video** | Bitmap modes, palette, scroll, interrupts; then sprites | Demo program runs all modes |
 | **6. Audio** | PCM channels reading from SDRAM | 4-channel module-style playback |
 | **7. Home computer** | SD card, PS/2 keyboard, EhBASIC | Boot to BASIC, load and save a program |
-| **8. Real CPU board** *(upgrade)* | KiCad design for 68SEC000 + 2 MB fast SRAM + headers; review, order, bring-up | All software from phases 4–7 runs unchanged on the real CPU at 12.5 MHz, then 20 MHz |
+| **8. Real CPU board** *(upgrade)* | KiCad design for 68SEC000 + 2 MB fast SRAM + headers; review, order, bring-up | All software from phases 4–7 runs unchanged on the real CPU at 20 MHz |
 | **9. Final PCB** | One board: CPU (or FPGA-only), RAM, FPGA, HDMI, audio, SD, keyboard | Everything from phases 3–8 works on the single board |
 
 ## 5. Risks and open questions
 
 | # | Item | Plan |
 |---|------|------|
-| Q1 | How fast fx68k runs on the LX25 (it reaches about 40 MHz master clock on Intel/Altera chips) | Check in phase 3 with an ISE timing report; 12.5 MHz is the safe target |
-| Q2 | Can the SDRAM controller really give the CPU zero wait states alongside video? | Slot timing checked against the W9825G6 datasheet in spec 5; still to prove in simulation with fx68k's real bus timing (spec 5, M1) |
+| Q1 | Can fx68k run at 40 MHz (a 20 MHz 68000) on the LX25? Its author reports about 40 MHz on Intel/Altera chips, so this is near its limit | Check with an ISE timing report as early as possible (phase 2/3); fallback is 33.3 MHz (16.7 MHz 68000) with 120 ns slots |
+| Q2 | How often does the 20 MHz CPU wait for busy DMA slots? | Slot timing checked against the W9825G6 datasheet in spec 5; measure in simulation with fx68k's real bus timing (spec 5, M1 and M9) |
 | Q3 | fx68k is SystemVerilog and ISE only reads Verilog; Yosys flagged one latch in `rowDecoder` | sv2v conversion is part of the build; check the latch and run fx68k's own tests in phase 2 |
 | Q4 | ISE 14.7 is old and no longer updated | Keep the build scripted inside a VM image; keep RTL portable (D9) so the final PCB can use a newer FPGA |
 | Q5 | PS/2 keyboards are 5 V devices; the FPGA pins are 3.3 V | Small level-shifter or resistor network on a pin adapter; many keyboards also work at 3.3 V. Decide in phase 7 |
