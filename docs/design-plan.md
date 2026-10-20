@@ -196,7 +196,7 @@ If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.
 
 Each block gets a short spec first: its interface, registers, timing and a test plan. RTL is written against that spec.
 
-1. `docs/spec/bus-interface.md`: fx68k clocking and phase enables, internal bus timing, DTACK/BERR rules, wait-state table; later the external-CPU timing
+1. [`docs/spec/bus-interface.md`](spec/bus-interface.md): **drafted.** fx68k at 40 MHz with phase enables, fixed-point 40/100 MHz crossing, bus cycle timing, decoding, wait states, bus errors, interrupt acknowledge, reset and halt
 2. `docs/spec/memory-map.md`: the final version of D5
 3. `docs/spec/registers.md`: every register, its address and bit layout. Registers are 32-bit, written as two 16-bit halves by the CPU and copper; the low-half write updates the whole register at once (spec 10, section 4.1)
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts

@@ -32,6 +32,7 @@ The other system-area devices have their own specs: timers (12), interrupt contr
 | USB RESET | Control command from the PC (spec 14, section 3) | USB (4) |
 | USB UPLOAD | Control command from the PC: reset, then wait for a program | UPLOAD (5) |
 | Keyboard | Ctrl + Alt + Delete (spec 16, section 3.5) | KEYBOARD (6) |
+| CPU halted | A double bus fault, if SYSCON.HALTRESET is set (spec 1, section 8) | HALTED (7) |
 
 RESETWHY shows the cause of the last reset. It is kept in the system control registers (section 7); earlier specs that mention RESETWHY refer to this register.
 
@@ -155,11 +156,14 @@ System control registers, in the system area at `0xF00000`. Spec 3 sets the fina
 | `0x800` | SYSID | 31–0 | Read: `0x5236384B` ("R68K") |
 | `0x804` | SYSVER | 31–0 | Read: FPGA build version |
 | `0x808` | SYSCFG | see section 5 | Read: hardware description |
-| `0x80C` | RESETWHY | POWER (0), WATCHDOG (1), BUTTON (2), SOFTWARE (3), USB (4), UPLOAD (5), KEYBOARD (6) | Read: cause of the last reset |
-| `0x810` | SYSCON | OVERLAY (0), ROMWE (1), ROMLOCK (2) | Overlay on (set at every reset); boot ROM writable; lock ROMWE off until power-on |
+| `0x80C` | RESETWHY | POWER (0), WATCHDOG (1), BUTTON (2), SOFTWARE (3), USB (4), UPLOAD (5), KEYBOARD (6), HALTED (7) | Read: cause of the last reset |
+| `0x810` | SYSCON | OVERLAY (0), ROMWE (1), ROMLOCK (2), PROTECT (3), HALTRESET (4) | Overlay on (set at every reset); boot ROM writable; lock ROMWE off until power-on; user-mode hardware accesses give bus errors; reset when the CPU halts (spec 1) |
 | `0x814` | SYSRESET | 15–0 | Write `0xA55A` to reset the computer; other values are ignored |
 | `0x818` | SYSLED | 7–0 | The board's 8 LEDs (1 = on) |
 | `0x81C` | SYSSW | 3–0 | Read: the board's 4 switches (1 = on) |
+| `0x820` | SYSSTAT | HALTED (0) | Read: the CPU is halted (spec 1, section 8) |
+| `0x824` | BUSERRADDR | 23–0 | Read: address of the last bus error (spec 1, section 6) |
+| `0x828` | BUSERRWHY | UNMAPPED (0), ROMWRITE (1), PROTECT (2), CPUSPACE (3) | Read: cause of the last bus error |
 
 ## 8. FPGA resources
 
