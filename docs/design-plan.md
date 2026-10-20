@@ -194,14 +194,14 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 
 1. `docs/spec/bus-interface.md`: fx68k clocking and phase enables, internal bus timing, DTACK/BERR rules, wait-state table; later the external-CPU timing
 2. `docs/spec/memory-map.md`: the final version of D5
-3. `docs/spec/registers.md`: every register, its address and bit layout
+3. `docs/spec/registers.md`: every register, its address and bit layout. Registers are 32-bit, written as two 16-bit halves by the CPU and copper; the low-half write updates the whole register at once (spec 10, section 4.1)
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 16 hardware channels with 16-tap sinc resampling, stereo stream, mixer, sigma-delta output
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
-10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Beam-following coprocessor: MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX
+10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Beam-following coprocessor with 4-byte instructions: MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX
 11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic/add in 1D and 2D, MIX for audio voices (on hold), peripheral ports
 
 ## 4. Phases
