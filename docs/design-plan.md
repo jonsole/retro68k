@@ -124,10 +124,29 @@ All interrupts are autovectored: the FPGA asserts `/VPA` during the interrupt-ac
 - **Chip-specific parts go in small wrapper modules** in `fpga/rtl/platform/spartan6/`: PLL, OSERDES2 for HDMI, block RAM, clock buffers and I/O pads. Each wrapper also has a plain behavioural version for simulation. Moving to ECP5 or Artix-7 later only means writing new wrappers.
 - **FPGA build:** Xilinx ISE 14.7 WebPACK, run from a script (`xtclsh`/command-line) in a VM, so builds are repeatable and nothing depends on the ISE GUI.
 - **Simulation:** Verilator for the full system, Icarus Verilog plus cocotb for block tests.
-- **Soft CPU for simulation:** fx68k, a cycle-accurate 68000 core, so the whole computer, including real boot code, runs in simulation before the CPU board exists.
+- **Soft CPU:** fx68k, a cycle-accurate 68000 core, used in simulation and on the FPGA itself (see D10).
 - **68000 software:** `vasm` for the boot ROM, `m68k-elf-gcc` later, and EhBASIC (68000 port) as the BASIC.
 - **CI:** GitHub Actions runs lint (Verilator) and all simulations on every push. FPGA builds happen locally in the ISE VM, because ISE cannot reasonably run in CI.
 - **PCB:** KiCad 8.
+
+### D10. A 68000 core inside the LX25
+
+The fx68k core (a cycle-accurate 68000) fits comfortably in the LX25. Trial synthesis on 2026-10-20: fx68k was converted to Verilog with sv2v and synthesised with Yosys 0.33 for Spartan-6 (`synth_xilinx -family xc6s`):
+
+| Resource | fx68k uses | LX25 has | Share |
+|----------|-----------|----------|-------|
+| LUTs | ~3,350 | 15,032 | ~22% |
+| Flip-flops | ~1,440 | 30,064 | ~5% |
+| 18 Kb block RAMs | 3 (microcode) | 52 | ~6% |
+
+This is a Yosys estimate; ISE's results will differ somewhat, but there is a large margin. About 11,700 LUTs are left for video, audio, the SDRAM controller and glue logic.
+
+What this means for the plan:
+- **Phase 3 is no longer optional.** The whole computer can run on the miniSpartan6+ with no extra hardware. Video, audio and software work can go ahead while the CPU board is designed and built.
+- **The same bus interface serves both CPUs.** The FPGA logic talks to a 68000 bus, whether the CPU is fx68k inside the chip or the real 68SEC000 on the headers. A build option chooses which one.
+- **ISE cannot read SystemVerilog**, so fx68k goes through sv2v, a free converter, during the build. The conversion worked without errors. Yosys reported one latch in `rowDecoder`, which needs checking.
+- **fx68k is GPL-3.0.** It will be added as a git submodule under `fpga/third_party/fx68k`. Any FPGA bitstream that includes it is covered by the GPL. The real 68SEC000 build does not use it.
+- **The memory map stays the same.** Main RAM can live in SDRAM when the soft CPU is used, because the 2 MB fast SRAM is on the CPU board.
 
 ## 3. Specs to write before code
 
@@ -148,10 +167,10 @@ Each phase ends with a test that shows it is done.
 
 | Phase | Work | Done when |
 |-------|------|-----------|
-| **0. Plan** | This document, decisions agreed, specs 1–3 written | Decisions D1–D9 signed off |
+| **0. Plan** | This document, decisions agreed, specs 1–3 written | Decisions D1–D10 signed off |
 | **1. FPGA bring-up** | ISE VM and scripted build, CI for simulation, blinky, HDMI test pattern, USB FIFO echo | Test pattern on a monitor; characters echo over USB |
 | **2. Simulated computer** | fx68k + bus interface + boot ROM + text mode + USB serial in Verilator | Boot ROM prints "hello" on the simulated screen and serial port |
-| **3. Soft CPU on the board** (optional) | Same design with fx68k inside the LX25, if it fits | Same result on a real monitor |
+| **3. Soft CPU on the board** | Same design with fx68k inside the LX25 (see D10) | Same result on a real monitor; software development can continue on this while the CPU board is built |
 | **4. CPU board** | KiCad schematic and layout for 68SEC000 + SRAM + headers, design review, order | Board assembled; power and clock check out |
 | **5. Real-CPU bring-up** | FPGA runs the real CPU from the BRAM ROM; SRAM test; serial monitor | Monitor prompt over USB; full SRAM test passes at 12.5 MHz, then 20 MHz |
 | **6. SDRAM + video** | SDRAM controller and arbiter; bitmap modes, palette, scroll, interrupts; then sprites | Demo program runs all modes |
@@ -166,7 +185,7 @@ Each phase ends with a test that shows it is done.
 | Q1 | MC68SEC000 availability, price and package (64-pin QFP, fine pitch) | Check distributors; hand-solderable with care, or use an assembly service |
 | Q2 | Signal integrity of the bus over header pins at 20 MHz | CPU board mates directly onto the miniSpartan6+ headers (no cables), ground pins next to the clock and strobes, series resistors on the clock |
 | Q3 | Physical fit: the CPU board has to reach headers on several sides of the board | Measure the miniSpartan6+ header positions from the Rev B board file before starting the layout |
-| Q4 | Does fx68k fit in the LX25 next to video, audio and SDRAM logic? | Only matters for optional phase 3; check with a trial synthesis |
+| Q4 | ~~Does fx68k fit in the LX25?~~ **Yes.** A trial synthesis uses about 22% of the chip (see D10) | Closed; confirm with a real ISE build in phase 3 |
 | Q5 | ISE 14.7 is old and no longer updated | Keep the build scripted inside a VM image; keep RTL portable (D9) so the final PCB can use a newer FPGA |
 | Q6 | FPGA for the final PCB: stay on Spartan-6, or move to ECP5 / Artix-7 | Decide in phase 9; Spartan-6 keeps everything proven, newer parts give more RAM and open tools |
 | Q7 | Keyboard: PS/2 on a spare pin pair vs. USB | PS/2 is far simpler in logic; decide in phase 8 |
@@ -174,4 +193,4 @@ Each phase ends with a test that shows it is done.
 
 ## 6. Next step
 
-Review this document. Once D1–D9 are agreed or changed, write specs 1–3 (bus interface, memory map, register map). Those are needed before any RTL.
+Review this document. Once D1–D10 are agreed or changed, write specs 1–3 (bus interface, memory map, register map). Those are needed before any RTL.
