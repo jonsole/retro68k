@@ -10,7 +10,7 @@ Status: **draft for review**
 - **Fetch is automatic:** the hardware works out what to fetch from each layer's window, so there are no fetch start/stop registers to keep in step (the Amiga's DDFSTRT/DDFSTOP)
 - **Free scaling:** each layer has its own horizontal and vertical step in 1/256ths of a pixel, so 2× and 4× pixels, odd sizes and simple zoom effects all use the same mechanism
 - Fully programmable horizontal and vertical timing, with presets for standard modes at 50 and 60 Hz; beam position registers, vertical-blank and line interrupts
-- **Everything runs from one master clock, as on the Amiga.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line, in every mode. Video only uses DMA slots (spec 5), so it never slows the CPU
+- **Everything runs from one master clock, as on the Amiga.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line, in every mode. Layers only use DMA slots (spec 5), so they never slow the CPU. Sprites can borrow a CPU slot when they would otherwise be late (section 5.4)
 
 Sprites, the copper and the blitter get their own specs. This spec defines how sprites slot into the layer priority order.
 
@@ -135,7 +135,7 @@ There are 4 layers (L0–L3), a sprite layer and a background colour. For every 
  SDRAM ──DMA, just in time──▶ 32-byte buffers L0..L3 ──┐
                                                         ├─▶ priority mux ─▶ palette ─▶ DVI encoder ─▶ HDMI
  block RAM (text) ─▶ text layer ────────────────────────┤        ▲
- SDRAM ──DMA, line before──▶ sprite data registers ─────┘   PRIO register
+ SDRAM ──DMA, just before X──▶ sprite data registers ───┘   PRIO register
 ```
 
 ### 4.2 Layer types and pixel formats
@@ -233,8 +233,8 @@ There are no line buffers. Video data is fetched by DMA during the line it is sh
 - Each bitmap layer has a **32-byte buffer** (4 bursts), made from FPGA logic, not block RAM. It does the job of the Amiga's bitplane data registers. The pixel output takes data from the front of the buffer, and DMA tops it up from the back.
 - **Display fetch slots** are fixed beam positions in every line (spec 5, section 7):
   - **Normal:** every slot with `hslot % 4 == 1`: 8 bytes every 4 slots.
-  - **Wide fetch** (VIDCON.WIDE = 1): also every slot with `hslot % 4 == 3` in the visible part of the line. Those come out of the free pool, so the copper, blitter and extra sprites lose them while it is on. The CPU's slots are never touched.
-- **Which layer gets each slot:** the layer whose buffer will run out soonest. With a given screen setup this always works out the same, so the fetch pattern repeats exactly on every line and every frame.
+  - **Wide fetch** (VIDCON.WIDE = 1): also every slot with `hslot % 4 == 3` in the visible part of the line. Those come out of the free pool, so the copper and blitter lose them while it is on, and sprites are more likely to borrow CPU slots. Layers never touch the CPU's slots.
+- **Which layer or sprite gets each slot:** whichever will run out of data soonest (earliest deadline first). With a given screen setup this always works out the same, so the fetch pattern repeats exactly on every line and every frame.
 - **Prefetch:** before a layer's window starts, its buffer is filled with its first 2 bursts. For windows that start at the left edge, this happens in the horizontal blanking before the line. For windows that start further right, it happens in display slots just before the window. This replaces the Amiga's DDFSTRT, which had to be set by hand earlier than the display window.
 - The first burst is rounded down to an 8-byte boundary, and leading pixels are skipped to give the exact SCROLLX position. A burst never crosses an SDRAM row, because rows are 1 KB and bursts are 8-byte aligned.
 - **Vertical scaling** re-fetches the source line for each screen line it appears on. There is nothing kept from the line before.
@@ -289,24 +289,22 @@ What one layer costs:
 
 Windows help: a status bar that sits below a game area, not on top of it, adds nothing to the budget on the lines where the game area is shown.
 
-### 5.4 Sprites
+### 5.4 Sprites: fetched just before they are drawn
 
-Sprite data is fetched during the line before it is shown, into **sprite data registers**: 16 bytes per sprite, double-buffered, held in FPGA logic. This is the Amiga's SPRxDATA idea.
+Sprite data is fetched on demand, just before the beam reaches each sprite, in the same way as layer data. Nothing is fetched a line ahead.
 
-- With wide fetch **off**, sprites use free-pool slots anywhere in the line, after the fixed blanking users (spec 5, section 7). **8 sprites fit in every mode.**
-- With wide fetch **on**, the free slots in the visible part are taken, so sprites only get what is left in the horizontal blanking. As on the Amiga, where wide display fetch costs sprites, fewer sprites can be shown:
-
-| Mode | Sprites with wide fetch on (4 bitmap layers / 2 bitmap layers) |
-|------|------------------------------------------------------------------|
-| 640×480 | 8 / 8 |
-| 720×576, 720×480 | 5 / 7 |
-| 800×600 @ 60 | 6 / 8 |
-| 800×600 @ 72 | 4 / 6 |
-| 1024×768 | 0 / 2 |
-| 1280×720 @ 60 | 5 / 7 |
-| 1280×720 @ 50 | 8 / 8 |
-
-The numbers depend on the blanking length, so a timing with longer blanking gives more sprites.
+- **Which sprites are on the next line:** at the start of horizontal blanking, the sprite unit checks every sprite's Y position and height (held in registers, so no memory access) and sorts the active ones by X.
+- **Fetch window:** each active sprite's line of data (16 bytes, 2 bursts; the sprite spec will confirm the size) is fetched into its **sprite data register** (16 bytes, built from logic) during the **32 slots before its first pixel**. That is 64 pixels ahead at 640×480. Sprites near the left edge are fetched at the end of the blanking before the line.
+- **Slots a sprite can use, in order of preference:**
+  1. Free odd slots (`hslot % 4 == 3`, when wide fetch is not using them)
+  2. Display-fetch slots that no layer needs at that moment (its buffer is full)
+  3. Even slots the CPU is not using
+  4. **Even slots the CPU wants: taken only when the sprite would otherwise miss its deadline**
+- The scheduler takes a CPU slot as late as possible: only when the slots left before the deadline, not counting the CPU's, are fewer than the bursts the sprite still needs. With a given screen setup and program, the pattern is the same every time.
+- **Cost to the CPU:** each slot taken delays the CPU by 2 clocks (160 ns), and only if it wanted that slot. Two clocks is an even number, so the CPU stays on its even slots afterwards (spec 5, section 5).
+  - Sprites spread out across the line, with wide fetch off: the free slots are enough, so the CPU is not slowed.
+  - Several sprites starting at the same X, or wide fetch on: some CPU slots are taken. The worst case is 8 sprites on one line, each taking both its bursts from the CPU: 16 slots = 32 CPU clocks, 8% of a 640×480 line. This only happens on lines with sprites, and only when the CPU is accessing Chip RAM at those moments.
+- **Always fits:** the 32-slot window holds 8 `hslot % 4 == 1` slots (for layers), 8 `hslot % 4 == 3` slots and 16 even slots. Even 8 sprites starting at the same X (16 bursts) fit without touching the layers' slots. Fixed blanking slots (refresh, audio, storage) are never taken. If a sprite still misses its deadline (e.g. an unusual setup that crowds blanking), that sprite's line is transparent and SPRMISS is set in VIDSTAT.
 
 ### 5.5 When a layer runs short
 
@@ -335,7 +333,7 @@ Addresses are offsets in the custom register block at `0xE00000`. Spec 3 sets th
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `0x000` | VIDCON | EN (0), WIDE (1), BLANKALL (2) | Video on, wide fetch, force background only |
-| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L3 (4–7), INVBLANK (8, read-only), PCLKLOCK (9, read-only), BADTIMING (10) | Sticky flags, write 1 to clear |
+| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L3 (4–7), INVBLANK (8, read-only), PCLKLOCK (9, read-only), BADTIMING (10), SPRMISS (11) | Sticky flags, write 1 to clear |
 | `0x008` | VIDINTEN | Same bit layout as VIDSTAT | Interrupt enables |
 | `0x00C` | BEAMPOS | `vline` 26–16, `hpixel` 10–0 | Read-only |
 | `0x010` | FRAMECOUNT | 15–0 | Read-only |
@@ -397,6 +395,7 @@ Clocks use two of the LX25's four PLLs: one for the fixed master clocks, one as 
 | # | Item |
 |---|------|
 | V1 | Sprite spec: size, formats, collision detection; section 5.4 sets how they are fetched |
+| V11 | Reusing a sprite's hardware further right on the same line once it has been drawn, to show more than 8 sprites per line. The just-in-time fetch makes this possible |
 | V2 | Test 50 Hz modes (640×480 @ 50 and the standard 576p/720p50) on real HDMI monitors and TVs |
 | V3 | Whether 4 layers is the right number; each extra layer costs one block RAM and a little logic |
 | V4 | 16-bit direct-colour and tile-map layer types (version 2) |
@@ -414,6 +413,7 @@ Clocks use two of the LX25's four PLLs: one for the fixed master clocks, one as 
 - **Beam lock:** for every preset, assert that each fixed DMA slot falls at the same `hslot` on every line, and that the CPU's even slots stay even across line boundaries.
 - **Fetch budget:** for every example in 5.3, assert no layer buffer runs empty; for over-budget setups, assert OVERRUN is set on the right layer only.
 - **Fetch pattern:** assert the DMA pattern is identical on every line for a fixed screen setup.
+- **Sprites:** 8 sprites at the same X with wide fetch on: all are drawn, the CPU loses at most 16 slots on that line, and it stays on even slots afterwards. Sprites spread across the line with wide fetch off: the CPU loses none.
 - **Golden images:** render test screens in simulation (windows, scroll, scale, priority, transparency, palette) and compare frame dumps with images made by a Python reference model.
 - **Register timing:** a write during line L−1's visible part changes line L exactly; a write during its blanking changes line L+1.
 - **No CPU slowdown:** with all layers on and wide fetch, the CPU zero-wait test from spec 5 still passes.

@@ -2,7 +2,7 @@
 
 Status: **draft for review**
 
-This spec describes how the CPU, video, audio and other DMA engines share the SDRAM. It follows the Amiga's model: memory time is cut into fixed **slots**, and the slots alternate between the CPU (even slots) and DMA (odd slots). Each DMA engine owns fixed slots in every scan line, so its bandwidth is guaranteed, and the CPU never waits for video or audio.
+This spec describes how the CPU, video, audio and other DMA engines share the SDRAM. It follows the Amiga's model: memory time is cut into fixed **slots**, and the slots alternate between the CPU (even slots) and DMA (odd slots). Each DMA engine owns fixed slots in every scan line, so its bandwidth is guaranteed. The CPU never waits for video layers, audio or refresh. Only sprites may borrow a CPU slot, and only when they would otherwise be late.
 
 ## 1. Summary
 
@@ -15,7 +15,7 @@ This spec describes how the CPU, video, audio and other DMA engines share the SD
 | Even slots | CPU first; blitter gets the ones the CPU does not use |
 | Odd slots | DMA, at fixed beam positions: half for display fetch (layers and sprites), a few for refresh, audio and storage, the rest to copper and blitter |
 | Page policy | Closed page: every slot opens a row, transfers, and precharges. No slot depends on the one before it |
-| CPU waits | **None** in normal running (see section 5) |
+| CPU waits | **None** from layers, audio or refresh. A sprite about to miss its deadline may take a CPU slot, costing 2 CPU clocks (section 5) |
 
 ## 2. Memory types (Amiga naming)
 
@@ -100,7 +100,7 @@ SDRAM keeps the RAS/CAS idea of older DRAM under new names: **ACTIVE** opens a r
 
 - **DMA slots already burst:** one ACTIVE, then 4 column reads back to back (8 bytes). This is the same idea as the Amiga AGA chipset's wider fetch modes (FMODE), which used page mode to fetch 32 or 64 bits per memory cycle.
 - **4 words is the most that fits in a slot.** A 5th read would push the precharge to clock 7, and the bank would not be ready again until clock 9. That is past the start of the next slot, which may need the same bank.
-- **Why each slot closes its row:** if a row stayed open into the next slot, that slot's timing would depend on which bank and row it needs. Closing the row every time keeps every slot independent and its timing fixed. That is what guarantees the CPU never waits.
+- **Why each slot closes its row:** if a row stayed open into the next slot, that slot's timing would depend on which bank and row it needs. Closing the row every time keeps every slot independent and its timing fixed. That is what makes the CPU's timing predictable.
 - **Cost:** opening and closing a row takes about half of each slot, so a DMA slot moves data on 4 of its 8 clocks. Even so, the odd slots give up to 50 MB/s, and video uses at most 40% of them in version 1.
 
 **Possible later upgrade: bank interleaving.** The SDRAM has 4 independent banks, and a row can be opened in one bank while another is bursting. Keeping frame buffers in their own bank would let video stream long bursts at close to the full 200 MB/s. The CPU can touch any bank at any time, so this needs a careful worst-case design. It is worth doing only if 16-bit colour modes or a faster blitter need the bandwidth.
@@ -128,8 +128,9 @@ A 68000 bus cycle takes 4 CPU clocks = 4 slots. Its states S0–S7 map onto slot
   - *Wait states from other devices* (e.g. a slow register) are always inserted in pairs of clocks.
   - *TAS* (read-modify-write, 10 clocks): the read uses the normal slot and the write uses the next even slot. It may take one realignment clock. TAS is rare.
 - Accesses to block RAM, registers and ROM never use an SDRAM slot. During those, and during CPU internal operations, the CPU's even slots are free.
+- **When a sprite takes the CPU's slot** (spec 4, section 5.4): the CPU's access moves from slot k+2 to the next even slot, k+4, and /DTACK is held back 2 clocks. Two clocks is an even number, so the CPU stays aligned afterwards.
 
-**Result:** the CPU runs at full 12.5 MHz speed from Chip RAM whatever video, audio and sprites are doing.
+**Result:** the CPU runs at full 12.5 MHz speed from Chip RAM whatever the layers, audio and refresh are doing. Sprites can slow it slightly on lines where they would otherwise be late; the worst case is 32 CPU clocks on a 640×480 line (8%).
 
 **Headroom:** if fx68k is later clocked faster (Q1 in the design plan), a 25 MHz 68000 would make an access every 160 ns, one per even slot. The same scheme would still give it zero wait states.
 
@@ -137,12 +138,14 @@ A 68000 bus cycle takes 4 CPU clocks = 4 slots. Its states S0–S7 map onto slot
 
 For each even slot, in order:
 
-1. **CPU**, if a CPU bus cycle to Chip RAM started two slots earlier
-2. **Blitter**, if it has work
-3. **Copper**, if it has work
-4. Idle
+1. **Sprite fetch**, only if a sprite would otherwise miss its deadline (spec 4, section 5.4)
+2. **CPU**, if a CPU bus cycle to Chip RAM started two slots earlier
+3. **Sprite fetch**, in its fetch window, when the CPU doesn't need the slot
+4. **Blitter**, if it has work
+5. **Copper**, if it has work
+6. Idle
 
-Because the CPU uses at most one even slot in two, the blitter always gets at least a quarter of all slots, even with the CPU running flat out from Chip RAM.
+Because the CPU uses at most one even slot in two, the blitter gets at least a quarter of all slots on lines without sprites, even with the CPU running flat out from Chip RAM.
 
 A future "blitter priority" bit (like the Amiga's BLTPRI) could let the blitter take CPU slots too, slowing the CPU. It is left out of version 1.
 
@@ -175,7 +178,7 @@ If an owner doesn't need its slot this line (audio FIFO full, layer off), the sl
 
 Free-pool slots go, in order, to:
 
-1. **Sprites**, fetching data for the next line (2 slots per sprite; spec 4, section 5.4)
+1. **Sprites**, in the 32 slots before each sprite's first pixel (2 slots per sprite; spec 4, section 5.4)
 2. **Copper**, the display-list coprocessor (version 2)
 3. **Blitter**
 4. **Storage**, beyond its 2 guaranteed slots
@@ -188,7 +191,7 @@ Free-pool slots go, in order, to:
 | Display fetch | Depends on the video mode and layers | Spec 4, section 5.2 lists the budget per mode | |
 | Audio channel at 48 kHz, 16-bit | 96 KB/s | 8 bytes per line: 250 KB/s at 640×480, more in modes with shorter lines | Pitch can go up at least 2.6× before it runs short |
 | Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
-| Sprites | 2 slots per sprite per line | 8 sprites in every mode with wide fetch off; fewer with it on (spec 4, section 5.4) | |
+| Sprites | 2 slots per sprite per line, just before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 4, section 5.4) | 8 sprites always fit |
 | Blitter (worst case: wide fetch on, CPU flat out) | – | At least a quarter of all slots (the even ones the CPU leaves): ~25 MB/s of reads or ~12 MB/s of writes | More whenever display fetch or the CPU leave slots unused |
 
 During vertical blanking, display fetch has nothing to do, so its slots go to the free pool.
@@ -237,11 +240,12 @@ With the real 68SEC000:
 | M5 | Copper instruction set (spec to follow; version 2) |
 | M6 | Whether sprite count/width should trade off against each other (e.g. 4 wide sprites vs 8 narrow) |
 | M7 | Bank interleaving for longer bursts (section 4.4): only if a later mode needs more bandwidth |
+| M8 | Check the sprite scheduler's "take a CPU slot only when needed" decision fits in one 100 MHz clock |
 
 ## 11. Tests
 
 - **Slot-table check in simulation:** for every video preset, count slot owners per line and assert each fixed owner gets its share at the same `hslot` on every line.
-- **CPU zero-wait test:** run fx68k from Chip RAM with all DMA on; assert that /DTACK is never delayed once the CPU is aligned.
+- **CPU zero-wait test:** run fx68k from Chip RAM with all layers, audio and refresh on; assert that /DTACK is never delayed once the CPU is aligned. With sprites on, assert every delay is exactly 2 clocks and caused by a sprite slot.
 - **Misalignment test:** force a cycle to start in an odd slot; assert exactly one extra clock, then realignment.
 - **SDRAM model:** run against a Winbond/Micron SDRAM simulation model with timing checks on, at the -75 timings.
 - **Refresh:** assert that no SDRAM row goes unrefreshed for 64 ms (counter check in simulation).

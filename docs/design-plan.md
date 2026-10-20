@@ -91,7 +91,7 @@ The FPGA decodes addresses, drives `/DTACK`, encodes interrupts and generates th
 Defined in [spec 5: memory architecture](spec/memory-architecture.md). In short:
 
 - **Amiga-style slots.** SDRAM time is cut into 80 ns slots (one 68000 clock). Even slots belong to the CPU, odd slots to DMA. Each DMA engine (refresh, audio, sprites, video, storage) owns fixed odd slots in every scan line. Unused slots go to the copper and blitter.
-- **The CPU never waits** for video or audio, and runs at full speed from Chip RAM.
+- **The CPU never waits** for video layers, audio or refresh, and runs at full speed from Chip RAM. Sprites, fetched just before they are drawn, may borrow a CPU slot when they would otherwise be late (2 CPU clocks each).
 - **Chip RAM** = the 32 MB SDRAM, shared with DMA. **Fast RAM** = 2 MB SRAM on the later CPU board, CPU-only.
 
 | Range | Size | Device |
@@ -114,7 +114,7 @@ Defined in [spec 4: video](spec/video.md). In short:
 - **4 layers + sprites + background colour**, in any priority order. Each layer has its own display window, source address, stride, scroll, scale and palette block
 - Layer types: chunky bitmaps at 1/2/4/8 bits per pixel from Chip RAM, or a text layer from block RAM
 - Free scaling in 1/256-pixel steps (2×, 4×, odd sizes)
-- Video memory is fetched on demand by DMA as the beam scans, Amiga-style, with no line buffers. Fetch timing is worked out from the windows; the budget is a rate in bytes per pixel (1 normally at 640×480, 2 with wide fetch). Only DMA slots are used, so the CPU is never slowed
+- Video memory is fetched on demand by DMA as the beam scans, Amiga-style, with no line buffers. Fetch timing is worked out from the windows; the budget is a rate in bytes per pixel (1 normally at 640×480, 2 with wide fetch). Layers only use DMA slots, so they never slow the CPU. Sprites are also fetched just before their X position, and borrow a CPU slot only when needed
 - 1024-entry palette of 24-bit colours; beam position registers; vertical-blank and line interrupts
 
 ### D7. Audio
