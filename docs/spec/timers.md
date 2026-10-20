@@ -108,7 +108,7 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 | `0x1C0` | WDCTRL | EN (0), LOCK (1) | On; lock settings until reset |
 | `0x1C4` | WDTIME | 15–0 | Time allowed between kicks, in milliseconds |
 | `0x1C8` | WDKICK | 15–0 | Write `0x5A5A` to restart the time; any other value resets at once |
-| `0x1CC` | RESETWHY | POWER (0), WATCHDOG (1), BUTTON (2), SOFTWARE (3), USB (4), UPLOAD (5) | Cause of the last reset; read-only. USB and UPLOAD are the USB serial RESET and UPLOAD commands (spec 14) |
+| `0x1CC` | RESETWHY | POWER (0), WATCHDOG (1), BUTTON (2), SOFTWARE (3), USB (4), UPLOAD (5), KEYBOARD (6) | Cause of the last reset; read-only. USB and UPLOAD are the USB serial RESET and UPLOAD commands (spec 14); KEYBOARD is Ctrl + Alt + Delete (spec 16) |
 
 **Interrupts:** each timer is its own source in the interrupt controller (spec 13), TIMER0–TIMER3, with its own vector. Default level 6. Starting a DMA channel works like a CPU write of START to that channel's CHCTRL (spec 11, section 8), and is independent of the interrupt.
 

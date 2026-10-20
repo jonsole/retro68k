@@ -202,7 +202,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 16 hardware channels with 16-tap sinc resampling, stereo stream, mixer, sigma-delta output
-7. `docs/spec/system.md`: keyboard, reset and overlay (timers are spec 12, interrupts spec 13, USB serial spec 14, SD card spec 15)
+7. `docs/spec/system.md`: reset, the boot ROM overlay and header pin use (timers are spec 12, interrupts spec 13, USB serial spec 14, SD card spec 15, keyboard spec 16)
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
 10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Beam-following coprocessor with 4-byte instructions: MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX
@@ -211,6 +211,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 13. [`docs/spec/interrupts.md`](spec/interrupts.md): **drafted.** 24 sources with their own vectors and programmable levels, NMI button and USB break, software interrupt
 14. [`docs/spec/serial.md`](spec/serial.md): **drafted.** FT2232H channel B in 245 FIFO mode: console and uploads at several MB/s, hardware flow control, DMA port, BREAK/RESET/UPLOAD commands from the PC
 15. [`docs/spec/sd-card.md`](spec/sd-card.md): **drafted.** Native 4-bit SD host: commands with CRC, 512-byte blocks, multi-block with auto-stop, up to 25 MB/s, DMA port, card detect on DAT3
+16. [`docs/spec/keyboard.md`](spec/keyboard.md): **drafted.** PS/2 keyboard through a level-shifting adapter: decoded key events, 512-bit key map, commands with acknowledge, Ctrl + Alt + Delete reset
 
 ## 4. Phases
 
@@ -237,7 +238,7 @@ Each phase ends with a test that shows it is done.
 | Q2 | How often does the 20 MHz CPU wait for busy DMA slots? | Slot timing checked against the W9825G6 datasheet in spec 5; measure in simulation with fx68k's real bus timing (spec 5, M1 and M9) |
 | Q3 | fx68k is SystemVerilog and ISE only reads Verilog; Yosys flagged one latch in `rowDecoder` | sv2v conversion is part of the build; check the latch and run fx68k's own tests in phase 2 |
 | Q4 | ISE 14.7 is old and no longer updated | Keep the build scripted inside a VM image; keep RTL portable (D9) so the final PCB can use a newer FPGA |
-| Q5 | PS/2 keyboards are 5 V devices; the FPGA pins are 3.3 V | Small level-shifter or resistor network on a pin adapter; many keyboards also work at 3.3 V. Decide in phase 7 |
+| Q5 | PS/2 keyboards are 5 V devices; the FPGA pins are 3.3 V | A level-shifting adapter on 2 header pins (spec 16, section 2) |
 | Q6 | Is the FT2232H channel B already set to parallel FIFO mode on this board? | Check the EEPROM settings with FT_Prog in phase 1 |
 | Q7 | FPGA for the final PCB: stay on Spartan-6, or move to ECP5 / Artix-7 | Decide in phase 9; newer parts give more RAM and open tools |
 | Q8 | *(CPU board)* MC68SEC000 availability, price and package (64-pin QFP, fine pitch) | Check before phase 8; hand-solderable with care, or use an assembly service |

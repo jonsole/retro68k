@@ -62,7 +62,7 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 | 14 | 78 | TIMER3 | Timer 3 underflow | 6 |
 | 15 | 79 | SERIAL | USB serial: data received, timeout, room to send, overflow (spec 14) | 3 |
 | 16 | 80 | SD | SD card: command or data done, error, card inserted/removed (spec 15) | 2 |
-| 17 | 81 | KEYB | Keyboard: key event | 2 |
+| 17 | 81 | KEYB | Keyboard: key event, keyboard reply, error (spec 16) | 2 |
 | 18 | 82 | SOFT | Software interrupt (SOFTINT) | 1 |
 | 19–23 | 83–87 | – | Reserved (e.g. GPIO pins on the headers, the CPU board) | 0 (off) |
 
