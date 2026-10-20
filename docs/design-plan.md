@@ -18,7 +18,7 @@ Sections marked *(CPU board)* only apply to stage 2.
 | R1 | CPU is a 68000: the fx68k core inside the FPGA first, a real MC68SEC000 (3.3 V, 16-bit bus) as a later upgrade | decided |
 | R2 | Main memory runs with zero wait states: Chip RAM (SDRAM) with Amiga-style even/odd slots on the main path, plus fast SRAM (Fast RAM) on the CPU board | project goal |
 | R3 | Video, audio and glue logic are done by an FPGA | project goal |
-| R4 | Video output is HDMI/DVI at 640×480 @ 60 Hz | decided |
+| R4 | Video output is HDMI/DVI with a programmable pixel clock and timing: 640×480 up to 1280×720, 50 or 60 Hz | decided |
 | R5 | Audio is 4–8 PCM sample channels (Amiga-style) | decided |
 | R6 | Usable as a home computer: boots to a monitor, then BASIC; keyboard; SD card | decided ("both") |
 | R7 | Usable as a game/demo machine: sprites, scrolling, later a blitter | decided ("both") |
@@ -78,7 +78,7 @@ The FPGA decodes addresses, drives `/DTACK`, encodes interrupts and generates th
 
 - The 50 MHz oscillator feeds the FPGA PLLs.
 - **System clock: 100 MHz.** Bus logic, SDRAM controller and most registers run on it.
-- **Pixel clock: 25 MHz.** HDMI bit clock: 250 MHz, made with the Spartan-6 OSERDES2 serialisers (the standard XAPP495 method, which Scarab's HDMI example also uses).
+- **Pixel clock: programmable, about 25–74.25 MHz** (spec 4, section 3), made by a DCM_CLKGEN that can be reprogrammed at run time plus a PLL. The HDMI bit clock is 10× the pixel clock, made with the Spartan-6 OSERDES2 serialisers (the XAPP495 method, which Scarab's HDMI example also uses). Video runs in its own clock domain, separate from the memory slot grid.
 - **CPU speed: 12.5 MHz first**, the speed of a fast 1980s 68000. fx68k is driven by a master clock plus two "phase enable" inputs, so its speed is set by those enables. Spec 1 confirms the exact clocking and how fast fx68k meets timing on the LX25; 16–20 MHz may be possible later.
 - *(CPU board)* The external CPU gets a 12.5 MHz clock from the PLL, rising to 20 MHz (the 68SEC000's rating) once the bus is proven. The FPGA samples its bus at 100 MHz through two-flop synchronisers. This adds about 20 ns, well inside the ~100 ns a zero-wait-state cycle at 20 MHz allows before `/DTACK` must be seen.
 
@@ -106,7 +106,7 @@ Before the SDRAM controller exists (phase 3), the first 16 KB of Chip RAM is tem
 
 Defined in [spec 4: video](spec/video.md). In short:
 
-- 640×480 DVI over HDMI; vertical timing programmable for 60 Hz or exactly 50 Hz
+- DVI over HDMI with a **programmable pixel clock and timing**: presets from 640×480 to 1280×720 at 50 or 60 Hz, including standard 576p and 720p
 - **4 layers + sprites + background colour**, in any priority order. Each layer has its own display window, source address, stride, scroll, scale and palette block
 - Layer types: chunky bitmaps at 1/2/4/8 bits per pixel from Chip RAM, or a text layer from block RAM
 - Free scaling in 1/256-pixel steps (2×, 4×, odd sizes)
