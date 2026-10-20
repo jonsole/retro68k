@@ -4,32 +4,36 @@ Status: **draft for review**
 
 Sound comes from two sources that are mixed together and sent to the audio jack:
 
-- **4 hardware channels**, like the Amiga's Paula: each plays a sample from Chip RAM by itself, with its own pitch, volume and loop, and needs no CPU work while it plays.
-- **A stereo stream**: plays a buffer in Chip RAM that the DMA engine fills by mixing any number of **voices** (spec 11, MIX operation). This gives 30–40 voices on spare memory slots, far more than hardware channels could.
+- **16 hardware channels.** Each plays a sample from Chip RAM by itself, at any pitch, volume and pan, with loops, and needs no CPU work while it plays. One shared engine does all 16, with a high-quality 16-tap resampling filter.
+- **A stereo stream.** Plays a buffer in Chip RAM that software fills: a software synthesiser, an emulator, decoded music, or anything else.
 
 ## 1. Summary
 
 | Item | Value |
 |------|-------|
 | Output rate | 200 MHz ÷ D, programmable. Default D = 4167: 47.996 kHz. D = 4535: 44.10 kHz |
-| Hardware channels | 4: 8- or 16-bit samples, any pitch, stereo volume (pan), loop, queued next sample |
+| Hardware channels | 16, processed one after another by one shared engine |
+| Sample formats | 16-bit or 8-bit signed PCM |
+| Pitch | Step per output sample, 8.16 fixed point (1/65536 steps, up to 255×) |
+| Resampling | 16-tap windowed-sinc filter: about −105 dB aliasing, flat to within 1 dB up to 0.3 × the sample's rate (14.4 kHz for a 48 kHz sample). Optional pre-filtered octave copies for clean pitch-ups. Per-channel "nearest" mode for an authentic Amiga sound |
+| Volume and pan | 0–255 left and right per channel; master volume |
+| Loops | Loop start and length; queued next sample, as on the Amiga |
 | Stream | 16-bit stereo, played from a ring buffer in Chip RAM, interrupt at the half-way point and at the end |
-| Software voices | Mixed into the stream buffer by the DMA engine's MIX operation; about 40 voices on spare slots at 640×480 |
-| Mixer | Channels + stream added at 18-bit precision, master volume, saturated to 16 bits |
+| Mixer | 24-bit sum, master volume, saturated to 16 bits |
 | Output | Second-order sigma-delta DAC at 100 MHz on the miniSpartan6+'s two audio pins and stereo jack |
-| CPU work | None for hardware channels while they play. For mixed voices: update notes and restart the mix chain once per block (e.g. every 5–10 ms) |
+| CPU work | None while channels play; the CPU only starts notes and changes settings |
 
 ## 2. Comparison with the Amiga (Paula)
 
 | Feature | Amiga | retro68k |
 |---------|-------|----------|
-| Channels | 4, hard-panned (2 left, 2 right) | 4 hardware channels with any pan, plus 30–40 DMA-mixed voices |
-| Sample size | 8-bit | 8- or 16-bit |
-| Volume | 0–64 | 0–255 per side (left and right) |
-| Pitch | Period register (clock ticks per sample) | Step per output sample, 8.16 fixed point |
-| Output | 8-bit DACs, analogue filter | 16-bit mix, sigma-delta DAC |
-| Next sample | Location and length reloaded at the end of each sample | Same: next-sample registers taken at the end or loop point |
-| Mixing more voices | In software on the CPU (very costly) | DMA engine, in hardware |
+| Channels | 4, hard-panned (2 left, 2 right) | 16, any pan, plus a stereo stream |
+| Sample size | 8-bit | 16- or 8-bit |
+| Volume | 0–64 | 0–255 per side (left and right), plus master volume |
+| Pitch | Each channel's DAC runs at the sample's own rate (period register) | All channels are resampled to one output rate by a 16-tap filter |
+| Sound at high pitches | Analogue filter smooths the steps | Clean: proper resampling, octave copies for pitch-ups |
+| Output | 8-bit DACs | 16-bit mix, sigma-delta DAC |
+| Next sample | Location and length reloaded at the end of each sample | Same: queued registers taken at the end or loop point |
 
 ## 3. Output
 
@@ -44,8 +48,6 @@ The output rate is the 200 MHz master clock divided by D (AUDRATE register), in 
 | 6250 | 32.000 kHz |
 | 9070 | 22.051 kHz |
 
-Lower rates leave more memory slots for more mixed voices.
-
 ### 3.2 Mixer
 
 At every output sample:
@@ -56,78 +58,92 @@ At every output sample:
  then × master volume, saturated to 16 bits
 ```
 
-The multiplies use the FPGA's DSP slices (the LX25 has 38). Adding is done at 18 bits so four loud channels plus the stream only clip at the final step.
+The sum is kept at 24 bits, so nothing clips until the final step. Sixteen loud channels together can be about 16 times louder than one, so the master volume should be set to suit how many channels are playing loudly at once.
 
 ### 3.3 DAC
 
 The miniSpartan6+ drives its stereo jack from two FPGA pins through a filter on the board. A second-order sigma-delta modulator running at 100 MHz turns each 16-bit sample into a fast 1-bit stream on each pin. The real quality depends on the board's filter and has to be measured (open point A1). An I2S DAC chip (e.g. PCM5102A) can be added on the final PCB for better quality; the mixer output stays the same.
 
-## 4. Hardware channels (Amiga-style)
+## 4. Hardware channels
 
-Each of the 4 channels plays one sample at a time from Chip RAM.
+### 4.1 One shared engine
 
-- **Sample:** START address and LENGTH in bytes. 8-bit or 16-bit signed samples (16-bit samples start on an even address).
-- **Loop:** when the end is reached, the channel continues from LOOPSTART for LOOPLEN bytes, repeatedly. With LOOPLEN = 0 it stops instead (a one-shot sound such as a drum).
-- **Pitch:** STEP, in 8.16 fixed point, is how far the channel moves through the sample for each output sample. `0x010000` plays it as recorded (at the output rate), `0x020000` an octave higher, `0x008000` an octave lower. To play a sample recorded at rate R: STEP = R ÷ output rate × 65536.
-- **Volume:** VOLL and VOLR, 0–255 each, so a channel can be placed anywhere from left to right.
-- **No interpolation:** each output sample takes the nearest source sample, as on the Amiga (open point A2 considers linear interpolation).
-- **Queued next sample (as on the Amiga):** writes to START, LENGTH, LOOPSTART and LOOPLEN while a channel is playing are held, and take effect when the current sample ends or loops. A music player can queue the next note without exact timing. Writes to STEP and the volumes take effect at once.
-- **Interrupt** when a sample ends or loops (if enabled), so software can queue the next one.
+The 16 channels are not 16 separate pieces of hardware. One engine visits them one after another for every output sample:
 
-**Memory:** each channel has a small FIFO (a few bursts) filled from its own fixed audio slot in every video line (spec 5, section 7.1): 12 bytes per line, at least 375 KB/s. A 16-bit channel at 48 kHz needs 96 KB/s at normal pitch, so it can play up to about 3.9× faster than recorded before it runs short.
+1. For each channel that is on: take 16 source samples around the channel's position from its sample cache, multiply each by a filter coefficient and add them up (one DSP slice, 16 clocks).
+2. Multiply the result by the channel's left and right volumes and add to the mix (two more DSP slices).
+3. Move the position on by STEP, following loops.
+
+At 48 kHz there are about 2,080 clocks of 100 MHz per output sample. All 16 channels take about 350, so the engine has plenty of time to spare. More channels, or higher output rates, could be added later without new multipliers.
+
+### 4.2 Samples and loops
+
+- **Formats:** 16-bit signed (big-endian, as the 68000 stores it) or 8-bit signed, per channel.
+- **START** is the address of the first sample. **LENGTH**, **LOOPSTART** and **LOOPLEN** are counted in samples.
+- At the end of the sample, the channel continues from LOOPSTART for LOOPLEN samples, repeatedly. With LOOPLEN = 0 it stops (a one-shot sound such as a drum).
+- **Queued next sample (as on the Amiga):** writes to CTRL format bits, START, LENGTH, LOOPSTART and LOOPLEN while a channel is playing are held, and take effect when the current sample ends or loops. A music player can queue the next note without exact timing. Writes to STEP and VOL take effect at once.
+- The filter looks 8 samples behind and 8 ahead of the position. Before the start of a sample it uses silence. Around a loop it uses the samples from the loop start, so loops are seamless.
+
+### 4.3 Pitch
+
+STEP is how far the channel moves through the sample for each output sample, in 8.16 fixed point:
+
+| STEP | Effect |
+|------|--------|
+| `0x010000` | Plays at the output rate, as recorded if the sample was recorded at that rate |
+| `0x008000` | An octave lower |
+| `0x020000` | An octave higher |
+
+To play a sample recorded at rate R at its own pitch: STEP = R ÷ output rate × 65536. Musical notes then multiply that by 2^(semitones ÷ 12).
+
+### 4.4 Resampling filter
+
+Each output sample is made from the 16 source samples nearest the exact position, weighted by a **windowed-sinc** filter (Kaiser window, β = 10.5, cut-off at 0.38 × the sample's own rate). The filter is stored as 128 phases × 16 coefficients in block RAM; the top 7 bits of the position's fraction choose the phase.
+
+Measured on the filter design:
+
+| | Result |
+|---|---|
+| Treble | Within 0.01 dB up to 0.2 × the sample's rate, −1 dB at 0.3 × (9.6 kHz and 14.4 kHz for a 48 kHz sample) |
+| Aliasing and images | At least 105 dB down |
+
+This is for STEP up to 1 (playing at or below the sample's own rate). Higher pitches need the next section.
+
+### 4.5 Pitching up: octave copies
+
+When STEP is above 1, the channel skips through the sample faster than the filter allows, and high frequencies alias. The cure is to play a copy of the sample that has been filtered and halved in rate in advance:
+
+- A sample can be stored with **up to 3 octave copies** after it: the original (LENGTH samples), then a half-rate copy (LENGTH ÷ 2), a quarter-rate copy (LENGTH ÷ 4) and an eighth-rate copy (LENGTH ÷ 8), one after another in memory. CTRL.OCTAVES says how many copies there are.
+- For each output sample the engine picks the smallest copy that brings the effective step to 1 or below, and scales the position, loop points and step to match. This happens automatically, including when STEP changes during a note (pitch slides, vibrato).
+- LENGTH, LOOPSTART and LOOPLEN must be multiples of 2^OCTAVES.
+- The copies are made once, when the sample is prepared, by a conversion tool (in `tools/`) or by the CPU. Each copy is low-pass filtered, then every other sample kept. They add up to 87.5% more memory with 3 copies.
+- **Trade-off:** between octaves, a copy has less treble than the original. For example at STEP 1.5 the half-rate copy is used, and the top quarter of the treble range is lost. This is the usual trade-off of this method (open point A2).
+- With OCTAVES = 0, pitching up simply aliases.
+
+### 4.6 Nearest mode
+
+With CTRL.NEAREST set, the channel skips the filter and takes the nearest source sample, as the Amiga did. This gives the gritty, aliased sound of Amiga trackers on purpose. It costs nothing extra.
+
+### 4.7 Sample cache and memory
+
+- Each channel has a **64-byte sample cache** (32 samples at 16-bit) in block RAM, holding the samples around its position and a little ahead.
+- A **fetcher** keeps the caches topped up, reading 12-byte bursts from Chip RAM. It always serves the channel whose cache is lowest first.
+- **Guaranteed bandwidth:** 6 of audio's 8 fixed slots per line (spec 5, section 7.1) are shared by the 16 channels. That is at least 2.2 MB/s, or 140 KB/s per channel with all 16 playing. A 16-bit channel at 48 kHz needs 96 KB/s at STEP 1, so with octave copies (which keep the effective step at 1 or below) all 16 channels always fit.
+- **Beyond that:** fast pitch-ups without octave copies, or many 16-bit channels at high steps, can need more. When a cache runs low, the fetcher also takes free odd slots, after the CPU and sprites but before the copper and the DMA engine (spec 5, section 6).
+- If a cache runs empty, the channel repeats its last value until data arrives and STARVED is set. This should not happen within the guaranteed limits.
 
 ## 5. Stream
 
-The stream plays a stereo buffer: 16-bit signed samples, left then right, in a ring buffer in Chip RAM.
+The stream plays a stereo buffer that software fills: 16-bit signed samples, left then right, in a ring buffer in Chip RAM.
 
 - **STRBASE** and **STRLEN** (in frames, one frame = left + right = 4 bytes) define the ring. The stream plays from start to end and wraps round.
 - **Interrupts** at the half-way point and at the end. Each one means the other half is now free to refill.
 - **STRPOS** reads back the frame being played.
-- The stream reads from Chip RAM through 2 fixed audio slots per line: 24 bytes per line, against 6 needed at 48 kHz.
+- The stream reads from Chip RAM through the other 2 fixed audio slots per line: 24 bytes per line, against 6 needed at 48 kHz.
 
-## 6. Mixing many voices with the DMA engine
+The DMA engine's MIX operation (spec 11, section 3.1) was meant for filling the stream with many mixed voices. It is on hold; with 16 good-quality hardware channels it may not be needed at all.
 
-> **On hold.** Stepping through a sample and taking the nearest value sounds poor when mixing at a fixed 48 kHz rate (a metallic buzz when pitched down, off-key aliasing when pitched up). The DMA engine's MIX operation needs proper resampling, for example 8-tap windowed-sinc interpolation with pre-filtered octave copies, before it is worth building. Parked until then. Until then, the stream can be filled by the CPU or by any other software mixer.
-
-The DMA engine's **MIX** operation (spec 11, section 3) adds one voice into a stream buffer: for each output frame it reads the voice's sample, multiplies by the left and right volumes, adds to the buffer with saturation, and steps through the sample by the voice's pitch, looping as needed. After the job, the engine writes the voice's new position back into its descriptor, so the next block carries on smoothly.
-
-**Typical set-up** (the "double buffer" pattern):
-
-1. Make a stream buffer of 2 × 256 frames (5.3 ms per half at 48 kHz).
-2. Make one MIX descriptor per voice, chained. The first has the OVER bit set, so it writes its voice instead of adding. This clears the old contents without a separate FILL.
-3. Start the stream.
-4. On each half-way or end interrupt:
-   - point the chain's descriptors at the half that just finished playing,
-   - update any notes that changed (sample pointer, STEP, volumes),
-   - start the chain on a DMA channel.
-
-   The engine mixes all voices into that half while the other half plays.
-
-**Delay:** a new note is heard after the current half finishes, so up to two halves later (10.7 ms with 256-frame halves).
-
-**Voices:** each voice costs about 48,000–56,000 memory slots per second at 48 kHz (sample reads, buffer read, buffer write).
-
-| Slots available (640×480) | Voices at 48 kHz |
-|---------------------------|------------------|
-| Spare odd slots only (CPU busy in Chip RAM) | about 40 |
-| Spare odd + even slots (CPU idle, in ROM or block RAM) | well over 100 |
-| HIGH-priority jobs | in between, at the cost of CPU slots |
-
-Lower output rates give proportionally more voices.
-
-## 7. Memory slots
-
-The 8 fixed audio slots per line in spec 5, section 7.1 are used as:
-
-| Slots | Use |
-|-------|-----|
-| 4 | Hardware channels 0–3, one each |
-| 2 | Stream |
-| 2 | Reserved (for example for 2 more hardware channels later) |
-
-Mixing voices with the DMA engine uses the engine's own slots (spec 11, section 5), not these.
-
-## 8. Registers
+## 6. Registers
 
 Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addresses.
 
@@ -138,60 +154,62 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 | `0x400` | AUDCON | EN (0) | Audio output on |
 | `0x404` | AUDRATE | 15–0 | D: output rate = 200 MHz ÷ D |
 | `0x408` | AUDVOL | L 15–8, R 7–0 | Master volume |
-| `0x40C` | AUDSTAT | CH0–3 END (0–3), STRHALF (4), STREND (5), CH0–3 STARVED (8–11), STRSTARVED (12) | Sticky flags, write 1 to clear |
+| `0x40C` | AUDSTAT | STRHALF (0), STREND (1), STARVED (2) | Sticky flags, write 1 to clear |
 | `0x410` | AUDINTEN | Same layout as AUDSTAT | Interrupt enables |
-
-**Per hardware channel** (channel n at `0x440 + n × 0x20`):
-
-| Offset | Name | Bits | Description |
-|--------|------|------|-------------|
-| `+0x00` | CTRL | EN (0), BITS16 (1) | On; 16-bit samples |
-| `+0x04` | START | 22–0 | Sample start (queued) |
-| `+0x08` | LENGTH | 23–0 | Bytes (queued) |
-| `+0x0C` | LOOPSTART | 22–0 | Loop start (queued) |
-| `+0x10` | LOOPLEN | 23–0 | Loop length in bytes; 0 = one-shot (queued) |
-| `+0x14` | STEP | 23–0 | Pitch, 8.16 fixed point |
-| `+0x18` | VOL | L 15–8, R 7–0 | Volume |
-| `+0x1C` | POS | 22–0 | Read: current position |
+| `0x414` | AUDCHEND | 15–0 | Channel n reached its end or looped; sticky, write 1 to clear |
+| `0x418` | AUDCHINTEN | 15–0 | Interrupt enables for AUDCHEND |
 
 **Stream:**
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
-| `0x4C0` | STRCON | EN (0) | Stream on |
-| `0x4C4` | STRBASE | 22–0 | Ring buffer start (4-byte aligned) |
-| `0x4C8` | STRLEN | 15–0 | Ring length in frames (even) |
-| `0x4CC` | STRPOS | 15–0 | Read: frame being played |
+| `0x420` | STRCON | EN (0) | Stream on |
+| `0x424` | STRBASE | 22–0 | Ring buffer start (4-byte aligned) |
+| `0x428` | STRLEN | 15–0 | Ring length in frames (even) |
+| `0x42C` | STRPOS | 15–0 | Read: frame being played |
 
-**DMACON** (spec 5, section 8): bits 3–0 enable hardware channels 0–3; bit 4 (freed when storage moved into the DMA engine) becomes **STREN**, the stream.
+**Per channel** (channel n = 0–15 at `0x440 + n × 0x20`):
 
-**Interrupts:** level 4, shared with the DMA engine; vectored, so each has its own handler.
+| Offset | Name | Bits | Description |
+|--------|------|------|-------------|
+| `+0x00` | CTRL | EN (0), BITS16 (1), NEAREST (2), OCTAVES (5–4) | On; 16-bit samples; nearest mode; number of octave copies (0–3). Format bits are queued |
+| `+0x04` | START | 22–0 | Sample start address (queued) |
+| `+0x08` | LENGTH | 22–0 | Samples (queued) |
+| `+0x0C` | LOOPSTART | 22–0 | Loop start, in samples from START (queued) |
+| `+0x10` | LOOPLEN | 22–0 | Loop length in samples; 0 = one-shot (queued) |
+| `+0x14` | STEP | 23–0 | Pitch, 8.16 fixed point |
+| `+0x18` | VOL | L 15–8, R 7–0 | Volume |
+| `+0x1C` | POS | 22–0 | Read: current position, in samples from START |
 
-**STARVED** flags: set if a channel or the stream ran out of data (should never happen within the limits above). The output repeats the last sample until data arrives.
+**DMACON** (spec 5, section 8): bit 3 becomes **AUDEN** (the hardware channels; each also has its own CTRL.EN), bit 4 is **STREN** (the stream). Bits 2–0 are unused.
 
-## 9. FPGA resources
+**Interrupts:** level 4, shared with the DMA engine; vectored, so each source has its own handler.
+
+## 7. FPGA resources
 
 | Item | Resource |
 |------|----------|
-| Channel and stream FIFOs | 1 block RAM (already in the design plan's budget) |
-| Mixer multiplies | 10 DSP slices (4 channels × 2 sides, + master × 2) |
-| Channel logic, mixer, sigma-delta | Estimate 600–900 LUTs |
+| Filter coefficients: 128 phases × 16 taps × 18 bits | 2 block RAMs |
+| Sample caches (16 × 64 bytes) and stream FIFO | 1 block RAM |
+| DSP slices | 5: filter, left and right volume, master volume left and right |
+| Channel state (16 channels), fetcher, mixer, sigma-delta | Estimate 900–1,300 LUTs |
 
-## 10. Open points
+## 8. Open points
 
 | # | Item |
 |---|------|
 | A1 | Measure the audio quality through the miniSpartan6+'s filter; decide whether the final PCB needs an I2S DAC |
-| A2 | **Resampling quality.** Nearest-sample stepping sounds poor at a fixed output rate. Hardware channels and MIX need interpolation: linear, 4-point cubic, or 8-tap windowed sinc with pre-filtered octave copies (the best option, using DSP slices and one block RAM of coefficients). To decide before either is built |
-| A3 | MIX of several voices in one job (reading and writing the buffer once for up to 4 voices) would roughly double the number of voices |
+| A2 | Treble loss between octave copies: a second coefficient table with a lower cut-off could reduce it, at the cost of 2 more block RAMs |
+| A3 | Is 128 filter phases enough? Rounding the position to 1/128 of a sample adds a little noise; interpolating between phases or using 256 phases would remove it |
 | A4 | Audio over HDMI (video spec open point V6) |
-| A5 | 2 more hardware channels in the reserved slots, if wanted |
+| A5 | Effects such as echo or reverb in hardware, using spare engine time |
 
-## 11. Tests
+## 9. Tests
 
 - **Rates:** check the output rate for each D value in simulation.
-- **Channels:** 8- and 16-bit, one-shot and looping, pitches from 1/16× to 3.9×, queued next sample taken exactly at the end or loop point, END interrupts.
+- **Filter:** play sine sweeps at STEP from 1/16 to 8, with and without octave copies; measure the aliasing and treble against the figures in 4.4 and 4.5, using a Python reference resampler.
+- **Channels:** 8- and 16-bit, one-shot and looping, seamless loops (no click at the loop point), queued next sample taken exactly at the end or loop point, AUDCHEND interrupts, nearest mode.
+- **All 16 at once:** 16 channels of 16-bit samples with octave copies, at a busy screen mode, for many seconds: never STARVED.
 - **Stream:** ring wrap, half and end interrupts, STRPOS.
-- **Mixer:** saturation with all four channels and the stream at full volume; master volume.
-- **DMA mixing end to end:** 32 voices mixed into a 2 × 256-frame stream for many blocks; compare the output with a Python reference mixer; no STARVED, positions continue smoothly across blocks.
+- **Mixer:** 24-bit sum and saturation with all channels and the stream at full volume; master volume.
 - **Sigma-delta:** run the modulator on a sine wave in simulation and check the noise level after a model of the board's filter.

@@ -166,9 +166,10 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 2. **Sprite fetch**, only if a sprite would otherwise miss its deadline
 3. **CPU**, if its access lands here
 4. **Sprite fetch**, in its fetch window
-5. **Copper**
-6. **DMA engine** (blitter, copies, peripheral transfers)
-7. Idle
+5. **Audio fetch**, when a channel's sample cache is running low (spec 6, section 4.7)
+6. **Copper**
+7. **DMA engine** (blitter, copies, peripheral transfers)
+8. Idle
 
 **The DMA engine's share:** a 20 MHz CPU running flat out from Chip RAM can use every even slot. Normal DMA jobs then get the free odd slots: at 640×480 with wide fetch off, 65 per line, about 24 MB/s of reads. Whenever the CPU is doing internal work, or running from ROM or block RAM, the engine gets the even slots too. A job with the HIGH bit set (like the Amiga's BLTPRI) can take the CPU's even slots too, leaving it 1 in 2, 1 in 4 or 1 in 8 of them. Spec 11 has the details and speeds.
 
@@ -189,19 +190,19 @@ Fixed users, F = R + 10 slots per line:
 | Owner | Slots | Notes |
 |-------|-------|-------|
 | Refresh | R = 4 or 5 | The SDRAM needs one refresh per 7.8 µs. R = ceil(1.2 × line time ÷ 7.8 µs): 5 for lines over 26 µs, 4 for shorter ones |
-| Audio | 8: 4 hardware channels, 2 for the stream, 2 reserved (spec 6, section 7) | One 6-word burst per slot |
+| Audio | 8: 6 shared by the 16 hardware channels, 2 for the stream (spec 6, sections 4.7 and 5) | One 6-word burst per slot |
 | Peripheral transfers (SD / USB, through the DMA engine) | 2 guaranteed | Spec 11, section 5 |
 
 In most modes all F fixed slots fall inside the horizontal blanking. In modes with short blanking (800×600 @ 72, 1024×768, 1280×720 @ 60), up to 7 of them run on into the start of the next visible line. That takes a few wide-fetch slots, which the 48-byte layer buffers absorb.
 
-If an owner doesn't need its slot this line (audio FIFO full, layer off), the slot goes to the next user in the odd-slot priority list (section 6), starting with the CPU.
+If an owner doesn't need its slot this line (audio caches full, layer off), the slot goes to the next user in the odd-slot priority list (section 6), starting with the CPU.
 
 ### 7.2 What each owner gets
 
 | Owner | Needs | Gets | Margin |
 |-------|-------|------|--------|
 | Display fetch | Depends on the video mode and layers | Spec 4, section 5.2 lists the budget per mode | |
-| Audio hardware channel at 48 kHz, 16-bit | 96 KB/s | 12 bytes per line: 375 KB/s at 640×480, more in modes with shorter lines | Pitch can go up about 3.9× before it runs short |
+| Audio, 16 hardware channels at 48 kHz, 16-bit | 96 KB/s each at STEP 1 (1.5 MB/s for all 16) | 72 bytes per line: at least 2.2 MB/s, shared; more from the free pool when a cache runs low | All 16 always fit with octave copies (spec 6, section 4.7) |
 | Audio stream, 48 kHz 16-bit stereo | 192 KB/s | 24 bytes per line: 750 KB/s | ~4× |
 | Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
 | Sprites | 1–3 slots per sprite per line, in the 64 slots before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 9, section 5) | 16 sprites per line fit (spec 9 lists the limits) |
@@ -230,7 +231,8 @@ One register at `0xE00000 + 0x096` (offset chosen to echo the Amiga; final addre
 | 6 | DMXEN | DMA engine (blitter, copies, peripheral transfers; spec 11) |
 | 5 | SPREN | Sprites |
 | 4 | STREN | Audio stream (spec 6) |
-| 3–0 | AUD3EN–AUD0EN | Audio hardware channels 0–3 |
+| 3 | AUDEN | Audio hardware channels (each also has its own enable; spec 6) |
+| 2–0 | – | Unused |
 
 Refresh cannot be turned off.
 

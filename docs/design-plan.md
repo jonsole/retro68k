@@ -121,8 +121,9 @@ Defined in [spec 4: video](spec/video.md). In short:
 
 Defined in [spec 6: audio](spec/audio.md). In short:
 
-- **4 Amiga-style hardware channels:** 8- or 16-bit samples, any pitch, stereo volume, loops, queued next sample; no CPU work while they play
-- **A 16-bit stereo stream** from a ring buffer in Chip RAM. Filling it with many voices through a DMA engine **MIX** operation is on hold until resampling quality is solved (spec 6, open point A2)
+- **16 hardware channels** in one shared engine: 16- or 8-bit samples, any pitch, stereo volume, loops, queued next sample; no CPU work while they play
+- **16-tap windowed-sinc resampling** (about −105 dB aliasing), optional pre-filtered octave copies for clean pitch-ups, and a per-channel Amiga-style "nearest" mode
+- **A 16-bit stereo stream** from a ring buffer in Chip RAM, filled by software. The DMA engine's MIX operation is on hold and may not be needed
 - Output rate = 200 MHz ÷ D (48 kHz by default), 16-bit mixer, sigma-delta DAC to the board's audio jack; an I2S DAC can be added on the final PCB
 
 ### D8. Interrupts
@@ -179,11 +180,11 @@ The LX25 has 52 blocks of 18 Kb (2 KB each).
 | Video: palette, text buffer and font | 8 | Spec 4, section 7. No line buffers; layer buffers and sprite registers are built from logic |
 | Sprite table | 1 | Spec 9 |
 | DMA descriptor RAM | 1 | Spec 11 |
-| Audio FIFOs | 1 | Estimate |
+| Audio: filter coefficients (2), sample caches and stream FIFO (1) | 3 | Spec 6, section 7 |
 | SDRAM and USB FIFOs | 2 | Estimate |
-| **Subtotal** | **32** | |
+| **Subtotal** | **34** | |
 | Temporary 16 KB RAM (phase 3 only) | 8 | Removed once Chip RAM is in SDRAM |
-| **Total in phase 3** | **40 of 52** | |
+| **Total in phase 3** | **42 of 52** | |
 
 If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.g. BASIC) from the SD card.
 
@@ -196,7 +197,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 3. `docs/spec/registers.md`: every register, its address and bit layout
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
-6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 4 hardware channels, DMA-mixed stereo stream, mixer, sigma-delta output
+6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 16 hardware channels with 16-tap sinc resampling, stereo stream, mixer, sigma-delta output
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
