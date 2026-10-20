@@ -184,10 +184,11 @@ The LX25 has 52 blocks of 18 Kb (2 KB each).
 | Sprite table | 1 | Spec 9 |
 | DMA descriptor RAM | 1 | Spec 11 |
 | Audio: filter coefficients (2), sample caches and stream FIFO (1) | 3 | Spec 6, section 7 |
-| SDRAM and USB FIFOs | 2 | Estimate |
-| **Subtotal** | **34** | |
+| USB serial FIFOs | 2 | Spec 14 |
+| SD card FIFO | 1 | Spec 15 |
+| **Subtotal** | **35** | |
 | Temporary 16 KB RAM (phase 3 only) | 8 | Removed once Chip RAM is in SDRAM |
-| **Total in phase 3** | **42 of 52** | |
+| **Total in phase 3** | **43 of 52** | |
 
 If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.g. BASIC) from the SD card.
 
@@ -201,7 +202,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 16 hardware channels with 16-tap sinc resampling, stereo stream, mixer, sigma-delta output
-7. `docs/spec/system.md`: SD card, keyboard, reset and overlay (timers are spec 12, interrupts spec 13, USB serial spec 14)
+7. `docs/spec/system.md`: keyboard, reset and overlay (timers are spec 12, interrupts spec 13, USB serial spec 14, SD card spec 15)
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
 10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Beam-following coprocessor with 4-byte instructions: MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX
@@ -209,6 +210,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 12. [`docs/spec/timers.md`](spec/timers.md): **drafted.** 64-bit time counter, 4 chainable 32-bit timers (clock, lines, frames), interrupts or DMA starts, watchdog
 13. [`docs/spec/interrupts.md`](spec/interrupts.md): **drafted.** 24 sources with their own vectors and programmable levels, NMI button and USB break, software interrupt
 14. [`docs/spec/serial.md`](spec/serial.md): **drafted.** FT2232H channel B in 245 FIFO mode: console and uploads at several MB/s, hardware flow control, DMA port, BREAK/RESET/UPLOAD commands from the PC
+15. [`docs/spec/sd-card.md`](spec/sd-card.md): **drafted.** Native 4-bit SD host: commands with CRC, 512-byte blocks, multi-block with auto-stop, up to 25 MB/s, DMA port, card detect on DAT3
 
 ## 4. Phases
 

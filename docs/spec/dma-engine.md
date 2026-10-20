@@ -184,7 +184,7 @@ Anything else, including the system area at `0xF00000` (interrupt controller, ti
 
 | Port | Device |
 |------|--------|
-| 0 | SD card data FIFO, paced by the card |
+| 0 | SD card data FIFO (spec 15), paced by the card |
 | 1 | USB serial FIFOs (spec 14), paced by the link |
 | 2–7 | Reserved |
 
