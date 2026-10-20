@@ -51,7 +51,7 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 
 | Bits | Name | Meaning |
 |------|------|---------|
-| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC, 4 ADD, 5 MIX (section 3.1, own descriptor layout) |
+| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC, 4 ADD, 5 MIX (section 3.1, on hold) |
 | 7–4 | FN | LOGIC: truth table, result bit = FN[src × 2 + dst]. For example `0x8` = AND, `0xE` = OR, `0x6` = XOR, `0x5` = NOT destination. ADD: bit 4 = saturate, bit 5 = signed (see below) |
 | 9–8 | BPP | 0 = 1, 1 = 2, 2 = 4, 3 = 8 bits per pixel |
 | 10 | DESC | Run backwards (last byte first), for overlapping copies |
@@ -88,6 +88,8 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 **2D jobs** (blits): WIDTH × HEIGHT pixels, with each row starting STRIDE bytes after the last. Source and destination can have different strides, so an image can be copied out of a sprite sheet into a screen.
 
 ### 3.1 MIX: one audio voice
+
+> **On hold.** Stepping through a sample and taking the nearest value sounds poor when mixing at a fixed 48 kHz rate (a metallic buzz when pitched down, off-key aliasing when pitched up). MIX needs proper resampling, for example 8-tap windowed-sinc interpolation with pre-filtered octave copies, before it is worth building. Parked until then.
 
 MIX adds one voice into a 16-bit stereo audio buffer, for the audio stream (spec 6, section 6). It uses its own 32-byte layout:
 

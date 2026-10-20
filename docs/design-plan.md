@@ -122,7 +122,7 @@ Defined in [spec 4: video](spec/video.md). In short:
 Defined in [spec 6: audio](spec/audio.md). In short:
 
 - **4 Amiga-style hardware channels:** 8- or 16-bit samples, any pitch, stereo volume, loops, queued next sample; no CPU work while they play
-- **A 16-bit stereo stream** from a ring buffer in Chip RAM, filled by the DMA engine's **MIX** operation with any number of voices (about 40 on spare memory slots at 48 kHz)
+- **A 16-bit stereo stream** from a ring buffer in Chip RAM. Filling it with many voices through a DMA engine **MIX** operation is on hold until resampling quality is solved (spec 6, open point A2)
 - Output rate = 200 MHz ÷ D (48 kHz by default), 16-bit mixer, sigma-delta DAC to the board's audio jack; an I2S DAC can be added on the final PCB
 
 ### D8. Interrupts
@@ -201,7 +201,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
 10. `docs/spec/copper.md`: the display-list coprocessor
-11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic/add in 1D and 2D, MIX for audio voices, peripheral ports
+11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic/add in 1D and 2D, MIX for audio voices (on hold), peripheral ports
 
 ## 4. Phases
 

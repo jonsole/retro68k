@@ -87,6 +87,8 @@ The stream plays a stereo buffer: 16-bit signed samples, left then right, in a r
 
 ## 6. Mixing many voices with the DMA engine
 
+> **On hold.** Stepping through a sample and taking the nearest value sounds poor when mixing at a fixed 48 kHz rate (a metallic buzz when pitched down, off-key aliasing when pitched up). The DMA engine's MIX operation needs proper resampling, for example 8-tap windowed-sinc interpolation with pre-filtered octave copies, before it is worth building. Parked until then. Until then, the stream can be filled by the CPU or by any other software mixer.
+
 The DMA engine's **MIX** operation (spec 11, section 3) adds one voice into a stream buffer: for each output frame it reads the voice's sample, multiplies by the left and right volumes, adds to the buffer with saturation, and steps through the sample by the voice's pitch, looping as needed. After the job, the engine writes the voice's new position back into its descriptor, so the next block carries on smoothly.
 
 **Typical set-up** (the "double buffer" pattern):
@@ -180,7 +182,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 | # | Item |
 |---|------|
 | A1 | Measure the audio quality through the miniSpartan6+'s filter; decide whether the final PCB needs an I2S DAC |
-| A2 | Linear interpolation between source samples, for hardware channels and/or MIX: smoother sound at low pitches, costs a second read and a multiply |
+| A2 | **Resampling quality.** Nearest-sample stepping sounds poor at a fixed output rate. Hardware channels and MIX need interpolation: linear, 4-point cubic, or 8-tap windowed sinc with pre-filtered octave copies (the best option, using DSP slices and one block RAM of coefficients). To decide before either is built |
 | A3 | MIX of several voices in one job (reading and writing the buffer once for up to 4 voices) would roughly double the number of voices |
 | A4 | Audio over HDMI (video spec open point V6) |
 | A5 | 2 more hardware channels in the reserved slots, if wanted |
