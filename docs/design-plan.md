@@ -16,7 +16,7 @@ Sections marked *(CPU board)* only apply to stage 2.
 | # | Requirement | Source |
 |---|-------------|--------|
 | R1 | CPU is a 68000: the fx68k core inside the FPGA first, a real MC68SEC000 (3.3 V, 16-bit bus) as a later upgrade | decided |
-| R2 | Main memory runs with zero wait states: SDRAM with a guaranteed CPU time slot on the main path, fast async SRAM on the CPU board | project goal |
+| R2 | Main memory runs with zero wait states: Chip RAM (SDRAM) with Amiga-style even/odd slots on the main path, plus fast SRAM (Fast RAM) on the CPU board | project goal |
 | R3 | Video, audio and glue logic are done by an FPGA | project goal |
 | R4 | Video output is HDMI/DVI at 640×480 @ 60 Hz | decided |
 | R5 | Audio is 4–8 PCM sample channels (Amiga-style) | decided |
@@ -82,25 +82,25 @@ The FPGA decodes addresses, drives `/DTACK`, encodes interrupts and generates th
 - **CPU speed: 12.5 MHz first**, the speed of a fast 1980s 68000. fx68k is driven by a master clock plus two "phase enable" inputs, so its speed is set by those enables. Spec 1 confirms the exact clocking and how fast fx68k meets timing on the LX25; 16–20 MHz may be possible later.
 - *(CPU board)* The external CPU gets a 12.5 MHz clock from the PLL, rising to 20 MHz (the 68SEC000's rating) once the bus is proven. The FPGA samples its bus at 100 MHz through two-flop synchronisers. This adds about 20 ns, well inside the ~100 ns a zero-wait-state cycle at 20 MHz allows before `/DTACK` must be seen.
 
-### D5. Memory map (proposed)
+### D5. Memory architecture and memory map
 
-| Range | Size | Device | Wait states |
-|-------|------|--------|-------------|
-| `0x000000`–`0x007FFF` | 32 KB | Boot ROM (FPGA BRAM); overlays RAM at reset | 0 |
-| `0x100000`–`0x8FFFFF` | up to 8 MB | Main RAM: SDRAM on the main path; 2 MB fast SRAM (1M×16, e.g. IS61WV102416, 10 ns) on the CPU board | 0 (see below) |
-| `0xC00000`–`0xDFFFFF` | 2 MB | SDRAM window (video memory and samples); a bank register selects which 2 MB of the 32 MB | variable |
-| `0xE00000`–`0xE0FFFF` | 64 KB | Video and audio registers, palette, sprites | 0–1 |
-| `0xE10000`–`0xE13FFF` | 16 KB | Text-mode screen and font (FPGA BRAM) | 0–1 |
-| `0xF00000`–`0xF0FFFF` | 64 KB | System: USB serial, timers, interrupt controller, SD, keyboard | 0–1 |
-| everything else | | Unmapped: `/BERR` after a timeout | — |
+Defined in [spec 5: memory architecture](spec/memory-architecture.md). In short:
 
-Reset overlay: the CPU reads its first two vectors from ROM at address 0. A write to a system register turns the overlay off, so RAM can hold a writable vector table at 0.
+- **Amiga-style slots.** SDRAM time is cut into 80 ns slots (one 68000 clock). Even slots belong to the CPU, odd slots to DMA. Each DMA engine (refresh, audio, sprites, video, storage) owns fixed odd slots in every scan line. Unused slots go to the copper and blitter.
+- **The CPU never waits** for video or audio, and runs at full speed from Chip RAM.
+- **Chip RAM** = the 32 MB SDRAM, shared with DMA. **Fast RAM** = 2 MB SRAM on the later CPU board, CPU-only.
 
-**Main RAM in SDRAM with zero wait states:** a 68000 bus cycle at 12.5 MHz lasts 320 ns. A random SDRAM read or write at 100 MHz takes under 100 ns. The SDRAM controller reserves a time slot for the CPU in every CPU bus cycle, and fits video, audio and blitter bursts around it. The CPU then always gets its data in time and never waits, like on a real SRAM. Spec 5 has to prove the timing and bandwidth budget.
+| Range | Size | Device |
+|-------|------|--------|
+| `0x000000`–`0x7FFFFF` | 8 MB | Chip RAM (boot ROM overlays address 0 at reset) |
+| `0x800000`–`0x9FFFFF` | 2 MB | Chip RAM bank window into the rest of the 32 MB |
+| `0xA00000`–`0xBFFFFF` | 2 MB | Fast RAM (CPU board only) |
+| `0xE00000`–`0xE0FFFF` | 64 KB | Custom registers: video, audio, DMA, blitter, copper |
+| `0xE10000`–`0xE13FFF` | 16 KB | Text screen and font (block RAM) |
+| `0xF00000`–`0xF0FFFF` | 64 KB | System: USB serial, timers, interrupts, SD, keyboard |
+| `0xF80000`–`0xF87FFF` | 32 KB | Boot ROM (block RAM) |
 
-The 2 MB SDRAM window at `0xC00000` is for video memory and samples. CPU accesses there may wait, because video fetches have top priority. The FPGA holds `/DTACK` until the access is done.
-
-**Before the SDRAM controller exists** (phase 3), the first 32 KB of main RAM is block RAM, enough for the boot monitor and small test programs.
+Before the SDRAM controller exists (phase 3), the first 32 KB of Chip RAM is temporarily block RAM.
 
 ### D6. Video
 
@@ -110,7 +110,7 @@ The 2 MB SDRAM window at `0xC00000` is for video memory and samples. CPU accesse
 - **Mode 2:** 320×240 at 8bpp with pixel doubling (games), read from SDRAM.
 - Hardware scroll registers, a vertical-blank interrupt and a raster-line interrupt.
 - **Later:** sprites (line buffers in block RAM), then a blitter working in SDRAM.
-- **SDRAM bandwidth check:** a 16-bit SDRAM at 100 MHz gives about 200 MB/s peak. 640×480×8bpp at 60 Hz needs about 25 MB/s during the visible part of each line, so well over half the bandwidth is left for the CPU, audio and blitter. The CPU's main-RAM slot needs at most about 6 MB/s (2 bytes every 320 ns).
+- **Bandwidth:** video, sprites and audio use fixed odd slots (see spec 5). 640×480×8bpp, the heaviest version 1 mode, takes 80 of the 200 odd slots per line, fetched one line ahead into a line buffer.
 
 ### D7. Audio
 
@@ -130,7 +130,7 @@ The 2 MB SDRAM window at `0xC00000` is for video memory and samples. CPU accesse
 | 3 | USB serial |
 | 2 | Keyboard, SD |
 
-All interrupts are autovectored: the FPGA asserts `/VPA` during the interrupt-acknowledge cycle (FC = 111).
+Interrupts are **vectored**: during the interrupt-acknowledge cycle the FPGA puts a vector number on the data bus and asserts `/DTACK`. Autovectoring through `/VPA` is not used, because its slow E-clock cycle would knock the CPU off the even-slot grid (spec 5, section 5).
 
 ### D9. Tools and languages
 
@@ -170,7 +170,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 2. `docs/spec/memory-map.md`: the final version of D5
 3. `docs/spec/registers.md`: every register, its address and bit layout
 4. `docs/spec/video.md`: timing, modes, memory layout, palette, interrupts
-5. `docs/spec/sdram.md`: controller, the CPU's guaranteed time slot, arbitration between CPU, video and audio, bandwidth budget
+5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU zero-wait scheme, DMA slot table, DMACON
 6. `docs/spec/audio.md`: channel registers, mixer, sample format
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
@@ -185,7 +185,7 @@ Each phase ends with a test that shows it is done.
 | **1. FPGA bring-up** | ISE VM and scripted build, CI for simulation, blinky, HDMI test pattern, USB FIFO echo | Test pattern on a monitor; characters echo over USB |
 | **2. Simulated computer** | fx68k + bus interface + boot ROM + 32 KB block-RAM main RAM + text mode + USB serial, in Verilator | Boot ROM prints "hello" on the simulated screen and serial port |
 | **3. Computer on the board** | The same design built for the LX25 | "hello" on a real HDMI monitor and over USB |
-| **4. SDRAM + monitor** | SDRAM controller with the CPU time slot; main RAM moves to SDRAM; boot monitor (memory dump/edit, load over USB, run) | Full RAM test passes with zero wait states; programs load and run over USB |
+| **4. SDRAM + monitor** | SDRAM controller with the even/odd slot scheduler; Chip RAM moves to SDRAM; boot monitor (memory dump/edit, load over USB, run) | Full RAM test passes with zero wait states; programs load and run over USB |
 | **5. Video** | Bitmap modes, palette, scroll, interrupts; then sprites | Demo program runs all modes |
 | **6. Audio** | PCM channels reading from SDRAM | 4-channel module-style playback |
 | **7. Home computer** | SD card, PS/2 keyboard, EhBASIC | Boot to BASIC, load and save a program |
@@ -197,7 +197,7 @@ Each phase ends with a test that shows it is done.
 | # | Item | Plan |
 |---|------|------|
 | Q1 | How fast fx68k runs on the LX25 (it reaches about 40 MHz master clock on Intel/Altera chips) | Check in phase 3 with an ISE timing report; 12.5 MHz is the safe target |
-| Q2 | Can the SDRAM controller really give the CPU zero wait states alongside video? | Prove the slot timing in spec 5 and in simulation before phase 4; fallback is one wait state on SDRAM accesses |
+| Q2 | Can the SDRAM controller really give the CPU zero wait states alongside video? | Slot timing checked against the W9825G6 datasheet in spec 5; still to prove in simulation with fx68k's real bus timing (spec 5, M1) |
 | Q3 | fx68k is SystemVerilog and ISE only reads Verilog; Yosys flagged one latch in `rowDecoder` | sv2v conversion is part of the build; check the latch and run fx68k's own tests in phase 2 |
 | Q4 | ISE 14.7 is old and no longer updated | Keep the build scripted inside a VM image; keep RTL portable (D9) so the final PCB can use a newer FPGA |
 | Q5 | PS/2 keyboards are 5 V devices; the FPGA pins are 3.3 V | Small level-shifter or resistor network on a pin adapter; many keyboards also work at 3.3 V. Decide in phase 7 |

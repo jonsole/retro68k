@@ -1,13 +1,13 @@
 ; retro68k boot ROM - minimal start-up
 ; Assemble: vasmm68k_mot -Fbin -o boot.bin boot.s
 
-STACK_TOP   equ $00900000       ; top of main SRAM
-UART_BASE   equ $00F00000       ; placeholder UART address
+STACK_TOP   equ $00008000       ; top of the first 32 KB of Chip RAM (enough for phase 3)
+UART_BASE   equ $00F00000       ; placeholder serial port address (system area)
 UART_DATA   equ UART_BASE+0
 UART_STATUS equ UART_BASE+2
 TX_READY    equ 0               ; status bit: transmitter empty
 
-            org $000000
+            org $F80000         ; boot ROM address; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP      ; initial supervisor stack pointer
             dc.l start          ; initial program counter
             dcb.l 254,unhandled ; remaining exception vectors
