@@ -119,10 +119,11 @@ Defined in [spec 4: video](spec/video.md). In short:
 
 ### D7. Audio
 
-- 4 channels at first, each with 8- or 16-bit samples, a start address, a length, a loop point, a pitch step and a volume. The mixer runs at 48 kHz.
-- Samples are read from SDRAM. Until the SDRAM controller exists, a small block-RAM FIFO that the CPU fills is used for testing.
-- Output goes through a sigma-delta DAC to the board's audio jack. An I2S DAC (PCM5102A) can be added on the final PCB.
-- Audio and video read the SDRAM directly; the CPU never gives up its bus. This keeps the bus logic simple.
+Defined in [spec 6: audio](spec/audio.md). In short:
+
+- **4 Amiga-style hardware channels:** 8- or 16-bit samples, any pitch, stereo volume, loops, queued next sample; no CPU work while they play
+- **A 16-bit stereo stream** from a ring buffer in Chip RAM, filled by the DMA engine's **MIX** operation with any number of voices (about 40 on spare memory slots at 48 kHz)
+- Output rate = 200 MHz ÷ D (48 kHz by default), 16-bit mixer, sigma-delta DAC to the board's audio jack; an I2S DAC can be added on the final PCB
 
 ### D8. Interrupts
 
@@ -195,12 +196,12 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 3. `docs/spec/registers.md`: every register, its address and bit layout
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
-6. `docs/spec/audio.md`: channel registers, mixer, sample format
+6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 4 hardware channels, DMA-mixed stereo stream, mixer, sigma-delta output
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
 10. `docs/spec/copper.md`: the display-list coprocessor
-11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic/add in 1D and 2D, peripheral ports
+11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic/add in 1D and 2D, MIX for audio voices, peripheral ports
 
 ## 4. Phases
 

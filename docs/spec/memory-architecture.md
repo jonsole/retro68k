@@ -189,7 +189,7 @@ Fixed users, F = R + 10 slots per line:
 | Owner | Slots | Notes |
 |-------|-------|-------|
 | Refresh | R = 4 or 5 | The SDRAM needs one refresh per 7.8 µs. R = ceil(1.2 × line time ÷ 7.8 µs): 5 for lines over 26 µs, 4 for shorter ones |
-| Audio | 8 (one per channel; 4 channels in version 1) | One 6-word burst per channel per line |
+| Audio | 8: 4 hardware channels, 2 for the stream, 2 reserved (spec 6, section 7) | One 6-word burst per slot |
 | Peripheral transfers (SD / USB, through the DMA engine) | 2 guaranteed | Spec 11, section 5 |
 
 In most modes all F fixed slots fall inside the horizontal blanking. In modes with short blanking (800×600 @ 72, 1024×768, 1280×720 @ 60), up to 7 of them run on into the start of the next visible line. That takes a few wide-fetch slots, which the 48-byte layer buffers absorb.
@@ -201,7 +201,8 @@ If an owner doesn't need its slot this line (audio FIFO full, layer off), the sl
 | Owner | Needs | Gets | Margin |
 |-------|-------|------|--------|
 | Display fetch | Depends on the video mode and layers | Spec 4, section 5.2 lists the budget per mode | |
-| Audio channel at 48 kHz, 16-bit | 96 KB/s | 12 bytes per line: 375 KB/s at 640×480, more in modes with shorter lines | Pitch can go up about 3.9× before it runs short |
+| Audio hardware channel at 48 kHz, 16-bit | 96 KB/s | 12 bytes per line: 375 KB/s at 640×480, more in modes with shorter lines | Pitch can go up about 3.9× before it runs short |
+| Audio stream, 48 kHz 16-bit stereo | 192 KB/s | 24 bytes per line: 750 KB/s | ~4× |
 | Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
 | Sprites | 1–3 slots per sprite per line, in the 64 slots before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 9, section 5) | 16 sprites per line fit (spec 9 lists the limits) |
 | DMA engine (blitter) | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves; HIGH jobs also 3 in 4 of the CPU's | Spec 11, section 7 |
@@ -228,7 +229,8 @@ One register at `0xE00000 + 0x096` (offset chosen to echo the Amiga; final addre
 | 7 | COPEN | Copper |
 | 6 | DMXEN | DMA engine (blitter, copies, peripheral transfers; spec 11) |
 | 5 | SPREN | Sprites |
-| 3–0 | AUD3EN–AUD0EN | Audio channels 0–3 (channels 4–7 later in a second register) |
+| 4 | STREN | Audio stream (spec 6) |
+| 3–0 | AUD3EN–AUD0EN | Audio hardware channels 0–3 |
 
 Refresh cannot be turned off.
 

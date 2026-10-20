@@ -10,7 +10,7 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 |------|-------|
 | Channels | 4, running at the same time and taking turns burst by burst |
 | Programming | Chains of 32-byte **descriptors** (job descriptions) in Chip RAM or in a small descriptor RAM inside the FPGA |
-| Jobs | Copy, fill, transparent copy (colour key), logic operations and add, in 1D (linear) or 2D (rectangles with a stride) |
+| Jobs | Copy, fill, transparent copy (colour key), logic operations and add, in 1D (linear) or 2D (rectangles with a stride); MIX for audio voices |
 | Pixel formats | Bytes, or 1, 2, 4 or 8 bits per pixel, positioned to the pixel |
 | Sources and destinations | Chip RAM, the FPGA's block RAM areas (palette, sprite table, text screen, font, ROM), or a peripheral port (SD card, USB) |
 | Memory slots | Normally only spare ones, so the CPU is never slowed. A **HIGH** bit per job lets it take CPU slots, like the Amiga's "blitter nasty" |
@@ -27,6 +27,7 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 | Masked (cookie-cut) drawing | Uses a separate mask plane and the minterm logic | Colour-key copy: source pixels of the key colour are skipped. No mask needed |
 | Logic | Any function of 3 sources (minterms) | Any function of source and destination (4-bit truth table) |
 | Arithmetic | None | ADD per pixel, wrapping or saturating, signed or unsigned |
+| Audio mixing | None (done by the CPU in software) | MIX: one audio voice per job, with pitch, stereo volume and looping |
 | Peripherals | Separate disk DMA | The same engine, through peripheral ports |
 | Priority | BLTPRI ("blitter nasty") for all blits | HIGH bit per job |
 | Line drawing, area fill | Yes | Not in version 1 (open point D3) |
@@ -50,7 +51,7 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 
 | Bits | Name | Meaning |
 |------|------|---------|
-| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC, 4 ADD |
+| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC, 4 ADD, 5 MIX (section 3.1, own descriptor layout) |
 | 7–4 | FN | LOGIC: truth table, result bit = FN[src × 2 + dst]. For example `0x8` = AND, `0xE` = OR, `0x6` = XOR, `0x5` = NOT destination. ADD: bit 4 = saturate, bit 5 = signed (see below) |
 | 9–8 | BPP | 0 = 1, 1 = 2, 2 = 4, 3 = 8 bits per pixel |
 | 10 | DESC | Run backwards (last byte first), for overlapping copies |
@@ -85,6 +86,42 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 **Linear jobs** (memcpy, memset, port transfers): BPP = 8, HEIGHT = 1, WIDTH = length in bytes (up to 16 MB).
 
 **2D jobs** (blits): WIDTH × HEIGHT pixels, with each row starting STRIDE bytes after the last. Source and destination can have different strides, so an image can be copied out of a sprite sheet into a screen.
+
+### 3.1 MIX: one audio voice
+
+MIX adds one voice into a 16-bit stereo audio buffer, for the audio stream (spec 6, section 6). It uses its own 32-byte layout:
+
+| Offset | Name | Bits | Meaning |
+|--------|------|------|---------|
+| `+0x00` | CTRL | OP 2–0 (= 5), LOOP (4), OVER (5), MONO (6), ENDED (7), BITS16 (8), HIGH (11), IRQ (12), COUNT 31–20 | See below |
+| `+0x04` | POS | 24–0 | Current byte address in the voice's sample. **Written back** at the end of the job |
+| `+0x08` | DST | 24–0 | Buffer to mix into (16-bit, left then right, 4-byte aligned) |
+| `+0x0C` | END | 24–0 | End of the sample (first byte after it) |
+| `+0x10` | LOOP | 24–0 | Where to continue when END is reached, if LOOP is set |
+| `+0x14` | STEP | 23–0 | Pitch: source samples per output frame, 8.16 fixed point |
+| `+0x18` | VOL / FRAC | VOLL 31–24, VOLR 23–16, FRAC 15–0 | Volumes 0–255; FRAC is the fractional part of the position, **written back** |
+| `+0x1C` | NEXT | 24–0 | Next descriptor |
+
+**CTRL bits for MIX:**
+
+| Bits | Name | Meaning |
+|------|------|---------|
+| 4 | LOOP | At END, continue from LOOP; otherwise the voice stops |
+| 5 | OVER | Write instead of add (the first voice of a block, so the buffer needn't be cleared) |
+| 6 | MONO | The buffer is mono 16-bit; VOLL is used |
+| 7 | ENDED | Set by the engine when a non-looping voice reaches END. While set, the job adds nothing (or writes silence if OVER is set) and finishes at once |
+| 8 | BITS16 | Samples are 16-bit signed; otherwise 8-bit signed |
+| 31–20 | COUNT | Output frames to mix (1–4095) |
+
+**For each output frame:**
+
+1. Read the sample at POS (8-bit samples are scaled up to 16 bits).
+2. `left += sample × VOLL ÷ 256`, `right += sample × VOLR ÷ 256`, saturating at the 16-bit limits (or write instead of add, with OVER).
+3. Add STEP to POS.FRAC. When POS reaches END, go to LOOP (keeping the overshoot) or set ENDED.
+
+At the end of the job, POS, FRAC and ENDED are written back to the descriptor, so the same descriptor carries on smoothly in the next block. To start a new note, software writes POS, FRAC = 0, END, LOOP, STEP and the volumes, and clears ENDED.
+
+**Cost:** about 1 memory slot per stereo frame at normal pitch (sample read, buffer read, buffer write), a little more at higher pitches. The multiplies use 2 DSP slices.
 
 ## 4. Where data can come from and go to
 
@@ -199,7 +236,7 @@ Software decides, but a sensible default:
 |------|----------|
 | Descriptor RAM, 2 KB | 1 block RAM |
 | Data buffer between reads and writes (64 bytes) | Logic |
-| 4 channel state machines, 2D address units, pixel shifter, colour key compare, logic function, per-pixel adder | Estimate 1,300–2,100 LUTs; to confirm by synthesis |
+| 4 channel state machines, 2D address units, pixel shifter, colour key compare, logic function, per-pixel adder, MIX unit | Estimate 1,500–2,400 LUTs and 2 DSP slices; to confirm by synthesis |
 
 ## 11. Open points
 
@@ -209,13 +246,13 @@ Software decides, but a sensible default:
 | D2 | Should HIGH leave the CPU 1 in 4 even slots, or be adjustable (1 in 2, 1 in 8)? |
 | D3 | Line drawing and area fill (Amiga blitter features), and scaling or rotating blits: version 2 |
 | D4 | Writes to custom registers from a descriptor (a "mini copper"): left out of version 1 for safety |
-| D5 | Should audio also be able to stream through a port (e.g. for long samples from SD card)? |
 
 ## 12. Tests
 
 - **Copy and fill:** linear and 2D, every BPP, starting and ending part-way through a byte, positive and negative strides, forwards and backwards (DESC) with overlapping areas. Compare with a Python reference model.
 - **KEYCOPY and LOGIC:** every BPP, with key pixels at the edges.
 - **ADD:** every BPP, wrap and saturate, signed and unsigned, memory and constant sources; check carries never cross pixels.
+- **MIX:** 8- and 16-bit voices, looping and one-shot, OVER and MONO, pitches from 1/16× to 4×; positions written back and continuing exactly across blocks; compare with a Python reference mixer.
 - **Chains:** a chain of mixed jobs in Chip RAM and in descriptor RAM; IRQ only on the marked ones.
 - **Channels:** all 4 running at once; a stalled port channel does not hold up the others.
 - **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least 1 in 4 even slots, and every CPU delay is 2 clocks.
