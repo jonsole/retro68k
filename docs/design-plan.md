@@ -131,7 +131,7 @@ Defined in [spec 6: audio](spec/audio.md). In short:
 | Level | Source |
 |-------|--------|
 | 7 | NMI button |
-| 6 | System timer |
+| 6 | Timers (4, each with its own vector) |
 | 5 | Video (vblank, raster line), copper |
 | 4 | Audio (channel end / FIFO low), DMA engine (job done, error) |
 | 3 | USB serial |
@@ -198,11 +198,12 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 16 hardware channels with 16-tap sinc resampling, stereo stream, mixer, sigma-delta output
-7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
+7. `docs/spec/system.md`: USB serial, interrupt controller, SD card, keyboard, reset and overlay (timers are spec 12)
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
 10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Beam-following coprocessor with 4-byte instructions: MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX
 11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic/add in 1D and 2D, MIX for audio voices (on hold), peripheral ports
+12. [`docs/spec/timers.md`](spec/timers.md): **drafted.** 64-bit time counter, 4 chainable 32-bit timers (clock, lines, frames), interrupts or DMA starts, watchdog
 
 ## 4. Phases
 
