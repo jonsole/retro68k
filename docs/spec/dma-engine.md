@@ -12,7 +12,7 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 | Programming | Chains of 32-byte **descriptors** (job descriptions) in Chip RAM or in a small descriptor RAM inside the FPGA |
 | Jobs | Copy, fill, transparent copy (colour key), logic operations and add, in 1D (linear) or 2D (rectangles with a stride); MIX for audio voices |
 | Pixel formats | Bytes, or 1, 2, 4 or 8 bits per pixel, positioned to the pixel |
-| Sources and destinations | Chip RAM, the FPGA's block RAM areas (palette, sprite table, text screen, font, ROM), or a peripheral port (SD card, USB) |
+| Sources and destinations | Chip RAM, the FPGA's block RAM areas (palette, sprite table, text screen, font, ROM), the custom hardware registers, or a peripheral port (SD card, USB) |
 | Memory slots | Normally only spare ones, so the CPU is never slowed. A **HIGH** bit per job lets it take CPU slots, like the Amiga's "blitter nasty" |
 | Speed at 640×480 | Copy 10–34 MB/s, fill 16–56 MB/s, depending on how busy the CPU is (section 7). A 68000 at 20 MHz copies about 4.5 MB/s |
 | Finishing | Interrupt per descriptor if asked, status flags per channel |
@@ -27,7 +27,8 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 | Masked (cookie-cut) drawing | Uses a separate mask plane and the minterm logic | Colour-key copy: source pixels of the key colour are skipped. No mask needed |
 | Logic | Any function of 3 sources (minterms) | Any function of source and destination (4-bit truth table) |
 | Arithmetic | None | ADD per pixel, wrapping or saturating, signed or unsigned |
-| Audio mixing | None (done by the CPU in software) | MIX: one audio voice per job, with pitch, stereo volume and looping |
+| Audio mixing | None (done by the CPU in software) | MIX: one audio voice per job, with pitch, stereo volume and looping (on hold) |
+| Register writes | Copper only | Copper, and DMA jobs: block copies into registers and register lists (REGLIST) |
 | Peripherals | Separate disk DMA | The same engine, through peripheral ports |
 | Priority | BLTPRI ("blitter nasty") for all blits | HIGH bit per job |
 | Line drawing, area fill | Yes | Not in version 1 (open point D3) |
@@ -39,19 +40,19 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
 | `+0x00` | CTRL | see below | Operation and options |
-| `+0x04` | SRC | 24–0 | Source byte address, or port number |
-| `+0x08` | DST | 24–0 | Destination byte address, or port number |
+| `+0x04` | SRC | 25–0 | Source DMA address (section 4), or port number |
+| `+0x08` | DST | 25–0 | Destination DMA address (section 4), or port number |
 | `+0x0C` | WIDTH | 23–0 | Pixels per row (bytes when BPP = 8) |
 | `+0x10` | HEIGHT | HEIGHT 15–0, SRCBIT 18–16, DSTBIT 22–20 | Rows (1 for a linear job). SRCBIT/DSTBIT: starting pixel within the first byte, for 1, 2 and 4bpp |
 | `+0x14` | STRIDE | SRCSTRIDE 31–16, DSTSTRIDE 15–0 (signed) | Bytes from one row to the next |
 | `+0x18` | VALUE | 31–0 | Fill pattern (repeated), or the colour key for KEYCOPY |
-| `+0x1C` | NEXT | 24–0 | Address of the next descriptor; 0 = end of chain |
+| `+0x1C` | NEXT | 25–0 | DMA address of the next descriptor; 0 = end of chain |
 
 **CTRL bits:**
 
 | Bits | Name | Meaning |
 |------|------|---------|
-| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC, 4 ADD, 5 MIX (section 3.1, on hold) |
+| 2–0 | OP | 0 COPY, 1 FILL, 2 KEYCOPY, 3 LOGIC, 4 ADD, 5 MIX (section 3.1, on hold), 6 REGLIST (section 3.2) |
 | 7–4 | FN | LOGIC: truth table, result bit = FN[src × 2 + dst]. For example `0x8` = AND, `0xE` = OR, `0x6` = XOR, `0x5` = NOT destination. ADD: bit 4 = saturate, bit 5 = signed (see below) |
 | 9–8 | BPP | 0 = 1, 1 = 2, 2 = 4, 3 = 8 bits per pixel |
 | 10 | DESC | Run backwards (last byte first), for overlapping copies |
@@ -112,7 +113,7 @@ MIX adds one voice into a 16-bit stereo audio buffer, for the audio stream (spec
 | `+0x10` | LOOP | 24–0 | Where to continue when END is reached, if LOOP is set |
 | `+0x14` | STEP | 23–0 | Pitch: source samples per output frame, 8.16 fixed point |
 | `+0x18` | VOL / FRAC | VOLL 31–24, VOLR 23–16, FRAC 15–0 | Volumes 0–255; FRAC is the fractional part of the position, **written back** |
-| `+0x1C` | NEXT | 24–0 | Next descriptor |
+| `+0x1C` | NEXT | 25–0 | Next descriptor (DMA address) |
 
 **CTRL bits for MIX:**
 
@@ -135,19 +136,61 @@ At the end of the job, POS, FRAC and ENDED are written back to the descriptor, s
 
 **Cost:** about 1 memory slot per stereo frame at normal pitch (sample read, buffer read, buffer write), a little more at higher pitches. The multiplies use 2 DSP slices.
 
+### 3.2 REGLIST: a list of register writes
+
+REGLIST writes a list of values to scattered hardware registers, in order. The list is in memory (Chip RAM or the descriptor RAM) as 8-byte entries:
+
+| Offset in entry | Bits | Meaning |
+|-----------------|------|---------|
+| `+0` | 15–0 | Register offset in the custom block (`0x0000`–`0xFFFC`, 4-byte aligned) |
+| `+4` | 31–0 | Value to write |
+
+The descriptor uses: CTRL (OP = 6, HIGH, IRQ), SRC = address of the list, WIDTH = number of entries, NEXT. The other fields are ignored.
+
+Uses:
+
+- Set up a whole screen mode, or several layers and sprites, in one job.
+- Start other DMA channels: a write to another channel's CHCTRL works just as a CPU write does, so one chain can start others.
+- With the copper: the copper starts a channel at a beam position, and the channel's register list is applied straight away. The copper then needs only one write for a big change.
+
 ## 4. Where data can come from and go to
 
-| Kind | Addresses | Uses SDRAM slots? |
-|------|-----------|-------------------|
-| Chip RAM | `0x000000`–`0x1FFFFFF` (the full 32 MB, as for all DMA) | Yes |
-| Block RAM areas | Palette, sprite table, descriptor RAM, text screen, font (destination or source); boot ROM (source only) | **No**: these are inside the FPGA, so a job such as "load a new palette from Chip RAM" only uses slots for its reads |
-| Port 0 | SD card data FIFO | No; paced by the card |
-| Port 1 | USB FIFO (FT2232H channel B) | No; paced by the USB chip |
-| Ports 2–7 | Reserved | |
+DMA addresses are 26 bits. **Bit 25 chooses the space:**
 
-Block RAM areas sit at their CPU addresses (`0xE04000` palette, `0xE05000` sprite table, `0xE06000` descriptor RAM, `0xE10000` text and font, `0xF80000` ROM). DMA addresses in Chip RAM are 25-bit byte addresses as in spec 5. Any other address stops the channel with an error.
+| DMA address | Space | What is there | Uses SDRAM slots? |
+|-------------|-------|---------------|-------------------|
+| `0x0000000`–`0x1FFFFFF` | **Chip RAM** | The full 32 MB (as for all DMA in spec 5) | Yes |
+| `0x2000000` + CPU address | **Internal** | The FPGA's block RAM areas and the custom registers, at their CPU addresses (below) | **No** |
 
-**Ports** are paced by the peripheral: when the port isn't ready, that channel waits and the other channels keep running. Port addresses don't increment.
+So the palette at CPU address `0xE04000` is DMA address `0x2E04000`. Without bit 25, internal areas and Chip RAM would overlap, because CPU addresses such as `0xE04000` are also valid Chip RAM addresses.
+
+**Internal areas:**
+
+| CPU address | Area | Read | Write |
+|-------------|------|------|-------|
+| `0xE00000`–`0xE0FFFF` | Custom registers (video, sprites, audio, DMA engine, copper), including the palette at `0xE04000`, sprite table at `0xE05000` and descriptor RAM at `0xE06000` | Yes | Yes |
+| `0xE10000`–`0xE13FFF` | Text screen and font | Yes | Yes |
+| `0xF80000`–`0xF87FFF` | Boot ROM | Yes | No |
+
+Anything else, including the system area at `0xF00000` (interrupt controller, timers, serial), stops the channel with an error. The system area is left out so a runaway job cannot disturb interrupts or the serial console.
+
+**Rules for registers:**
+
+- Register accesses are 32-bit, so addresses and lengths must be multiples of 4.
+- Only COPY, FILL and REGLIST may write registers. COPY can also read registers into memory, for example to save a screen setup or keep a log of beam positions.
+- Reading a register never changes anything, by design, so a DMA read is always safe. Sticky flags are cleared only by writing 1.
+- A DMA register write has exactly the same effect as a CPU write to the same register, including any timing rules (for example, layer registers latch at the start of horizontal blanking, spec 4, section 5.6).
+- Register and block RAM accesses take one 100 MHz clock each on the FPGA's internal register bus. If the CPU accesses a register at the same moment, the CPU goes first; the job waits a clock.
+
+**Ports:**
+
+| Port | Device |
+|------|--------|
+| 0 | SD card data FIFO, paced by the card |
+| 1 | USB FIFO (FT2232H channel B), paced by the USB chip |
+| 2–7 | Reserved |
+
+When a port isn't ready, that channel waits and the other channels keep running. Port addresses don't increment.
 
 ## 5. Memory slots and priority
 
@@ -208,10 +251,10 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
-| `+0x0` | CHDESC | 24–0 | Write: first descriptor of a chain. Read: the descriptor now running |
+| `+0x0` | CHDESC | 25–0 | Write: first descriptor of a chain (DMA address). Read: the descriptor now running |
 | `+0x4` | CHCTRL | START (0), STOP (1), PAUSE (2), CPUSHARE (5–4) | START begins the chain at CHDESC. STOP ends it after the current burst. PAUSE holds it. CPUSHARE: even slots the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
 | `+0x8` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | DONE and ERR are sticky, write 1 to clear |
-| `+0xC` | CHERR | 24–0 | Address that caused an error |
+| `+0xC` | CHERR | 25–0 | DMA address that caused an error |
 
 **Global:**
 
@@ -227,7 +270,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 **Interrupts:** the DMA engine shares interrupt level 4 with audio (design plan D8). Interrupts are vectored, so each has its own handler.
 
 **Typical use:**
-1. Write descriptors to the descriptor RAM or Chip RAM.
+1. Write descriptors to the descriptor RAM or Chip RAM. In descriptors and CHDESC, the descriptor RAM is at DMA address `0x2E06000` (section 4).
 2. Write the first descriptor's address to CHDESC, then START to CHCTRL.
 3. Carry on. Take the interrupt, or poll CHSTAT.BUSY.
 
@@ -258,7 +301,6 @@ Software decides, but a sensible default:
 |---|------|
 | D1 | Check the engine fits and meets timing at 100 MHz |
 | D3 | Line drawing and area fill (Amiga blitter features), and scaling or rotating blits: version 2 |
-| D4 | Writes to custom registers from a descriptor (a "mini copper"): left out of version 1 for safety |
 
 ## 12. Tests
 
@@ -269,5 +311,6 @@ Software decides, but a sensible default:
 - **Chains:** a chain of mixed jobs in Chip RAM and in descriptor RAM; IRQ only on the marked ones.
 - **Channels:** all 4 running at once; a stalled port channel does not hold up the others.
 - **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least its CPUSHARE of even slots (check all three settings), and every CPU delay is 2 clocks.
-- **Errors:** a bad address stops only that channel, sets ERR and CHERR, and raises its interrupt.
+- **Errors:** a bad address (including the system area) stops only that channel, sets ERR and CHERR, and raises its interrupt.
+- **Registers:** block COPY into a layer's registers and a REGLIST give exactly the same result as CPU writes; a REGLIST that starts another channel works; register reads into memory; misaligned register access is an error; a CPU register access during a DMA register write is never delayed by more than one clock.
 - **Speed:** measure the figures in section 7 in simulation.
