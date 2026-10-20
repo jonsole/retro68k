@@ -157,8 +157,8 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 3. **DMA engine, HIGH jobs**, except the CPU's share (1 in 2, 1 in 4 or 1 in 8 even slots, set per channel), which is always left for the CPU (spec 11, section 5)
 4. **CPU**
 5. **Sprite fetch**, in its fetch window
-6. **DMA engine** (blitter), normal jobs
-7. **Copper**
+6. **Copper**
+7. **DMA engine** (blitter), normal jobs
 8. Idle
 
 **Odd slots**, in order:
