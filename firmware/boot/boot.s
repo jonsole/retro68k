@@ -1,7 +1,7 @@
 ; retro68k boot ROM - minimal start-up
 ; Assemble: vasmm68k_mot -Fbin -o boot.bin boot.s
 
-STACK_TOP   equ $00008000       ; top of the first 32 KB of Chip RAM (enough for phase 3)
+STACK_TOP   equ $00004000       ; top of the first 16 KB of Chip RAM (temporary RAM in phase 3)
 UART_BASE   equ $00F00000       ; placeholder serial port address (system area)
 UART_DATA   equ UART_BASE+0
 UART_STATUS equ UART_BASE+2
