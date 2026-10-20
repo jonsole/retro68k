@@ -291,7 +291,7 @@ Windows help: a status bar that sits below a game area, not on top of it, adds n
 
 Sprite data is fetched on demand, just before the beam reaches each sprite, using the same slots as layers plus, when needed, the CPU's. Nothing is fetched a line ahead. [Spec 9](sprites.md), section 5 has the details:
 
-- Each sprite's line of data is fetched in the 64 slots before its first pixel.
+- Each sprite's fetch starts exactly 64 slots before its first pixel, on the line it is shown (or at the end of the line before, for sprites near the left edge).
 - It uses free odd slots and spare display slots first, then even slots the CPU isn't using, and takes a slot the CPU wants only when the sprite would otherwise be late (2 CPU clocks each).
 - Sprites never take the layers' slots, so they don't count towards the layer budget in section 5.2.
 
