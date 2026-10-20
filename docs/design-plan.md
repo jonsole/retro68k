@@ -100,17 +100,18 @@ Defined in [spec 5: memory architecture](spec/memory-architecture.md). In short:
 | `0xF00000`–`0xF0FFFF` | 64 KB | System: USB serial, timers, interrupts, SD, keyboard |
 | `0xF80000`–`0xF87FFF` | 32 KB | Boot ROM (block RAM) |
 
-Before the SDRAM controller exists (phase 3), the first 32 KB of Chip RAM is temporarily block RAM.
+Before the SDRAM controller exists (phase 3), the first 16 KB of Chip RAM is temporarily block RAM (see D11).
 
 ### D6. Video
 
-- 640×480 @ 60 Hz, DVI signalling over the HDMI connector.
-- **Mode 0:** 80×30 text with an 8×16 font and 16 colours. Lives entirely in block RAM, so it works before the SDRAM controller exists (monitor and BASIC console).
-- **Mode 1:** 640×480 at 4 or 8 bits per pixel, read from SDRAM, using a 256-entry palette of 24-bit colours.
-- **Mode 2:** 320×240 at 8bpp with pixel doubling (games), read from SDRAM.
-- Hardware scroll registers, a vertical-blank interrupt and a raster-line interrupt.
-- **Later:** sprites (line buffers in block RAM), then a blitter working in SDRAM.
-- **Bandwidth:** video, sprites and audio use fixed odd slots (see spec 5). 640×480×8bpp, the heaviest version 1 mode, takes 80 of the 200 odd slots per line, fetched one line ahead into a line buffer.
+Defined in [spec 4: video](spec/video.md). In short:
+
+- 640×480 DVI over HDMI; vertical timing programmable for 60 Hz or exactly 50 Hz
+- **4 layers + sprites + background colour**, in any priority order. Each layer has its own display window, source address, stride, scroll, scale and palette block
+- Layer types: chunky bitmaps at 1/2/4/8 bits per pixel from Chip RAM, or a text layer from block RAM
+- Free scaling in 1/256-pixel steps (2×, 4×, odd sizes)
+- Fetch is worked out automatically from the windows: 640 bytes per line normally, 1280 with wide fetch, using only DMA slots, so the CPU is never slowed
+- 1024-entry palette of 24-bit colours; beam position registers; vertical-blank and line interrupts
 
 ### D7. Audio
 
@@ -162,6 +163,24 @@ What this means for the plan:
 - **fx68k is GPL-3.0.** It will be added as a git submodule under `fpga/third_party/fx68k`. Any FPGA bitstream that includes it is covered by the GPL. The real 68SEC000 build does not use it.
 - **The memory map is the same for both CPUs.** Only what sits behind the main RAM range changes (SDRAM or fast SRAM).
 
+### D11. Block RAM budget
+
+The LX25 has 52 blocks of 18 Kb (2 KB each).
+
+| Item | Blocks | Notes |
+|------|--------|-------|
+| fx68k microcode | 3 | From the trial synthesis (D10) |
+| Boot ROM, 32 KB | 16 | |
+| Video: line buffers, palette, text buffer and font | 12 | Spec 4, section 7 |
+| Sprite line buffers | 2 | Estimate; sprite spec to confirm |
+| Audio FIFOs | 1 | Estimate |
+| SDRAM and USB FIFOs | 2 | Estimate |
+| **Subtotal** | **36** | |
+| Temporary 16 KB RAM (phase 3 only) | 8 | Removed once Chip RAM is in SDRAM |
+| **Total in phase 3** | **44 of 52** | |
+
+If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.g. BASIC) from the SD card.
+
 ## 3. Specs to write before code
 
 Each block gets a short spec first: its interface, registers, timing and a test plan. RTL is written against that spec.
@@ -169,7 +188,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 1. `docs/spec/bus-interface.md`: fx68k clocking and phase enables, internal bus timing, DTACK/BERR rules, wait-state table; later the external-CPU timing
 2. `docs/spec/memory-map.md`: the final version of D5
 3. `docs/spec/registers.md`: every register, its address and bit layout
-4. `docs/spec/video.md`: timing, modes, memory layout, palette, interrupts
+4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU zero-wait scheme, DMA slot table, DMACON
 6. `docs/spec/audio.md`: channel registers, mixer, sample format
 7. `docs/spec/system.md`: USB serial, timer, interrupt controller, reset and overlay
@@ -181,9 +200,9 @@ Each phase ends with a test that shows it is done.
 
 | Phase | Work | Done when |
 |-------|------|-----------|
-| **0. Plan** | This document, decisions agreed, specs 1–3 written | Decisions D1–D10 signed off |
+| **0. Plan** | This document, decisions agreed, specs 1–3 written | Decisions D1–D11 signed off |
 | **1. FPGA bring-up** | ISE VM and scripted build, CI for simulation, blinky, HDMI test pattern, USB FIFO echo | Test pattern on a monitor; characters echo over USB |
-| **2. Simulated computer** | fx68k + bus interface + boot ROM + 32 KB block-RAM main RAM + text mode + USB serial, in Verilator | Boot ROM prints "hello" on the simulated screen and serial port |
+| **2. Simulated computer** | fx68k + bus interface + boot ROM + 16 KB block-RAM main RAM + text layer + USB serial, in Verilator | Boot ROM prints "hello" on the simulated screen and serial port |
 | **3. Computer on the board** | The same design built for the LX25 | "hello" on a real HDMI monitor and over USB |
 | **4. SDRAM + monitor** | SDRAM controller with the even/odd slot scheduler; Chip RAM moves to SDRAM; boot monitor (memory dump/edit, load over USB, run) | Full RAM test passes with zero wait states; programs load and run over USB |
 | **5. Video** | Bitmap modes, palette, scroll, interrupts; then sprites | Demo program runs all modes |
@@ -209,4 +228,4 @@ Each phase ends with a test that shows it is done.
 
 ## 6. Next step
 
-Review this document. Once D1–D10 are agreed or changed, write specs 1–3 (bus interface, memory map, register map). Those are needed before any RTL.
+Review this document. Once D1–D11 are agreed or changed, write specs 1–3 (bus interface, memory map, register map). Those are needed before any RTL.

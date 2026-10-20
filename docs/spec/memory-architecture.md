@@ -158,7 +158,7 @@ Each scan line has 400 slots: slots 0–319 cover the 640 visible pixels and slo
 | Audio | 8 (one per channel; 4 channels in version 1) | Blanking | 8 per channel | One 4-word burst per channel per line |
 | Sprites | 16 (2 per sprite, 8 sprites) | Blanking | 16 per sprite | 16 px at 8bpp or 32 px at 4bpp per sprite per line |
 | Storage (SD / USB) | 2 guaranteed | Blanking | 16 | More from the free pool |
-| Video fetch | 80 (every 4th slot, `hslot % 4 == 1`) | Visible area | 640 | Fetches the **next** line into a line buffer |
+| Video fetch | 80 (every 4th slot, `hslot % 4 == 1`) | Visible area | 640 | Fetches the **next** line into a line buffer. With wide fetch on (spec 4), video also takes the `hslot % 4 == 3` slots from the free pool: 160 slots, 1280 bytes |
 | **Free pool** | **89** | Visible area (`hslot % 4 == 3`) and 9 in blanking | | Copper, then blitter, then extra storage |
 | **Total** | **200** | | | |
 
