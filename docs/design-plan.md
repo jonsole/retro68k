@@ -255,6 +255,6 @@ All the planning specs are drafted (section 3). To finish phase 0:
    - **FT2232H channel B mode** (Q6): read the board's EEPROM with FT_Prog.
    - **SDRAM speed grade** (spec 5, M2): read the marking on the SDRAM chip.
    - **FPGA speed grade** (spec 4, V7): read the marking on the FPGA.
-3. Write the register-map generator (spec 3, open point R1), so the FPGA and software share one set of addresses from the start.
+3. ~~Write the register-map generator.~~ Done: `fpga/regmap.def` and `tools/regmap.py` (spec 3, section 6).
 
 Then phase 1 (FPGA bring-up) starts: scripted ISE build, blinky, HDMI test pattern and USB echo.

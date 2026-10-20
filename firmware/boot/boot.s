@@ -1,18 +1,18 @@
 ; retro68k boot ROM - minimal start-up
-; Assemble: vasmm68k_mot -Fbin -o boot.bin boot.s
+; Assemble: vasmm68k_mot -Fbin -I ../include -o boot.bin boot.s
+
+            include "hw.inc"
 
 STACK_TOP   equ $00004000       ; top of the first 16 KB of Chip RAM (temporary RAM in phase 3)
-UART_BASE   equ $00F00000       ; placeholder serial port address (system area)
-UART_DATA   equ UART_BASE+0
-UART_STATUS equ UART_BASE+2
-TX_READY    equ 0               ; status bit: transmitter empty
 
-            org $F80000         ; boot ROM address; also seen at 0 while the reset overlay is on
+            org ROM             ; $F80000; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP      ; initial supervisor stack pointer
             dc.l start          ; initial program counter
             dcb.l 254,unhandled ; remaining exception vectors
 
-start:      move.w  #$2700,sr   ; supervisor mode, interrupts off
+start:      move.w  #$2700,sr                   ; supervisor mode, interrupts off
+            lea     SYSTEM,a5
+            move.l  #SERCON_EN_M|SERCON_CTLEN_M,SERCON(a5)  ; USB serial on, PC control commands on
             lea     hello(pc),a0
             bsr     puts
 .loop:      bra.s   .loop
@@ -24,10 +24,11 @@ puts:       move.b  (a0)+,d0
             bra.s   puts
 .done:      rts
 
-; send d0 over the UART
-putc:       btst    #TX_READY,UART_STATUS
-            beq.s   putc
-            move.b  d0,UART_DATA
+; send d0 over the USB serial link (spec 14); a5 = SYSTEM
+putc:       move.w  SERSTAT+2(a5),d1            ; low half: TXSPACE
+            and.w   #SERSTAT_TXSPACE_M,d1
+            beq.s   putc                        ; no room yet
+            move.b  d0,SERDATA+3(a5)            ; low byte of SERDATA sends one byte
             rts
 
 unhandled:  bra.s   unhandled

@@ -1,0 +1,289 @@
+# retro68k register map: the one source for every hardware address.
+#
+# tools/regmap.py reads this file and generates:
+#   firmware/include/hw.inc   68000 assembler (vasm) equates
+#   firmware/include/hw.h     C header
+#   fpga/rtl/regmap.vh        Verilog defines
+# and checks it against docs/spec/registers.md.
+#
+# Edit this file, then run:  python3 tools/regmap.py
+#
+# Syntax (one item per line, # starts a comment):
+#   block   NAME BASE SIZE "text"            a region of the address space
+#   reg     OFFSET NAME ACCESS SPEC [fields]  a 32-bit register in the current block
+#   regs    NAME COUNT OFFSET ACCESS SPEC     NAME0..NAME(COUNT-1), 4 bytes apart
+#   array   NAME COUNT OFFSET STRIDE SPEC     repeated group of registers ...
+#   end                                       ... ends an array or struct
+#   struct  NAME SIZE SPEC                    a layout in memory (offsets only) ...
+#   area    NAME OFFSET SIZE ACCESS SPEC      a memory area inside the current block
+#   const   NAME VALUE ["text"]               a named number
+# Fields:  FIELD=BIT  or  FIELD=HIGH:LOW.  "fields=OTHER" copies another register's fields.
+# Access:  R, W, RW, W1C (sticky, write 1 to clear), RW1C (mixed), SC (set/clear), Q (queued)
+# SPEC is "spec/section", e.g. 4/6.1, matching docs/spec.
+
+# ---------------------------------------------------------------- memory map
+block CHIPRAM 0x000000 0x800000 "Chip RAM (SDRAM), shared with DMA"
+block FASTRAM 0xA00000 0x200000 "Fast RAM, CPU board only"
+block TEXT    0xE10000 0x002000 "Text screen, 128 x 32 cells of 16 bits"
+block FONT    0xE12000 0x001000 "Font, 256 characters x 16 bytes"
+block ROM     0xF80000 0x008000 "Boot ROM"
+
+# ---------------------------------------------------------------- custom block
+block CUSTOM 0xE00000 0x10000 "Custom registers: video, sprites, DMA engine, audio, copper"
+
+# Video (spec 4)
+reg 0x000 VIDCON     RW   4/6.1  EN=0 WIDE=1 BLANKALL=2
+reg 0x004 VIDSTAT    RW1C 4/6.1  VBLANK=0 LINE=1 OVERRUN=7:4 INVBLANK=8 PCLKLOCK=9 BADTIMING=10 SPRMISS=11 SPROVF=12 COPIRQ=13
+reg 0x008 VIDINTEN   RW   4/6.1  fields=VIDSTAT
+reg 0x00C BEAMPOS    R    4/3.6  VLINE=26:16 HPIXEL=10:0
+reg 0x010 FRAMECOUNT R    4/3.6  COUNT=15:0
+reg 0x014 LINECMP    RW   4/3.7  VLINE=26:16 HPIXEL=10:0
+reg 0x018 BGCOLOR    RW   4/6.1  RGB=23:0
+reg 0x01C PRIO       RW   4/4.8  FRONT=1:0 SECOND=3:2 THIRD=5:4 BACK=7:6
+reg 0x020 HVISIBLE   RW   4/3.4  VALUE=10:0
+reg 0x024 HSYNCSTART RW   4/3.4  VALUE=10:0
+reg 0x028 HSYNCEND   RW   4/3.4  VALUE=10:0
+reg 0x02C HTOTAL     RW   4/3.4  VALUE=10:0
+reg 0x030 VVISIBLE   RW   4/3.4  VALUE=10:0
+reg 0x034 VSYNCSTART RW   4/3.4  VALUE=10:0
+reg 0x038 VSYNCEND   RW   4/3.4  VALUE=10:0
+reg 0x03C VTOTAL     RW   4/3.4  VALUE=10:0
+reg 0x040 SYNCPOL    RW   4/3.4  HPOL=0 VPOL=1
+reg 0x044 PCLKDIV    RW   4/3.4  N=3:0
+reg 0x048 SLOTPOS    R    4/3.6  VLINE=26:16 HSLOT=8:0
+
+# DMA control (spec 5); its 16-bit value sits in the low half at 0x096, as on the Amiga
+reg 0x094 DMACON     SC   5/8    AUDEN=3 STREN=4 SPREN=5 DMXEN=6 COPEN=7 VIDEN=8 DMAEN=9 SETCLR=15
+
+# Layers 0-3 (spec 4)
+array L 4 0x100 0x40 4/6.2
+  reg 0x00 CTRL    RW 4/6.2  EN=0 TYPE=1 BPP=3:2 TRANSP=4 PALOFS=15:6
+  reg 0x04 PTR     RW 4/4.4  ADDR=22:0
+  reg 0x08 STRIDE  RW 4/4.4  BYTES=15:0
+  reg 0x0C WINX    RW 4/4.3  XSTART=26:16 XEND=10:0
+  reg 0x10 WINY    RW 4/4.3  YSTART=26:16 YEND=10:0
+  reg 0x14 SCROLLX RW 4/4.4  PIXELS=15:0
+  reg 0x18 SCROLLY RW 4/4.4  LINES=15:0
+  reg 0x1C HSTEP   RW 4/4.5  STEP=15:0
+  reg 0x20 VSTEP   RW 4/4.5  STEP=15:0
+end
+
+# Sprite control (spec 9)
+reg 0x200 SPRCON  RW 9/8  EN=0
+reg 0x204 SPRHIT0 R  9/7  HIT=31:0
+reg 0x208 SPRHIT1 R  9/7  HIT=31:0
+reg 0x20C CLXGRP  R  9/7  PAIRS=15:0
+
+# DMA engine channels 0-3 (spec 11)
+array DMX 4 0x300 0x10 11/8
+  reg 0x0 CHDESC RW   11/8  ADDR=23:0
+  reg 0x4 CHCTRL RW   11/8  START=0 STOP=1 PAUSE=2 CPUSHARE=5:4
+  reg 0x8 CHSTAT RW1C 11/8  BUSY=0 DONE=1 ERR=2 PAUSED=3
+  reg 0xC CHERR  R    11/8  ADDR=23:0
+end
+reg 0x340 DMXINT   W1C 11/8  CH=3:0
+reg 0x344 DMXINTEN RW  11/8  CH=3:0
+
+# Audio (spec 6)
+reg 0x400 AUDCON     RW  6/6    EN=0
+reg 0x404 AUDRATE    RW  6/3.1  D=15:0
+reg 0x408 AUDVOL     RW  6/3.2  L=15:8 R=7:0
+reg 0x40C AUDSTAT    W1C 6/6    STRHALF=0 STREND=1 STARVED=2
+reg 0x410 AUDINTEN   RW  6/6    fields=AUDSTAT
+reg 0x414 AUDCHEND   W1C 6/6    CH=15:0
+reg 0x418 AUDCHINTEN RW  6/6    CH=15:0
+reg 0x420 STRCON     RW  6/5    EN=0
+reg 0x424 STRBASE    RW  6/5    ADDR=22:0
+reg 0x428 STRLEN     RW  6/5    FRAMES=15:0
+reg 0x42C STRPOS     R   6/5    FRAME=15:0
+array AUD 16 0x440 0x20 6/6
+  reg 0x00 CTRL      RW 6/6    EN=0 BITS16=1 NEAREST=2 OCTAVES=5:4
+  reg 0x04 START     Q  6/4.2  ADDR=22:0
+  reg 0x08 LENGTH    Q  6/4.2  SAMPLES=22:0
+  reg 0x0C LOOPSTART Q  6/4.2  SAMPLES=22:0
+  reg 0x10 LOOPLEN   Q  6/4.2  SAMPLES=22:0
+  reg 0x14 STEP      RW 6/4.3  STEP=23:0
+  reg 0x18 VOL       RW 6/6    L=15:8 R=7:0
+  reg 0x1C POS       R  6/6    SAMPLES=22:0
+end
+
+# Copper (spec 10)
+reg 0x700 COPCON  RW   10/7  EN=0
+reg 0x704 COPLC   RW   10/7  ADDR=22:0
+reg 0x708 COPJMP  W    10/7
+reg 0x70C COPPC   R    10/7  ADDR=22:0
+reg 0x710 COPSTAT RW1C 10/7  WAITING=0 STOPPED=1 ERR=2
+reg 0x714 COPERR  R    10/7  ADDR=22:0
+
+# Memory areas in the custom block
+area PALETTE 0x4000 0x1000 RW 4/6.3
+area SPRTAB  0x5000 0x0800 RW 9/3
+area DESCRAM 0x6000 0x0800 RW 11/8
+
+# ---------------------------------------------------------------- system block
+block SYSTEM 0xF00000 0x10000 "System registers: interrupts, timers, serial, SD card, keyboard, system control"
+
+# Interrupt controller (spec 13)
+reg 0x000 INTCON    RW  13/7  MASTER=0
+reg 0x004 INTENA    RW  13/7  SRC=23:0
+reg 0x008 INTPEND   R   13/7  SRC=23:0
+reg 0x00C INTRAW    R   13/7  SRC=23:0
+reg 0x010 INTLEVEL0 RW  13/7
+reg 0x014 INTLEVEL1 RW  13/7
+reg 0x018 INTLEVEL2 RW  13/7
+reg 0x01C VECBASE   RW  13/7  VEC=7:0
+reg 0x020 SOFTINT   W   13/6  SET=0 CLR=1
+reg 0x024 LASTSRC   R   13/7  SRC=4:0
+reg 0x028 NMICON    RW  13/5  BUTTONEN=0 USBEN=1
+reg 0x02C NMISTAT   W1C 13/5  BUTTON=0 USB=1
+
+# Timers and watchdog (spec 12)
+reg 0x100 TIMEHI R 12/3
+reg 0x104 TIMELO R 12/3
+array TMR 4 0x140 0x20 12/6
+  reg 0x00 CTRL     RW  12/6    EN=0 REPEAT=1 SRC=3:2 IRQ=4 DMA=5 DMACH=7:6
+  reg 0x04 PRESCALE RW  12/4.2  DIV=15:0
+  reg 0x08 RELOAD   RW  12/4.1
+  reg 0x0C COUNT    RW  12/4.1
+  reg 0x10 STAT     W1C 12/6    UNDER=0
+end
+reg 0x1C0 WDCTRL RW 12/5  EN=0 LOCK=1
+reg 0x1C4 WDTIME RW 12/5  MS=15:0
+reg 0x1C8 WDKICK W  12/5  KEY=15:0
+
+# USB serial (spec 14)
+reg 0x200 SERCON   RW   14/5    EN=0 CTLEN=1 CTLLOCK=2 TXDROP=3
+reg 0x204 SERSTAT  R    14/5    RXCOUNT=27:16 TXSPACE=11:0
+reg 0x208 SERDATA  RW   14/4.1  EMPTY=8 BYTE=7:0
+reg 0x20C SERLEVEL RW   14/4.2  RXLEVEL=27:16 TXLEVEL=11:0
+reg 0x210 SERTIME  RW   14/4.2  US=15:0
+reg 0x214 SERIRQ   RW1C 14/4.2  RXREADY=0 RXTIMEOUT=1 TXREADY=2 TXOVF=3
+reg 0x218 SERIRQEN RW   14/4.2  fields=SERIRQ
+reg 0x21C SERDROP  R    14/4.3  COUNT=15:0
+
+# SD card (spec 15)
+reg 0x300 SDCON     RW  15/6    EN=0 BUS4=1 AUTOSTOP=2 DETECT=3 CLKDIV=15:8
+reg 0x304 SDARG     RW  15/3.1
+reg 0x308 SDCMD     W   15/3.1  INDEX=5:0 RESP=9:8 DATA=10 WRITE=11 MULTI=12 APP=13
+regs SDRESP 4 0x30C R 15/3.1
+reg 0x31C SDBLKCNT  RW  15/3.2  COUNT=15:0
+reg 0x320 SDSTAT    R   15/6    CMDBUSY=0 DATABUSY=1 CARDBUSY=2 CARDIN=3 FIFOCOUNT=15:4
+reg 0x324 SDIRQ     W1C 15/6    CMDDONE=0 DATADONE=1 CMDTIMEOUT=2 CMDCRC=3 DATATIMEOUT=4 DATACRC=5 WRITEERR=6 CARDCHANGE=7
+reg 0x328 SDIRQEN   RW  15/6    fields=SDIRQ
+reg 0x32C SDTIMEOUT RW  15/6    MS=15:0
+reg 0x330 SDDATA    RW  15/3.3
+
+# Keyboard (spec 16)
+reg 0x400 KBCON   RW   16/4    EN=0 RAW=1 RESETKEYS=2
+reg 0x404 KBSTAT  R    16/4    COUNT=4:0 TXBUSY=8
+reg 0x408 KBDATA  R    16/3.2  EMPTY=16 RELEASED=15 KEY=8:0
+reg 0x40C KBSEND  W    16/3.4  BYTE=7:0
+reg 0x410 KBREPLY R    16/3.2  BYTE=7:0
+reg 0x414 KBIRQ   RW1C 16/4    EVENT=0 REPLY=1 PARITY=2 FRAME=3 TIMEOUT=4 OVERFLOW=5
+reg 0x418 KBIRQEN RW   16/4    fields=KBIRQ
+regs KBMAP 16 0x440 R 16/3.3
+
+# System control (specs 7 and 1)
+reg 0x800 SYSID      R  7/5    VALUE=31:0
+reg 0x804 SYSVER     R  7/5    VALUE=31:0
+reg 0x808 SYSCFG     R  7/5    CPU=1:0 CPUMHZ=9:2 CHIPMB=15:10 FASTMB=21:16
+reg 0x80C RESETWHY   R  7/2.1  POWER=0 WATCHDOG=1 BUTTON=2 SOFTWARE=3 USB=4 UPLOAD=5 KEYBOARD=6 HALTED=7
+reg 0x810 SYSCON     RW 7/7    OVERLAY=0 ROMWE=1 ROMLOCK=2 PROTECT=3 HALTRESET=4
+reg 0x814 SYSRESET   W  7/2.1  KEY=15:0
+reg 0x818 SYSLED     RW 7/5    LEDS=7:0
+reg 0x81C SYSSW      R  7/5    SWITCHES=3:0
+reg 0x820 SYSSTAT    R  1/8    HALTED=0
+reg 0x824 BUSERRADDR R  1/6    ADDR=23:0
+reg 0x828 BUSERRWHY  R  1/6    UNMAPPED=0 ROMWRITE=1 PROTECT=2 CPUSPACE=3
+
+# ---------------------------------------------------------------- layouts in memory
+# Sprite table entry (spec 9, section 3), 64 of them at CUSTOM + SPRTAB
+struct SPR 32 9/3
+  reg 0x00 POS   RW 9/3  X=11:0 Y=27:16
+  reg 0x04 PTR   RW 9/3  ADDR=22:0
+  reg 0x08 SIZE  RW 9/3  HEIGHTM1=9:0 STRIDE=31:16
+  reg 0x0C CTRL  RW 9/3  EN=0 WIDTH=2:1 BPP=4:3 HFLIP=5 VFLIP=6 DEPTH=10:8 PALOFS=21:16
+  reg 0x10 SCALE RW 9/3  HSTEP=15:0 VSTEP=31:16
+  reg 0x14 COLL  RW 9/7  GROUP=1:0 HITGROUPS=7:4 HITLAYERS=11:8
+end
+
+# DMA engine descriptor (spec 11, section 3)
+struct DMXDESC 32 11/3
+  reg 0x00 CTRL   RW 11/3  OP=2:0 FN=7:4 BPP=9:8 DESC=10 HIGH=11 IRQ=12 SRCKIND=14:13 DSTKIND=16:15
+  reg 0x04 SRC    RW 11/3  ADDR=23:0
+  reg 0x08 DST    RW 11/3  ADDR=23:0
+  reg 0x0C WIDTH  RW 11/3  COUNT=23:0
+  reg 0x10 HEIGHT RW 11/3  ROWS=15:0 SRCBIT=18:16 DSTBIT=22:20
+  reg 0x14 STRIDE RW 11/3  SRCSTRIDE=31:16 DSTSTRIDE=15:0
+  reg 0x18 VALUE  RW 11/3
+  reg 0x1C NEXT   RW 11/3  ADDR=23:0
+end
+
+# Text screen cell (spec 4, section 4.7): 16 bits: character 7-0, foreground 11-8, background 15-12
+const TEXTCELL_CHAR_SHIFT 0
+const TEXTCELL_FG_SHIFT   8
+const TEXTCELL_BG_SHIFT   12
+
+# ---------------------------------------------------------------- named numbers
+const SYSID_MAGIC      0x5236384B "R68K"
+const WDKICK_MAGIC     0x5A5A
+const SYSRESET_MAGIC   0xA55A
+const VECBASE_DEFAULT  64
+
+# Interrupt sources (spec 13, section 4); vector = VECBASE + source
+const INT_VBLANK 0
+const INT_LINE   1
+const INT_COPPER 2
+const INT_VIDERR 3
+const INT_DMA0   4
+const INT_DMA1   5
+const INT_DMA2   6
+const INT_DMA3   7
+const INT_AUDSTR 8
+const INT_AUDCH  9
+const INT_AUDERR 10
+const INT_TIMER0 11
+const INT_TIMER1 12
+const INT_TIMER2 13
+const INT_TIMER3 14
+const INT_SERIAL 15
+const INT_SD     16
+const INT_KEYB   17
+const INT_SOFT   18
+const VEC_NMI      31
+const VEC_SPURIOUS 24
+
+# DMA engine operations, kinds and ports (spec 11)
+const DMX_OP_COPY    0
+const DMX_OP_FILL    1
+const DMX_OP_KEYCOPY 2
+const DMX_OP_LOGIC   3
+const DMX_OP_ADD     4
+const DMX_OP_MIX     5
+const DMX_OP_REGLIST 6
+const DMX_KIND_MEM   0
+const DMX_KIND_PORT  1
+const DMX_KIND_NONE  2
+const DMX_KIND_VALUE 3
+const DMX_PORT_SD     0
+const DMX_PORT_SERIAL 1
+
+# Copper instructions (spec 10, section 4.2)
+const COP_EXT        0x80000000 "bit 31: 0 = MOVE, 1 = other instruction"
+const COP_OP_SHIFT   27
+const COP_OP_MOVEN   0
+const COP_OP_ADD     1
+const COP_OP_WAIT    2
+const COP_OP_WAITH   3
+const COP_OP_SKIP    4
+const COP_OP_JUMP    5
+const COP_OP_CALL    6
+const COP_OP_RET     7
+const COP_OP_SETC    8
+const COP_OP_DBNZ    9
+const COP_OP_IRQ     10
+const COP_OP_WAITDMX 11
+const COP_OP_STOP    15
+const COP_MOVE_REG_SHIFT 16
+const COP_V_SHIFT        16
+const COP_H_SHIFT        0

@@ -301,19 +301,18 @@ Listed in spec 13, section 4. With the default VECBASE of 64, vectors 64–87 ar
 
 ## 6. One source for the numbers
 
-To keep software and the FPGA design in step, the register map will also be kept as a machine-readable file (`fpga/regmap.yaml` or similar). A small tool in `tools/` will generate from it:
+Every register, field, layout and named number is also kept in **`fpga/regmap.def`**, a short text file. **`tools/regmap.py`** (standard Python, nothing to install) reads it and:
 
-- `firmware/include/hw.inc`: equates for the 68000 assembler (vasm),
-- `firmware/include/hw.h`: the same for C,
-- a Verilog include with the offsets, for the FPGA design.
+- checks it: 4-byte alignment, no overlaps, fields inside 31–0 and not overlapping, no name generated twice;
+- checks it against the tables in this spec, so the two can't disagree;
+- writes `firmware/include/hw.inc` (vasm), `firmware/include/hw.h` (C) and `fpga/rtl/regmap.vh` (Verilog).
 
-Then an address can only be changed in one place (open point R1).
+GitHub runs `python3 tools/regmap.py --verify` on every push, which fails if the spec, the `.def` file and the generated files don't all agree. `tools/README.md` explains the file format and the generated names.
 
 ## 7. Open points
 
 | # | Item |
 |---|------|
-| R1 | Choose the machine-readable format and write the generator before RTL starts |
 | R2 | Bit layouts in each spec should be checked against the rules in section 2 once more when the generator is written |
 | R3 | The palette write delay after a copper WAIT (spec 10, open point C2) should be listed here per video mode once known |
 

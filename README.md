@@ -38,7 +38,8 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 | `hardware/kicad/`   | Schematic and PCB                              |
 | `fpga/rtl/`         | Verilog for video, audio and bus interface     |
 | `firmware/boot/`    | 68000 assembly boot ROM / monitor              |
-| `tools/`            | Build scripts, ROM flashing, serial loader     |
+| `tools/`            | Register map generator (`regmap.py`); later build scripts and the USB loader |
+| `firmware/include/` | Generated hardware definitions for assembler (`hw.inc`) and C (`hw.h`) |
 
 ## Toolchain
 
