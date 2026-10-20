@@ -13,7 +13,7 @@ This spec describes how the CPU, video, audio and other DMA engines share the SD
 | Slot length | 100 ns = 10 SDRAM clocks = 2 CPU clocks at 20 MHz (the Amiga's ratio). Fallback if fx68k cannot reach 20 MHz: 120 ns at 16.7 MHz |
 | Slots per line | Every scan line is a whole, even number of slots (204–322 depending on the video mode). The slot counter restarts each line, so DMA is locked to the beam |
 | Even slots | CPU first; sprites and blitter get the ones the CPU does not use |
-| Odd slots | DMA, at fixed beam positions: half for display fetch, a few for refresh, audio and storage, the rest free. The CPU may use any odd slot DMA leaves free |
+| Odd slots | DMA, at fixed beam positions: half for display fetch, a few for refresh, audio and peripheral transfers, the rest free. The CPU may use any odd slot DMA leaves free |
 | Page policy | Closed page: every slot opens a row, transfers, and precharges. No slot depends on the one before it |
 | CPU waits | 2 clocks, only when an access lands on an odd slot DMA is using, or a sprite about to miss its deadline takes an even slot (section 5) |
 
@@ -137,7 +137,7 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 | An odd slot that DMA is using | /DTACK is held for 2 clocks and the access moves to the next slot, which is even. The CPU loses 2 clocks |
 
 - **Self-aligning, like the Amiga:** after a 2-clock wait, back-to-back bus cycles land on even slots, so the CPU stays aligned until an instruction's internal steps shift it by an odd number of slots again.
-- **Which odd slots are busy:** display-fetch slots while a layer needs data (in the visible part of lines that have layers), wide-fetch slots, and the few fixed refresh, audio and storage slots. Odd slots in the free pool go to the CPU before sprites, the copper or the blitter.
+- **Which odd slots are busy:** display-fetch slots while a layer needs data (in the visible part of lines that have layers), wide-fetch slots, and the few fixed refresh, audio and peripheral slots. Odd slots in the free pool go to the CPU before sprites, the copper or the DMA engine.
 - **When a sprite takes an even slot** the CPU wanted (spec 4, section 5.4), the access also moves on by one slot: a 2-clock wait.
 - **Things that would knock the CPU off the 2-clock grid,** and how they are avoided:
   - *Autovectored interrupts (/VPA)* use the slow 6800-style E-clock cycle, which takes a variable, sometimes odd, number of clocks. **Change to the plan (D8):** interrupts are vectored instead. The FPGA supplies the vector number and /DTACK during the interrupt-acknowledge cycle. This is also faster.
@@ -153,11 +153,12 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 **Even slots**, in order:
 
 1. **Sprite fetch**, only if a sprite would otherwise miss its deadline (spec 4, section 5.4)
-2. **CPU**
-3. **Sprite fetch**, in its fetch window
-4. **Blitter**
-5. **Copper**
-6. Idle
+2. **DMA engine, HIGH jobs**, except 1 even slot in every 4, which is always left for the CPU (spec 11, section 5)
+3. **CPU**
+4. **Sprite fetch**, in its fetch window
+5. **DMA engine** (blitter), normal jobs
+6. **Copper**
+7. Idle
 
 **Odd slots**, in order:
 
@@ -166,13 +167,10 @@ At 20 MHz a CPU clock is 50 ns, so one slot is 2 CPU clocks and a 68000 bus cycl
 3. **CPU**, if its access lands here
 4. **Sprite fetch**, in its fetch window
 5. **Copper**
-6. **Blitter**
-7. **Storage**, beyond its guaranteed slots
-8. Idle
+6. **DMA engine** (blitter, copies, peripheral transfers)
+7. Idle
 
-**The blitter's share:** a 20 MHz CPU running flat out from Chip RAM can use every even slot. The blitter then gets the free odd slots: at 640×480 with wide fetch off, 65 per line, about 24 MB/s of reads. Whenever the CPU is doing internal work, or running from ROM or block RAM, the blitter gets the even slots too. This is the Amiga's trade-off: the blitter and a busy CPU share the same memory.
-
-A future "blitter priority" bit (like the Amiga's BLTPRI) could let the blitter go ahead of the CPU. It is left out of version 1.
+**The DMA engine's share:** a 20 MHz CPU running flat out from Chip RAM can use every even slot. Normal DMA jobs then get the free odd slots: at 640×480 with wide fetch off, 65 per line, about 24 MB/s of reads. Whenever the CPU is doing internal work, or running from ROM or block RAM, the engine gets the even slots too. A job with the HIGH bit set (like the Amiga's BLTPRI) can take 3 of every 4 even slots ahead of the CPU. Spec 11 has the details and speeds.
 
 ## 7. Odd-slot table (DMA)
 
@@ -183,7 +181,7 @@ Odd slots are given out by a fixed pattern that starts again at the beginning of
 | Odd slots | Owner |
 |-----------|-------|
 | `hslot % 4 == 1` | **Display fetch**: layers, just in time (spec 4, section 5). In the horizontal blanking, these slots do the prefetch for the next line |
-| `hslot % 4 == 3`, the first F counted from the start of horizontal blanking | **Fixed users**: refresh, audio and storage (below) |
+| `hslot % 4 == 3`, the first F counted from the start of horizontal blanking | **Fixed users**: refresh, audio and peripheral transfers (below) |
 | Other `hslot % 4 == 3` slots | **Display fetch** in the visible part if wide fetch is on; otherwise the **free pool** |
 
 Fixed users, F = R + 10 slots per line:
@@ -192,7 +190,7 @@ Fixed users, F = R + 10 slots per line:
 |-------|-------|-------|
 | Refresh | R = 4 or 5 | The SDRAM needs one refresh per 7.8 µs. R = ceil(1.2 × line time ÷ 7.8 µs): 5 for lines over 26 µs, 4 for shorter ones |
 | Audio | 8 (one per channel; 4 channels in version 1) | One 6-word burst per channel per line |
-| Storage (SD / USB) | 2 guaranteed | |
+| Peripheral transfers (SD / USB, through the DMA engine) | 2 guaranteed | Spec 11, section 5 |
 
 In most modes all F fixed slots fall inside the horizontal blanking. In modes with short blanking (800×600 @ 72, 1024×768, 1280×720 @ 60), up to 7 of them run on into the start of the next visible line. That takes a few wide-fetch slots, which the 48-byte layer buffers absorb.
 
@@ -206,7 +204,7 @@ If an owner doesn't need its slot this line (audio FIFO full, layer off), the sl
 | Audio channel at 48 kHz, 16-bit | 96 KB/s | 12 bytes per line: 375 KB/s at 640×480, more in modes with shorter lines | Pitch can go up about 3.9× before it runs short |
 | Refresh | 1 per 7.8 µs | R per line, 20% or more spare | |
 | Sprites | 1–3 slots per sprite per line, in the 64 slots before the sprite | Free odd slots and spare display slots first, then the CPU's even slots if needed (spec 9, section 5) | 16 sprites per line fit (spec 9 lists the limits) |
-| Blitter | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves | Little when wide fetch is on and the CPU is running flat out from Chip RAM (section 6) |
+| DMA engine (blitter) | – | Free odd slots (about 24 MB/s of reads at 640×480, wide fetch off), plus every even slot the CPU leaves; HIGH jobs also 3 in 4 of the CPU's | Spec 11, section 6 |
 
 During vertical blanking, display fetch has nothing to do, so its slots go to the free pool.
 
@@ -228,9 +226,8 @@ One register at `0xE00000 + 0x096` (offset chosen to echo the Amiga; final addre
 | 9 | DMAEN | Master enable for everything below |
 | 8 | VIDEN | Video fetch |
 | 7 | COPEN | Copper |
-| 6 | BLTEN | Blitter |
+| 6 | DMXEN | DMA engine (blitter, copies, peripheral transfers; spec 11) |
 | 5 | SPREN | Sprites |
-| 4 | STOEN | Storage DMA |
 | 3–0 | AUD3EN–AUD0EN | Audio channels 0–3 (channels 4–7 later in a second register) |
 
 Refresh cannot be turned off.
@@ -250,7 +247,6 @@ With the real 68SEC000:
 | M1 | Confirm fx68k's exact bus timing (when address and write data are valid) in simulation; section 5 assumes real-68000 timing |
 | M2 | Read the speed grade off the board's SDRAM chip (W9825G6JH-6, -6I or -75) |
 | M3 | Choose the final register addresses (spec 3) |
-| M4 | Blitter design: its data path and how it splits read and write slots (spec to follow) |
 | M5 | Copper instruction set (spec to follow; version 2) |
 | M7 | Bank interleaving for longer bursts (section 4.4): only if a later mode needs more bandwidth |
 | M8 | Check the sprite scheduler's "take a CPU slot only when needed" decision fits in one 100 MHz clock |

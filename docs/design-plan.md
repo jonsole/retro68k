@@ -131,7 +131,7 @@ Defined in [spec 4: video](spec/video.md). In short:
 | 7 | NMI button |
 | 6 | System timer |
 | 5 | Video (vblank, raster line) |
-| 4 | Audio (channel end / FIFO low) |
+| 4 | Audio (channel end / FIFO low), DMA engine (job done, error) |
 | 3 | USB serial |
 | 2 | Keyboard, SD |
 
@@ -177,11 +177,12 @@ The LX25 has 52 blocks of 18 Kb (2 KB each).
 | Boot ROM, 32 KB | 16 | |
 | Video: palette, text buffer and font | 8 | Spec 4, section 7. No line buffers; layer buffers and sprite registers are built from logic |
 | Sprite table | 1 | Spec 9 |
+| DMA descriptor RAM | 1 | Spec 11 |
 | Audio FIFOs | 1 | Estimate |
 | SDRAM and USB FIFOs | 2 | Estimate |
-| **Subtotal** | **31** | |
+| **Subtotal** | **32** | |
 | Temporary 16 KB RAM (phase 3 only) | 8 | Removed once Chip RAM is in SDRAM |
-| **Total in phase 3** | **39 of 52** | |
+| **Total in phase 3** | **40 of 52** | |
 
 If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.g. BASIC) from the SD card.
 
@@ -199,7 +200,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
 10. `docs/spec/copper.md`: the display-list coprocessor
-11. `docs/spec/blitter.md`: the blitter
+11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** DMA engine and blitter: 4 channels, descriptor chains, copy/fill/colour-key/logic in 1D and 2D, peripheral ports
 
 ## 4. Phases
 
