@@ -33,7 +33,7 @@ The other system-area devices have their own specs: timers (12), interrupt contr
 | USB UPLOAD | Control command from the PC: reset, then wait for a program | UPLOAD (5) |
 | Keyboard | Ctrl + Alt + Delete (spec 16, section 3.5) | KEYBOARD (6) |
 
-RESETWHY shows the cause of the last reset. It is kept in the system control registers (section 6); earlier specs that mention RESETWHY refer to this register.
+RESETWHY shows the cause of the last reset. It is kept in the system control registers (section 7); earlier specs that mention RESETWHY refer to this register.
 
 ### 2.2 What a reset does
 
