@@ -197,8 +197,8 @@ If the budget gets tight, the boot ROM can shrink to 16 KB and load the rest (e.
 Each block gets a short spec first: its interface, registers, timing and a test plan. RTL is written against that spec.
 
 1. [`docs/spec/bus-interface.md`](spec/bus-interface.md): **drafted.** fx68k at 40 MHz with phase enables, fixed-point 40/100 MHz crossing, bus cycle timing, decoding, wait states, bus errors, interrupt acknowledge, reset and halt
-2. `docs/spec/memory-map.md`: the final version of D5
-3. `docs/spec/registers.md`: every register, its address and bit layout. Registers are 32-bit, written as two 16-bit halves by the CPU and copper; the low-half write updates the whole register at once (spec 10, section 4.1)
+2. Memory map: folded into spec 3
+3. [`docs/spec/registers.md`](spec/registers.md): **drafted.** Memory map, rules for all registers (32-bit, written and read as 16-bit halves), every register address in the custom and system blocks
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 16 hardware channels with 16-tap sinc resampling, stereo stream, mixer, sigma-delta output
@@ -247,4 +247,14 @@ Each phase ends with a test that shows it is done.
 
 ## 6. Next step
 
-Review this document. Once D1–D11 are agreed or changed, write specs 1–3 (bus interface, memory map, register map). Those are needed before any RTL.
+All the planning specs are drafted (section 3). To finish phase 0:
+
+1. Review the decisions (D1–D11) and specs, and change anything that doesn't feel right.
+2. Do the early checks that could change the design:
+   - **fx68k at 40 MHz in ISE** (Q1, spec 1 open point B1): set up ISE, run a trial build of fx68k for the LX25 with the multicycle constraints, and read the timing report.
+   - **FT2232H channel B mode** (Q6): read the board's EEPROM with FT_Prog.
+   - **SDRAM speed grade** (spec 5, M2): read the marking on the SDRAM chip.
+   - **FPGA speed grade** (spec 4, V7): read the marking on the FPGA.
+3. Write the register-map generator (spec 3, open point R1), so the FPGA and software share one set of addresses from the start.
+
+Then phase 1 (FPGA bring-up) starts: scripted ISE build, blinky, HDMI test pattern and USB echo.

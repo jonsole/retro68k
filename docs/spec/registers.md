@@ -1,0 +1,325 @@
+# Spec 3: Register map and memory map
+
+Status: **draft for review**
+
+This is the one place that lists every address in the machine: the memory map, the rules every register follows, and every register's final address. The bit layouts stay in each device's spec, linked from here, so they are described in only one place.
+
+This spec also replaces spec 2 (memory map), which is folded in here.
+
+## 1. Memory map
+
+| CPU address | Size | What | Spec |
+|-------------|------|------|------|
+| `0x000000`–`0x007FFF` | 32 KB | Boot ROM overlay for CPU reads after reset (writes go to Chip RAM) | 7, section 3.2 |
+| `0x000000`–`0x7FFFFF` | 8 MB | **Chip RAM** (SDRAM), shared by the CPU and all DMA | 5 |
+| `0x800000`–`0x9FFFFF` | 2 MB | Reserved (bus error) | |
+| `0xA00000`–`0xBFFFFF` | 2 MB | **Fast RAM** on the CPU board (bus error on the main path) | 5, section 9 |
+| `0xC00000`–`0xDFFFFF` | 2 MB | Reserved (bus error) | |
+| `0xE00000`–`0xE0FFFF` | 64 KB | **Custom block**: video, sprites, copper, DMA engine, audio registers; palette, sprite table, descriptor RAM | Section 3 |
+| `0xE10000`–`0xE11FFF` | 8 KB | Text screen | 4, section 4.7 |
+| `0xE12000`–`0xE12FFF` | 4 KB | Font | 4, section 4.7 |
+| `0xF00000`–`0xF0FFFF` | 64 KB | **System block**: interrupts, timers, serial, SD card, keyboard, system control | Section 4 |
+| `0xF80000`–`0xF87FFF` | 32 KB | **Boot ROM** | 7, section 3 |
+| Everything else | | Unmapped (bus error) | 1, section 6 |
+
+**Who can reach what:**
+
+| Area | CPU (supervisor) | CPU (user mode) | Copper | DMA engine |
+|------|------------------|-----------------|--------|------------|
+| Chip RAM | Yes | Yes | Read (its list) | Yes |
+| Custom block | Yes | Yes, or bus error with SYSCON.PROTECT | Write | Read and write |
+| Text screen, font | Yes | As above | No | Read and write |
+| System block | Yes | As above | No | No |
+| Boot ROM | Read (write with ROMWE) | As above | No | Read |
+
+## 2. Rules for all registers
+
+1. **Size and order.** Every register is 32 bits wide, at an address that is a multiple of 4, stored big-endian as the 68000 expects. Its **high half** is at the register's address and its **low half** at address + 2.
+2. **Writing in halves (CPU and copper).**
+   - A write to the high half is held, not applied.
+   - The next write to the low half of the same register writes both halves at once.
+   - A low-half write on its own keeps the register's current high half.
+   - A byte write behaves like a 16-bit write that keeps the other byte.
+
+   The 68000's MOVE.L writes the high word first in every addressing mode except −(An), so ordinary code just works. DMA jobs write all 32 bits at once.
+3. **Reading in halves.**
+   - Reading the high half captures the whole register at that moment.
+   - The next read of the low half returns the captured value, so a MOVE.L always gets a matching pair.
+   - A low-half read on its own returns the current low half.
+4. **Reading has no side effects,** except the three FIFO data registers in the system block (SERDATA, KBDATA, SDDATA), where reading takes data out. None of these are in the custom block, so DMA and the copper can never disturb anything by reading.
+5. **Sticky flags** (marked W1C below) are cleared by writing 1 to them. Writing 0 leaves them alone.
+6. **Set/clear registers** (DMACON): bit 15 = 1 sets the other bits written as 1; bit 15 = 0 clears them.
+7. **Unused bits** read as 0; write them as 0.
+8. **Unused addresses** inside the custom and system blocks read as 0 and ignore writes. Only the unmapped regions in section 1 give bus errors.
+9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layers before each line, sprites at their selection and fetch points), some only while the device is off (video timing).
+
+**Access column key:** R = read only, W = write only, RW = read and write, W1C = sticky flags cleared by writing 1.
+
+## 3. Custom block (`0xE00000`)
+
+### 3.1 Layout
+
+| Offset | Size | Contents | Spec |
+|--------|------|----------|------|
+| `0x0000`–`0x00FF` | 256 B | Video global registers and DMACON | 4, 5 |
+| `0x0100`–`0x01FF` | 256 B | Layers 0–3 | 4 |
+| `0x0200`–`0x02FF` | 256 B | Sprite control | 9 |
+| `0x0300`–`0x03FF` | 256 B | DMA engine | 11 |
+| `0x0400`–`0x06FF` | 768 B | Audio | 6 |
+| `0x0700`–`0x07FF` | 256 B | Copper | 10 |
+| `0x0800`–`0x3FFF` | | Free | |
+| `0x4000`–`0x4FFF` | 4 KB | Palette: 1024 × 32-bit `0x00RRGGBB` | 4, section 6.3 |
+| `0x5000`–`0x57FF` | 2 KB | Sprite table: 64 × 32 bytes | 9, section 3 |
+| `0x6000`–`0x67FF` | 2 KB | DMA descriptor RAM: 64 × 32 bytes | 11, section 8 |
+| `0x6800`–`0xFFFF` | | Free | |
+
+### 3.2 Video and DMA control (`0xE00000`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x000` | VIDCON | RW | 4, 6.1 |
+| `0x004` | VIDSTAT | W1C (some bits R) | 4, 6.1 |
+| `0x008` | VIDINTEN | RW | 4, 6.1 |
+| `0x00C` | BEAMPOS | R | 4, 3.6 |
+| `0x010` | FRAMECOUNT | R | 4, 3.6 |
+| `0x014` | LINECMP | RW | 4, 3.7 |
+| `0x018` | BGCOLOR | RW | 4, 6.1 |
+| `0x01C` | PRIO | RW | 4, 4.8 |
+| `0x020` | HVISIBLE | RW (video off) | 4, 3.4 |
+| `0x024` | HSYNCSTART | RW (video off) | 4, 3.4 |
+| `0x028` | HSYNCEND | RW (video off) | 4, 3.4 |
+| `0x02C` | HTOTAL | RW (video off) | 4, 3.4 |
+| `0x030` | VVISIBLE | RW (video off) | 4, 3.4 |
+| `0x034` | VSYNCSTART | RW (video off) | 4, 3.4 |
+| `0x038` | VSYNCEND | RW (video off) | 4, 3.4 |
+| `0x03C` | VTOTAL | RW (video off) | 4, 3.4 |
+| `0x040` | SYNCPOL | RW (video off) | 4, 3.4 |
+| `0x044` | PCLKDIV | RW (video off) | 4, 3.4 |
+| `0x048` | SLOTPOS | R | 4, 3.6 |
+| `0x094` | DMACON | Set/clear | 5, 8. Its 16-bit value is in the low half at `0x096`, the same address as the Amiga's DMACON |
+
+### 3.3 Layers (`0xE00100`)
+
+Layer n (0–3) at `0x100 + n × 0x40`:
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `+0x00` | CTRL | RW | 4, 6.2 |
+| `+0x04` | PTR | RW | 4, 4.4 |
+| `+0x08` | STRIDE | RW | 4, 4.4 |
+| `+0x0C` | WINX | RW | 4, 4.3 |
+| `+0x10` | WINY | RW | 4, 4.3 |
+| `+0x14` | SCROLLX | RW | 4, 4.4 |
+| `+0x18` | SCROLLY | RW | 4, 4.4 |
+| `+0x1C` | HSTEP | RW | 4, 4.5 |
+| `+0x20` | VSTEP | RW | 4, 4.5 |
+
+### 3.4 Sprite control (`0xE00200`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x200` | SPRCON | RW | 9, 8 |
+| `0x204` | SPRHIT0 | R | 9, 7 |
+| `0x208` | SPRHIT1 | R | 9, 7 |
+| `0x20C` | CLXGRP | R | 9, 7 |
+
+Sprite table entry n (0–63) at `0x5000 + n × 0x20`: POS `+0x00`, PTR `+0x04`, SIZE `+0x08`, CTRL `+0x0C`, SCALE `+0x10`, COLL `+0x14` (spec 9, section 3).
+
+### 3.5 DMA engine (`0xE00300`)
+
+Channel n (0–3) at `0x300 + n × 0x10`:
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `+0x0` | CHDESC | RW | 11, 8 |
+| `+0x4` | CHCTRL | RW | 11, 8 |
+| `+0x8` | CHSTAT | R, W1C | 11, 8 |
+| `+0xC` | CHERR | R | 11, 8 |
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x340` | DMXINT | W1C | 11, 8 |
+| `0x344` | DMXINTEN | RW | 11, 8 |
+
+### 3.6 Audio (`0xE00400`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x400` | AUDCON | RW | 6, 6 |
+| `0x404` | AUDRATE | RW | 6, 3.1 |
+| `0x408` | AUDVOL | RW | 6, 3.2 |
+| `0x40C` | AUDSTAT | W1C | 6, 6 |
+| `0x410` | AUDINTEN | RW | 6, 6 |
+| `0x414` | AUDCHEND | W1C | 6, 6 |
+| `0x418` | AUDCHINTEN | RW | 6, 6 |
+| `0x420` | STRCON | RW | 6, 5 |
+| `0x424` | STRBASE | RW | 6, 5 |
+| `0x428` | STRLEN | RW | 6, 5 |
+| `0x42C` | STRPOS | R | 6, 5 |
+
+Channel n (0–15) at `0x440 + n × 0x20`:
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `+0x00` | CTRL | RW (format bits queued) | 6, 6 |
+| `+0x04` | START | RW (queued) | 6, 4.2 |
+| `+0x08` | LENGTH | RW (queued) | 6, 4.2 |
+| `+0x0C` | LOOPSTART | RW (queued) | 6, 4.2 |
+| `+0x10` | LOOPLEN | RW (queued) | 6, 4.2 |
+| `+0x14` | STEP | RW | 6, 4.3 |
+| `+0x18` | VOL | RW | 6, 6 |
+| `+0x1C` | POS | R | 6, 6 |
+
+### 3.7 Copper (`0xE00700`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x700` | COPCON | RW | 10, 7 |
+| `0x704` | COPLC | RW | 10, 7 |
+| `0x708` | COPJMP | W | 10, 7 |
+| `0x70C` | COPPC | R | 10, 7 |
+| `0x710` | COPSTAT | R, W1C | 10, 7 |
+| `0x714` | COPERR | R | 10, 7 |
+
+## 4. System block (`0xF00000`)
+
+### 4.1 Layout
+
+| Offset | Contents | Spec |
+|--------|----------|------|
+| `0x000`–`0x0FF` | Interrupt controller | 13 |
+| `0x100`–`0x1FF` | Timers and watchdog | 12 |
+| `0x200`–`0x2FF` | USB serial | 14 |
+| `0x300`–`0x3FF` | SD card | 15 |
+| `0x400`–`0x4FF` | Keyboard | 16 |
+| `0x500`–`0x7FF` | Free (mouse, joysticks and other inputs later) | |
+| `0x800`–`0x8FF` | System control | 7, 1 |
+| `0x900`–`0xFFFF` | Free | |
+
+### 4.2 Interrupt controller (`0xF00000`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x000` | INTCON | RW | 13, 7 |
+| `0x004` | INTENA | RW | 13, 7 |
+| `0x008` | INTPEND | R | 13, 7 |
+| `0x00C` | INTRAW | R | 13, 7 |
+| `0x010` | INTLEVEL0 | RW | 13, 7 |
+| `0x014` | INTLEVEL1 | RW | 13, 7 |
+| `0x018` | INTLEVEL2 | RW | 13, 7 |
+| `0x01C` | VECBASE | RW | 13, 7 |
+| `0x020` | SOFTINT | W | 13, 6 |
+| `0x024` | LASTSRC | R | 13, 7 |
+| `0x028` | NMICON | RW | 13, 5 |
+| `0x02C` | NMISTAT | W1C | 13, 5 |
+
+### 4.3 Timers and watchdog (`0xF00100`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x100` | TIMEHI | R (reading the high half captures all 64 bits) | 12, 3 |
+| `0x104` | TIMELO | R | 12, 3 |
+| `0x1C0` | WDCTRL | RW (lockable) | 12, 5 |
+| `0x1C4` | WDTIME | RW (lockable) | 12, 5 |
+| `0x1C8` | WDKICK | W | 12, 5 |
+
+Timer n (0–3) at `0x140 + n × 0x20`:
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `+0x00` | CTRL | RW | 12, 6 |
+| `+0x04` | PRESCALE | RW | 12, 4.2 |
+| `+0x08` | RELOAD | RW | 12, 4.1 |
+| `+0x0C` | COUNT | RW | 12, 4.1 |
+| `+0x10` | STAT | W1C | 12, 6 |
+
+### 4.4 USB serial (`0xF00200`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x200` | SERCON | RW | 14, 5 |
+| `0x204` | SERSTAT | R | 14, 5 |
+| `0x208` | SERDATA | RW (reading takes a byte) | 14, 4.1 |
+| `0x20C` | SERLEVEL | RW | 14, 4.2 |
+| `0x210` | SERTIME | RW | 14, 4.2 |
+| `0x214` | SERIRQ | R, W1C | 14, 4.2 |
+| `0x218` | SERIRQEN | RW | 14, 4.2 |
+| `0x21C` | SERDROP | R (clears on read) | 14, 4.3 |
+
+SERDROP clearing on read is the one other exception to rule 4 (section 2). It is in the system block, out of reach of DMA and the copper.
+
+### 4.5 SD card (`0xF00300`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x300` | SDCON | RW | 15, 6 |
+| `0x304` | SDARG | RW | 15, 3.1 |
+| `0x308` | SDCMD | W (starts a command) | 15, 3.1 |
+| `0x30C` | SDRESP0 | R | 15, 3.1 |
+| `0x310` | SDRESP1 | R | 15, 3.1 |
+| `0x314` | SDRESP2 | R | 15, 3.1 |
+| `0x318` | SDRESP3 | R | 15, 3.1 |
+| `0x31C` | SDBLKCNT | RW | 15, 3.2 |
+| `0x320` | SDSTAT | R | 15, 6 |
+| `0x324` | SDIRQ | W1C | 15, 6 |
+| `0x328` | SDIRQEN | RW | 15, 6 |
+| `0x32C` | SDTIMEOUT | RW | 15, 6 |
+| `0x330` | SDDATA | RW (reading takes 4 bytes) | 15, 3.3 |
+
+### 4.6 Keyboard (`0xF00400`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x400` | KBCON | RW | 16, 4 |
+| `0x404` | KBSTAT | R | 16, 4 |
+| `0x408` | KBDATA | R (reading takes an event) | 16, 3.2 |
+| `0x40C` | KBSEND | W | 16, 3.4 |
+| `0x410` | KBREPLY | R | 16, 3.2 |
+| `0x414` | KBIRQ | R, W1C | 16, 4 |
+| `0x418` | KBIRQEN | RW | 16, 4 |
+| `0x440`–`0x47C` | KBMAP0–15 | R | 16, 3.3 |
+
+### 4.7 System control (`0xF00800`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x800` | SYSID | R | 7, 5 |
+| `0x804` | SYSVER | R | 7, 5 |
+| `0x808` | SYSCFG | R | 7, 5 |
+| `0x80C` | RESETWHY | R | 7, 2.1 |
+| `0x810` | SYSCON | RW | 7, 7; 1, 9 |
+| `0x814` | SYSRESET | W | 7, 2.1 |
+| `0x818` | SYSLED | RW | 7, 5 |
+| `0x81C` | SYSSW | R | 7, 5 |
+| `0x820` | SYSSTAT | R | 1, 8 |
+| `0x824` | BUSERRADDR | R | 1, 6 |
+| `0x828` | BUSERRWHY | R | 1, 6 |
+
+## 5. Interrupt sources and vectors
+
+Listed in spec 13, section 4. With the default VECBASE of 64, vectors 64–87 are used for sources 0–23. Vector 31 is NMI, 24 is spurious, 2 is bus error.
+
+## 6. One source for the numbers
+
+To keep software and the FPGA design in step, the register map will also be kept as a machine-readable file (`fpga/regmap.yaml` or similar). A small tool in `tools/` will generate from it:
+
+- `firmware/include/hw.inc`: equates for the 68000 assembler (vasm),
+- `firmware/include/hw.h`: the same for C,
+- a Verilog include with the offsets, for the FPGA design.
+
+Then an address can only be changed in one place (open point R1).
+
+## 7. Open points
+
+| # | Item |
+|---|------|
+| R1 | Choose the machine-readable format and write the generator before RTL starts |
+| R2 | Bit layouts in each spec should be checked against the rules in section 2 once more when the generator is written |
+| R3 | The palette write delay after a copper WAIT (spec 10, open point C2) should be listed here per video mode once known |
+
+## 8. Tests
+
+- **Decoding:** read every listed register after reset and check its reset value; read every free address and check 0; access every unmapped region and check a bus error.
+- **Halves rules:** for a sample of registers in both blocks, check held high halves, low-half commits, low-half-only writes, byte writes, and captured reads.
+- **Access rights:** the copper can't reach the system block or text screen; DMA can't reach the system block; PROTECT blocks user mode.
+- **Generated files:** the assembler, C and Verilog files from the generator agree with this spec.

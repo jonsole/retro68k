@@ -222,7 +222,7 @@ Modes that need more than wide fetch gives (e.g. 1280×720 at 8bpp, or 16 bits p
 
 ## 8. DMA control register (Amiga DMACON style)
 
-One register at `0xE00000 + 0x096` (offset chosen to echo the Amiga; final address goes in spec 3) with set/clear writes:
+One register, **DMACON**, at `0xE00094` (spec 3). Its 16-bit value is in the low half at `0xE00096`, the same offset as the Amiga's DMACON. Writes use set/clear:
 
 | Bit | Name | Enables |
 |-----|------|---------|
