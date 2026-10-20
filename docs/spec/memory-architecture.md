@@ -8,7 +8,7 @@ This spec describes how the CPU, video, audio and other DMA engines share the SD
 
 | Item | Value |
 |------|-------|
-| Memory | One Winbond W9825G6JH SDRAM, 16M × 16 bit (32 MB), on the miniSpartan6+ |
+| Memory | One Winbond W9825G6JH SDRAM, 16M × 16 bit (32 MB), on the miniSpartan6+. **8 MB is used as Chip RAM**; the rest is unused |
 | SDRAM clock | 100 MHz, CAS latency 2 |
 | Slot length | 100 ns = 10 SDRAM clocks = 2 CPU clocks at 20 MHz (the Amiga's ratio). Fallback if fx68k cannot reach 20 MHz: 120 ns at 16.7 MHz |
 | Slots per line | Every scan line is a whole, even number of slots (204–322 depending on the video mode). The slot counter restarts each line, so DMA is locked to the beam |
@@ -21,7 +21,7 @@ This spec describes how the CPU, video, audio and other DMA engines share the SD
 
 | Name | Where | Who can access it |
 |------|-------|-------------------|
-| **Chip RAM** | The 32 MB SDRAM | CPU and every DMA engine |
+| **Chip RAM** | 8 MB of the SDRAM | CPU and every DMA engine |
 | **Fast RAM** | 2 MB SRAM on the later CPU board | CPU only, never slowed by DMA |
 | **Block RAM** | Inside the FPGA: boot ROM, text screen, font, palette, FIFOs | CPU through registers/windows; never uses SDRAM slots |
 
@@ -31,8 +31,8 @@ On the main path (fx68k inside the FPGA) there is no Fast RAM, so all RAM is Chi
 
 | Range | Size | Device |
 |-------|------|--------|
-| `0x000000`–`0x7FFFFF` | 8 MB | Chip RAM, first 8 MB of the SDRAM. At reset the boot ROM overlays address 0 |
-| `0x800000`–`0x9FFFFF` | 2 MB | Chip RAM bank window: any 2 MB bank of the 32 MB, chosen by a register |
+| `0x000000`–`0x7FFFFF` | 8 MB | Chip RAM: the first 8 MB of the SDRAM. At reset the boot ROM overlays address 0 |
+| `0x800000`–`0x9FFFFF` | 2 MB | Reserved |
 | `0xA00000`–`0xBFFFFF` | 2 MB | Fast RAM (CPU board only; unmapped on the main path) |
 | `0xE00000`–`0xE0FFFF` | 64 KB | Custom registers: video, audio, DMA control, blitter, copper |
 | `0xE10000`–`0xE13FFF` | 16 KB | Text screen and font (block RAM) |
@@ -41,8 +41,8 @@ On the main path (fx68k inside the FPGA) there is no Fast RAM, so all RAM is Chi
 | everything else | | Unmapped: `/BERR` after a timeout |
 
 - **Reset overlay:** after reset the ROM also appears at `0x000000`, so the CPU can fetch its stack pointer and start address. The ROM code jumps to its real address at `0xF80000`, then turns the overlay off with a write to a system register.
-- **DMA pointers are 25-bit byte addresses**, so video, audio, sprites, copper and blitter can use all 32 MB, not just what the CPU sees directly.
-- The CPU sees no difference between the first 8 MB and the bank window. Both use the same slots.
+- **DMA addresses are the same as CPU addresses** (24-bit). Video, audio, sprites, copper and the DMA engine can all use the whole 8 MB of Chip RAM, which the CPU also sees directly. There is no bank window.
+- **Why 8 MB:** plenty for this machine (a 640×480 256-colour screen is 300 KB). The SDRAM chip holds 32 MB, but the other 24 MB is left unused. It could become a RAM disk or an SD card cache later, through the DMA engine (open point M10).
 
 ## 4. Slot timing
 
@@ -253,6 +253,7 @@ With the real 68SEC000:
 | M7 | Bank interleaving for longer bursts (section 4.4): only if a later mode needs more bandwidth |
 | M8 | Check the sprite scheduler's "take a CPU slot only when needed" decision fits in one 100 MHz clock |
 | M9 | Measure in simulation how often the 20 MHz CPU waits, running typical code from Chip RAM with busy screens |
+| M10 | Whether to use the unused 24 MB of the SDRAM (e.g. a RAM disk reached only through the DMA engine) |
 
 ## 11. Tests
 

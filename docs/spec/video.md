@@ -163,7 +163,7 @@ For each layer:
 
 | Register | Bits | Meaning |
 |----------|------|---------|
-| PTR | 25 | Byte address in Chip RAM of the layer's top-left source pixel (before scrolling) |
+| PTR | 23 | Byte address in Chip RAM of the layer's top-left source pixel (before scrolling) |
 | STRIDE | 16, signed | Bytes from one source line to the next. Negative values flip the image vertically |
 | SCROLLX | 16 | Source pixels skipped at the left |
 | SCROLLY | 16 | Source lines skipped at the top |
@@ -350,7 +350,7 @@ Layer *n* is at `0x100 + n × 0x40`.
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `+0x00` | CTRL | EN (0), TYPE (1: 0 = bitmap, 1 = text), BPP (3–2: 1/2/4/8), TRANSP (4), PALOFS (15–6, in units of 16 entries) | |
-| `+0x04` | PTR | 24–0 | Source byte address (text layer: cell offset) |
+| `+0x04` | PTR | 22–0 | Source byte address in Chip RAM (text layer: cell offset) |
 | `+0x08` | STRIDE | 15–0 signed | Bytes per source line |
 | `+0x0C` | WINX | XSTART 26–16, XEND 10–0 | Window, pixels |
 | `+0x10` | WINY | YSTART 26–16, YEND 10–0 | Window, lines |

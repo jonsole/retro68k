@@ -41,7 +41,7 @@ The sprite table holds 64 entries of 32 bytes (2 KB, one block RAM) at `0xE05000
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
 | `+0x00` | POS | X 11–0, Y 27–16 (both signed 12-bit) | Screen position of the top-left pixel. Negative values or values past the edge clip the sprite |
-| `+0x04` | PTR | 24–0 | Chip RAM byte address of the image's top line |
+| `+0x04` | PTR | 22–0 | Chip RAM byte address of the image's top line |
 | `+0x08` | SIZE | HEIGHT−1 9–0, STRIDE 31–16 (signed) | Height in source lines; bytes from one source line to the next |
 | `+0x0C` | CTRL | see below | |
 | `+0x10` | SCALE | HSTEP 15–0, VSTEP 31–16 (8.8 fixed point) | `0x0100` = 1:1, `0x0080` = 2× bigger, `0x0040` = 4× bigger. Values from `0x0040` to `0x0100` are allowed |

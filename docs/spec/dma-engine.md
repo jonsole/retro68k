@@ -40,13 +40,13 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
 | `+0x00` | CTRL | see below | Operation and options |
-| `+0x04` | SRC | 25–0 | Source DMA address (section 4), or port number |
-| `+0x08` | DST | 25–0 | Destination DMA address (section 4), or port number |
+| `+0x04` | SRC | 23–0 | Source address (section 4), or port number |
+| `+0x08` | DST | 23–0 | Destination address (section 4), or port number |
 | `+0x0C` | WIDTH | 23–0 | Pixels per row (bytes when BPP = 8) |
 | `+0x10` | HEIGHT | HEIGHT 15–0, SRCBIT 18–16, DSTBIT 22–20 | Rows (1 for a linear job). SRCBIT/DSTBIT: starting pixel within the first byte, for 1, 2 and 4bpp |
 | `+0x14` | STRIDE | SRCSTRIDE 31–16, DSTSTRIDE 15–0 (signed) | Bytes from one row to the next |
 | `+0x18` | VALUE | 31–0 | Fill pattern (repeated), or the colour key for KEYCOPY |
-| `+0x1C` | NEXT | 25–0 | DMA address of the next descriptor; 0 = end of chain |
+| `+0x1C` | NEXT | 23–0 | Address of the next descriptor; 0 = end of chain |
 
 **CTRL bits:**
 
@@ -84,7 +84,7 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
   - Mixing 8-bit signed audio samples with signed saturation (linear job, BPP = 8).
 - To subtract, add the two's complement, e.g. add 0xFF to subtract 1 at 8bpp with wrap.
 
-**Linear jobs** (memcpy, memset, port transfers): BPP = 8, HEIGHT = 1, WIDTH = length in bytes (up to 16 MB).
+**Linear jobs** (memcpy, memset, port transfers): BPP = 8, HEIGHT = 1, WIDTH = length in bytes (up to 8 MB).
 
 **2D jobs** (blits): WIDTH × HEIGHT pixels, with each row starting STRIDE bytes after the last. Source and destination can have different strides, so an image can be copied out of a sprite sheet into a screen.
 
@@ -107,13 +107,13 @@ MIX adds one voice into a 16-bit stereo audio buffer, for the audio stream (spec
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
 | `+0x00` | CTRL | OP 2–0 (= 5), LOOP (4), OVER (5), MONO (6), ENDED (7), BITS16 (8), HIGH (11), IRQ (12), COUNT 31–20 | See below |
-| `+0x04` | POS | 24–0 | Current byte address in the voice's sample. **Written back** at the end of the job |
-| `+0x08` | DST | 24–0 | Buffer to mix into (16-bit, left then right, 4-byte aligned) |
-| `+0x0C` | END | 24–0 | End of the sample (first byte after it) |
-| `+0x10` | LOOP | 24–0 | Where to continue when END is reached, if LOOP is set |
+| `+0x04` | POS | 22–0 | Current byte address in the voice's sample. **Written back** at the end of the job |
+| `+0x08` | DST | 22–0 | Buffer to mix into (16-bit, left then right, 4-byte aligned) |
+| `+0x0C` | END | 22–0 | End of the sample (first byte after it) |
+| `+0x10` | LOOP | 22–0 | Where to continue when END is reached, if LOOP is set |
 | `+0x14` | STEP | 23–0 | Pitch: source samples per output frame, 8.16 fixed point |
 | `+0x18` | VOL / FRAC | VOLL 31–24, VOLR 23–16, FRAC 15–0 | Volumes 0–255; FRAC is the fractional part of the position, **written back** |
-| `+0x1C` | NEXT | 25–0 | Next descriptor (DMA address) |
+| `+0x1C` | NEXT | 23–0 | Next descriptor |
 
 **CTRL bits for MIX:**
 
@@ -155,18 +155,16 @@ Uses:
 
 ## 4. Where data can come from and go to
 
-DMA addresses are 26 bits. **Bit 25 chooses the space:**
+**DMA addresses are CPU addresses** (24-bit). A job sees memory exactly as the CPU does:
 
-| DMA address | Space | What is there | Uses SDRAM slots? |
-|-------------|-------|---------------|-------------------|
-| `0x0000000`–`0x1FFFFFF` | **Chip RAM** | The full 32 MB (as for all DMA in spec 5) | Yes |
-| `0x2000000` + CPU address | **Internal** | The FPGA's block RAM areas and the custom registers, at their CPU addresses (below) | **No** |
-
-So the palette at CPU address `0xE04000` is DMA address `0x2E04000`. Without bit 25, internal areas and Chip RAM would overlap, because CPU addresses such as `0xE04000` are also valid Chip RAM addresses.
+| Address | Area | Uses SDRAM slots? |
+|---------|------|-------------------|
+| `0x000000`–`0x7FFFFF` | **Chip RAM** (8 MB) | Yes |
+| Internal areas below | The FPGA's block RAM areas and the custom registers | **No** |
 
 **Internal areas:**
 
-| CPU address | Area | Read | Write |
+| Address | Area | Read | Write |
 |-------------|------|------|-------|
 | `0xE00000`–`0xE0FFFF` | Custom registers (video, sprites, audio, DMA engine, copper), including the palette at `0xE04000`, sprite table at `0xE05000` and descriptor RAM at `0xE06000` | Yes | Yes |
 | `0xE10000`–`0xE13FFF` | Text screen and font | Yes | Yes |
@@ -251,10 +249,10 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
-| `+0x0` | CHDESC | 25–0 | Write: first descriptor of a chain (DMA address). Read: the descriptor now running |
+| `+0x0` | CHDESC | 23–0 | Write: first descriptor of a chain. Read: the descriptor now running |
 | `+0x4` | CHCTRL | START (0), STOP (1), PAUSE (2), CPUSHARE (5–4) | START begins the chain at CHDESC. STOP ends it after the current burst. PAUSE holds it. CPUSHARE: even slots the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
 | `+0x8` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | DONE and ERR are sticky, write 1 to clear |
-| `+0xC` | CHERR | 25–0 | DMA address that caused an error |
+| `+0xC` | CHERR | 23–0 | Address that caused an error |
 
 **Global:**
 
@@ -270,7 +268,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 **Interrupts:** the DMA engine shares interrupt level 4 with audio (design plan D8). Interrupts are vectored, so each has its own handler.
 
 **Typical use:**
-1. Write descriptors to the descriptor RAM or Chip RAM. In descriptors and CHDESC, the descriptor RAM is at DMA address `0x2E06000` (section 4).
+1. Write descriptors to the descriptor RAM (`0xE06000`) or Chip RAM.
 2. Write the first descriptor's address to CHDESC, then START to CHCTRL.
 3. Carry on. Take the interrupt, or poll CHSTAT.BUSY.
 

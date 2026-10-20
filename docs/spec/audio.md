@@ -146,20 +146,20 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `+0x00` | CTRL | EN (0), BITS16 (1) | On; 16-bit samples |
-| `+0x04` | START | 24–0 | Sample start (queued) |
+| `+0x04` | START | 22–0 | Sample start (queued) |
 | `+0x08` | LENGTH | 23–0 | Bytes (queued) |
-| `+0x0C` | LOOPSTART | 24–0 | Loop start (queued) |
+| `+0x0C` | LOOPSTART | 22–0 | Loop start (queued) |
 | `+0x10` | LOOPLEN | 23–0 | Loop length in bytes; 0 = one-shot (queued) |
 | `+0x14` | STEP | 23–0 | Pitch, 8.16 fixed point |
 | `+0x18` | VOL | L 15–8, R 7–0 | Volume |
-| `+0x1C` | POS | 24–0 | Read: current position |
+| `+0x1C` | POS | 22–0 | Read: current position |
 
 **Stream:**
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `0x4C0` | STRCON | EN (0) | Stream on |
-| `0x4C4` | STRBASE | 24–0 | Ring buffer start (4-byte aligned) |
+| `0x4C4` | STRBASE | 22–0 | Ring buffer start (4-byte aligned) |
 | `0x4C8` | STRLEN | 15–0 | Ring length in frames (even) |
 | `0x4CC` | STRPOS | 15–0 | Read: frame being played |
 

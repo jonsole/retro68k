@@ -34,7 +34,7 @@ What the board provides, checked against Scarab's Rev B schematic and pin file (
 |---------|--------|----------|
 | FPGA | XC6SLX25-FT256: ~24k logic cells, 52 × 18 Kb block RAM (~117 KB), 38 DSP slices | Everything |
 | GPIO | **64 pins** (ports A, B, C, E, F × 12, port D × 4), all I/O banks at **3.3 V** | Keyboard, joypads, debug; CPU bus later |
-| SDRAM | Winbond 16M×16 (32 MB) | Main RAM, video memory, audio samples |
+| SDRAM | Winbond 16M×16 (32 MB) | 8 MB of Chip RAM: main RAM, video memory, audio samples |
 | HDMI | 1 out, 1 in | Display |
 | USB | FT2232H: channel A = JTAG, channel B = 8-bit parallel FIFO to the FPGA | Programming; host link / serial console |
 | Storage | microSD slot (4-bit) | Storage |
@@ -92,12 +92,12 @@ Defined in [spec 5: memory architecture](spec/memory-architecture.md). In short:
 
 - **Amiga-style slots.** SDRAM time is cut into 100 ns slots (two 68000 clocks). Even slots belong to the CPU, odd slots to DMA; the CPU may also use odd slots DMA leaves free. Each DMA engine (refresh, audio, sprites, video, storage) owns fixed odd slots in every scan line. Unused slots go to the copper and blitter.
 - **The 20 MHz CPU rarely waits.** It loses 2 clocks only when an access lands on a busy DMA slot, or when a sprite about to be late borrows its slot, as on the Amiga.
-- **Chip RAM** = the 32 MB SDRAM, shared with DMA. **Fast RAM** = 2 MB SRAM on the later CPU board, CPU-only.
+- **Chip RAM** = 8 MB of the SDRAM, shared with DMA. **Fast RAM** = 2 MB SRAM on the later CPU board, CPU-only.
 
 | Range | Size | Device |
 |-------|------|--------|
 | `0x000000`–`0x7FFFFF` | 8 MB | Chip RAM (boot ROM overlays address 0 at reset) |
-| `0x800000`–`0x9FFFFF` | 2 MB | Chip RAM bank window into the rest of the 32 MB |
+| `0x800000`–`0x9FFFFF` | 2 MB | Reserved |
 | `0xA00000`–`0xBFFFFF` | 2 MB | Fast RAM (CPU board only) |
 | `0xE00000`–`0xE0FFFF` | 64 KB | Custom registers: video, audio, DMA, blitter, copper |
 | `0xE10000`–`0xE13FFF` | 16 KB | Text screen and font (block RAM) |
