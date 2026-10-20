@@ -40,7 +40,7 @@ On the main path (fx68k inside the FPGA) there is no Fast RAM, so all RAM is Chi
 | `0xF80000`–`0xF87FFF` | 32 KB | Boot ROM (block RAM), like the Amiga's Kickstart at `0xF80000` |
 | everything else | | Unmapped: `/BERR` after a timeout |
 
-- **Reset overlay:** after reset the ROM also appears at `0x000000`, so the CPU can fetch its stack pointer and start address. The ROM code jumps to its real address at `0xF80000`, then turns the overlay off with a write to a system register.
+- **Reset overlay:** after reset the ROM also appears at `0x000000` for CPU reads (writes go to Chip RAM), so the CPU can fetch its stack pointer and start address. The ROM code runs at its real address at `0xF80000`, builds the vector table in RAM, then turns the overlay off (spec 7, section 3).
 - **DMA addresses are the same as CPU addresses** (24-bit). Video, audio, sprites, copper and the DMA engine can all use the whole 8 MB of Chip RAM, which the CPU also sees directly. There is no bank window.
 - **Why 8 MB:** plenty for this machine (a 640×480 256-colour screen is 300 KB). The SDRAM chip holds 32 MB, but the other 24 MB is left unused. It could become a RAM disk or an SD card cache later, through the DMA engine (open point M10).
 

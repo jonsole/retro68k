@@ -71,7 +71,7 @@ If the keyboard doesn't answer within 20 ms, TIMEOUT is set and the queue is cle
 
 ### 3.5 Reset keys
 
-With KBCON.RESETKEYS set (the default), holding **Ctrl + Alt + Delete** resets the computer in hardware, with RESETWHY.KEYBOARD set (spec 12). This works even when software has hung, like the Amiga's Ctrl + Amiga + Amiga. Software that needs those keys for itself can turn it off.
+With KBCON.RESETKEYS set (the default), holding **Ctrl + Alt + Delete** resets the computer in hardware, with RESETWHY.KEYBOARD set (spec 7). This works even when software has hung, like the Amiga's Ctrl + Amiga + Amiga. Software that needs those keys for itself can turn it off.
 
 ## 4. Registers
 
@@ -90,7 +90,7 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 
 **OVERFLOW** means the event FIFO was full and an event was lost; the key map is still correct.
 
-**RESETWHY** (spec 12) gains bit 6, **KEYBOARD**.
+**RESETWHY** (spec 7, section 7) has bit 6, **KEYBOARD**, for this.
 
 ## 5. FPGA resources
 

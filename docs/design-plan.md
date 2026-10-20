@@ -50,7 +50,7 @@ Consequences compared to the earlier ECP5 plan:
 
 The FPGA decodes addresses, drives `/DTACK`, encodes interrupts and generates the CPU clock and reset. It does this the same way for the internal core and the external CPU, so the memory map can change without new hardware and no glue chips are needed.
 
-- **The boot ROM lives in FPGA block RAM** (32 KB), loaded with the bitstream.
+- **The boot ROM lives in FPGA block RAM** (32 KB), loaded with the bitstream, and can be made writable for development (spec 7).
 - With the internal core, the CPU bus is just signals inside the FPGA, so everything is synchronous and simple to simulate.
 - *(CPU board)* The FPGA holds the external CPU in reset until it has finished loading its configuration. All FPGA banks are 3.3 V, like the 68SEC000, so no level shifters are needed.
 
@@ -202,7 +202,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 4. [`docs/spec/video.md`](spec/video.md): **drafted.** Timing, layers, windows, fetch, palette, interrupts
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **drafted.** Slots, SDRAM timing, CPU access at 20 MHz, DMA slot table, DMACON
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 16 hardware channels with 16-tap sinc resampling, stereo stream, mixer, sigma-delta output
-7. `docs/spec/system.md`: reset, the boot ROM overlay and header pin use (timers are spec 12, interrupts spec 13, USB serial spec 14, SD card spec 15, keyboard spec 16)
+7. [`docs/spec/system.md`](spec/system.md): **drafted.** Reset sources and behaviour, boot ROM and overlay, start-up outline, LEDs, switches, ID registers, header pins (timers are spec 12, interrupts 13, USB serial 14, SD card 15, keyboard 16)
 8. *(CPU board)* `docs/spec/cpu-board.md`: schematic-level description, header pinout onto ports A–F, power. Written at the start of phase 8.
 9. [`docs/spec/sprites.md`](spec/sprites.md): **drafted.** Sprite table, formats, scaling, depth, just-in-time fetch, collision
 10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Beam-following coprocessor with 4-byte instructions: MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX
