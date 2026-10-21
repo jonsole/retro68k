@@ -12,9 +12,9 @@
 // the DMA fetches the next group. Full and taken cross between the clock
 // domains as toggles (fill_t here, take_t there).
 //
-// The DMA uses the display's memory cycles (1 and 2 of each slot). Words
-// are asked for in a fixed order: the lowest-numbered layer that wants a
-// word first. A group is always asked for to the end once started.
+// The DMA uses the display's memory cycles (1 and 2 of each slot). The
+// layers that want a word take turns, one word each (round robin), so no
+// layer waits for more than one word from each of the others.
 //
 // Line by line: at line_go (start of horizontal blank, from the pixel
 // domain) the line just shown is finished off: each plane pointer it used
@@ -100,15 +100,19 @@ module bpldma (
     reg         q_gen   [0:3];
     reg  [1:0]  q_h, q_t;
 
-    // Who asks next: the lowest-numbered layer with a group being asked for,
-    // or able to start one
+    // Who asks next: the layers with a group being asked for, or able to
+    // start one, take turns after the last one served
     reg  [2:0]  want;
-    reg  [1:0]  pick;
+    reg  [1:0]  pick, last;
     integer n;
     always @(*) begin
         for (n = 0; n < 3; n = n + 1)
             want[n] = (togo[n] != 0) || (left[n] != 0 && !busy[n] && !full[n]);
-        pick = want[0] ? 2'd0 : want[1] ? 2'd1 : 2'd2;
+        case (last)
+            2'd0:    pick = want[1] ? 2'd1 : want[2] ? 2'd2 : 2'd0;
+            2'd1:    pick = want[2] ? 2'd2 : want[0] ? 2'd0 : 2'd1;
+            default: pick = want[0] ? 2'd0 : want[1] ? 2'd1 : 2'd2;
+        endcase
     end
     // The plane to ask for: high to low, plane 0 last
     wire [3:0]  pl_n    = (togo[pick] != 0) ? togo[pick] - 1'b1 : {1'b0, planes[3*pick +: 3]};
@@ -129,6 +133,7 @@ module bpldma (
         take_s2 <= take_s1;
         if (rst) begin
             req    <= 1'b0;
+            last   <= 2'd2;
             q_h    <= 2'd0;
             q_t    <= 2'd0;
             gen    <= 3'd0;
@@ -184,6 +189,7 @@ module bpldma (
             end else if ((!req || ack) && |want) begin
                 // Ask for the next word
                 req        <= 1'b1;
+                last       <= pick;
                 addr       <= pt[pi][21:1];
                 pt[pi]     <= pt[pi] + 23'd2;
                 togo[pick] <= pl_n;

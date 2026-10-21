@@ -1,10 +1,11 @@
 // One bitmap layer, pixel side (spec 4, sections 4.2-4.6 and 5.1).
 //
 // Eight 16-bit shifters, loaded all at once from the layer's BPLxDAT
-// registers (bpldma.v) when a 16-pixel group starts: at the window's first
-// pixel, then each time the group is used up. If BPL0DAT has not been
-// written by then, the layer shows transparent pixels for that group
-// (OVERRUN).
+// registers (bpldma.v). The first group of a line is taken as soon as it
+// is complete, in the horizontal blank (so the DMA fetches the second one
+// before the window starts); after that, each time a group is used up. If
+// BPL0DAT has not been written by then, the layer shows transparent pixels
+// for that group (OVERRUN).
 //
 //   chunky: plane 0 only; 1, 2, 4 or 8 bits per pixel, leftmost pixel in the top bits
 //   planar: 1-8 planes, one bit each, leftmost pixel in bit 15
@@ -15,6 +16,8 @@ module layer_pix (
     input  wire         en,            // video on
     input  wire [10:0]  hc,            // beam, and the next pixel's position
     input  wire [10:0]  hn,
+    input  wire         line_start,    // start of horizontal blank: a new line's setup begins
+    input  wire         ready,         // the data registers hold this line's data (after the DMA restarted)
 
     // This line's settings (from video.v, stable through the line)
     input  wire         active,        // the layer shows on this line
@@ -45,6 +48,7 @@ module layer_pix (
 
     reg  [15:0] sh [0:7];              // shifters
     reg         ok;                    // the current group arrived
+    reg         primed;                // the line's first group is in the shifters
     reg  [3:0]  pos;                   // bit (chunky) or pixel (planar) in the group
     reg  [2:0]  hsub;                  // screen pixels shown of this source pixel
 
@@ -89,14 +93,24 @@ module layer_pix (
             ok        <= 1'b0;
             overrun_t <= 1'b0;
             take_t    <= fill_s[1];        // nothing waiting
+            primed    <= 1'b0;
+        end else if (line_start) begin
+            opaque <= 1'b0;
+            ok     <= 1'b0;
+            primed <= 1'b0;
         end else begin
             opaque <= in_win && ok && !(transp && value == 8'd0);
             idx    <= deep ? value : {palofs, value[3:0]};
             raw    <= (in_win && ok) ? value : 8'd0;
+            if (!primed && ready && avail) begin
+                load;                          // the first group, ahead of the window
+                primed <= 1'b1;
+            end
             if (first) begin
                 pos  <= pos0;
                 hsub <= 3'd0;
-                load;
+                if (!primed) load;             // (counts as OVERRUN if it is not there)
+                primed <= 1'b1;
             end else if (in_win) begin
                 if (step) begin
                     hsub <= 3'd0;

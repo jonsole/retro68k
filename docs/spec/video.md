@@ -175,9 +175,9 @@ With VIDCON.DIRECT set, the palette and priority are not used. Every visible pix
 
 - Each plane of each layer has a data register **BPLxDAT** and a 16-bit **shift register**. There is no other storage: the data registers hold the layer's next group of 16 source pixels (one word per plane), while the shifters show the current group.
 - **A group is complete when BPL0DAT is written.** The DMA writes a group's words from the highest plane down, with plane 0 last. The CPU or copper can also write the data registers (for example with DMA off), and its write of BPL0DAT completes the group the same way.
-- When a layer's shifters need a new group (at the first pixel of its window, then every 16 source pixels), they take all of its data registers at once. That empties the data registers, and the DMA fetches the next group.
+- The shifters take all of a layer's data registers at once. They take the line's first group as soon as it is complete, in the horizontal blank, so the second group is already in the data registers when the window starts (as the Amiga fetches ahead of the display window). After that they take the next group each time the current one is used up (every 16 source pixels). Each take empties the data registers, and the DMA fetches the next group.
 - The display owns **memory cycles 1 and 2 of every slot**: 4 bytes every 100 ns (spec 5, section 4.3). It never touches the CPU's cycle 0.
-- **Order:** when several layers want a word, the lowest-numbered layer goes first. A layer's group is always asked for to the end once started. With a given screen setup, the fetch pattern is the same on every line and every frame.
+- **Order:** the layers that want a word take turns, one word each, so a layer never waits for more than one word from each of the others. With a given screen setup, the fetch pattern is the same on every line and every frame.
 - **Start and stop:** at the start of the horizontal blank, each layer whose window covers the next line gets its first group fetched; the number of groups on the line comes from the window width, scale and fine scroll. Nothing is fetched outside the windows.
 - With vertical scaling, each source line is fetched again for every screen line it appears on.
 
@@ -204,7 +204,7 @@ A layer needs `bits per pixel ÷ 8 ÷ HS` bytes per screen pixel (for planar, bi
 
 Windows help: a status bar below a game area, not on top of it, adds nothing on the lines where the game area is shown.
 
-Each layer has one group of time in hand (its data registers), so the order in 5.1 matters only near the budget: put the deepest layer at L0.
+Each layer has one group of time in hand (its data registers). Near the budget, very deep layers at 1× are the first to run short.
 
 ### 5.3 When a layer runs short
 

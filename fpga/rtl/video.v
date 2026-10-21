@@ -362,10 +362,13 @@ module video #(
     // ---- layer units: their output is stage 1
     wire [2:0] bl_op;
     wire [7:0] bl_idx [0:2], bl_raw [0:2];
+    // The layer units may take this line's first group once the DMA has
+    // restarted (line_gen caught up) and the handshake has crossed back
+    wire       buf_ready = (line_gen == line_t) && (hc >= HVIS + 4'd8 || hc < HVIS);
     genvar g;
     generate for (g = 0; g < 3; g = g + 1) begin : lay
         layer_pix u (
-            .clk_pix(clk_pix), .en(en_p), .hc(hc), .hn(hn),
+            .clk_pix(clk_pix), .en(en_p), .hc(hc), .hn(hn), .line_start(hc == HVIS), .ready(buf_ready),
             .active(c_act[g]), .xs(c_xs[g]), .xe(c_xe[g]), .planar(c_planar[g]), .lb(c_lb[g]),
             .planes(c_planes[g]), .hs(c_hs[g]), .pos0(c_pos0[g]), .transp(c_transp[g]),
             .palofs(c_palofs[g]),
