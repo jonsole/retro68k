@@ -2,17 +2,19 @@
 
 Status: **draft for review**
 
-This spec connects the 68000 to everything else. It covers how the fx68k core is clocked, how its bus signals cross into the 100 MHz memory side, address decoding, /DTACK and wait states, bus errors, interrupt acknowledge, reset, and what changes for the real 68SEC000 later.
+This spec connects the 68000 to everything else. It covers how the fx68k core is clocked, how its bus signals cross into the 100 MHz memory side, address decoding, /DTACK and wait states, bus errors, interrupt acknowledge and reset.
+
+On the ZX Spectrum Next KS3 board the CPU is always fx68k inside the FPGA. The earlier plan for a real MC68SEC000 on a plug-on CPU board was dropped: the Next has no suitable connector, and its fast SRAM already gives the CPU zero-wait memory.
 
 ## 1. Summary
 
 | Item | Value |
 |------|-------|
-| CPU | fx68k (cycle-exact 68000) inside the FPGA; a real MC68SEC000 on the CPU board later |
-| CPU speed | 20 MHz: fx68k clocked at 40 MHz with alternating phase enables. Fallback 16.7 MHz (33.3 MHz clock) |
-| Clock crossing | 40 MHz and 100 MHz come from the same PLL and line up every 50 ns. Signals cross at fixed points with at least 15 ns to settle, so no synchronisers and no uncertainty |
+| CPU | fx68k (cycle-exact 68000) inside the Artix-7 FPGA |
+| CPU speed | 20 MHz: fx68k clocked at 40 MHz with alternating phase enables |
+| Clock crossing | 40 MHz and 100 MHz come from the same MMCM and line up every 50 ns. Signals cross at fixed points with at least 15 ns to settle, so no synchronisers and no uncertainty |
 | Bus | 68000 asynchronous bus: /AS, /UDS, /LDS, R/W, /DTACK, /BERR, FC0–2, IPL0–2. /VPA, E, bus arbitration and /HALT input are not used |
-| Wait states | None for ROM, block RAM and registers. Chip RAM: none on the CPU's slots, 2 clocks when an access meets a busy DMA slot (spec 5) |
+| Wait states | None for ROM, block RAM, registers and Chip RAM. The only exception: a HIGH DMA job or an urgent sprite or copper fetch taking the CPU's memory cycle costs 2 clocks (spec 5) |
 | Bus errors | Unmapped addresses, writes to ROM, and (optionally) user-mode accesses to hardware |
 | Interrupts | Vectored; the interrupt controller answers the acknowledge cycle with no wait states |
 | Reset | fx68k reset from the system reset (spec 7); its RESET instruction resets the devices; a halted CPU (double bus fault) is detected |
@@ -30,7 +32,7 @@ fx68k needs a clock at least twice the CPU speed, plus two one-cycle pulses, **e
 
 ### 2.2 Meeting timing at 40 MHz
 
-40 MHz is near fx68k's top speed (design plan Q1). The fx68k notes say its microcode lookup is one of the slowest paths but its result isn't needed in the next cycle. The build will give ISE matching **multicycle constraints** (2 cycles) from the instruction register to the micro- and nanocode addresses, as the notes show for Vivado. If 40 MHz still can't be met, the fallback is 33.3 MHz (master ÷ 6) for a 16.7 MHz 68000, with 120 ns slots (spec 5, section 4.1).
+On the KS3's Artix-7 (XC7A35T, speed grade -2), 40 MHz is comfortable. A Yosys trial synthesis puts fx68k at about 3,340 LUTs. On Lattice ECP5, open-source place and route measured fx68k at 62–81 MHz, and the Artix-7 -2 is a faster family than that. The fx68k notes say its microcode lookup is one of the slowest paths but its result isn't needed in the next cycle, and give the matching Vivado **multicycle constraints** (2 cycles from the instruction register to the micro- and nanocode addresses). The Vivado build uses them, for extra margin. Confirming the final figure in Vivado is open point B1.
 
 ### 2.3 Pausing the CPU
 
@@ -38,7 +40,7 @@ Because the enables are just clock enables, stopping them freezes fx68k exactly,
 
 ## 3. Crossing between 40 MHz and 100 MHz
 
-The bus interface and the slot controller run at 100 MHz, while fx68k runs at 40 MHz. Both come from the 200 MHz master, and their rising edges line up every **50 ns** (one 68000 clock). Within each 50 ns, the edges are:
+The bus interface and the slot controller run at 100 MHz, while fx68k runs at 40 MHz. Both come from the 200 MHz master (one MMCM), and their rising edges line up every **50 ns** (one 68000 clock). Within each 50 ns, the edges are:
 
 ```
  time (ns):    0    10    20    25    30    40    50
@@ -50,9 +52,8 @@ The bus interface and the slot controller run at 100 MHz, while fx68k runs at 40
 
 **From 100 MHz to fx68k** (/DTACK, /BERR, IPL, read data): the 100 MHz side changes these only on its edges at **10 and 30 ns**. fx68k samples them on its edges at 25 and 50 ns, 15 and 20 ns later.
 
-Every crossing therefore has **at least 15 ns** to settle. The build tells ISE so with timing groups and 15 ns path constraints, instead of the default worst case (5 ns, from 25 to 30). There are no synchronisers and no random delays, so the CPU's timing against the memory slots is the same every time.
+Every crossing therefore has **at least 15 ns** to settle. The build tells Vivado so with 15 ns path constraints (multicycle paths between the two clocks), instead of the default worst case (5 ns, from 25 to 30). There are no synchronisers and no random delays, so the CPU's timing against the memory slots is the same every time.
 
-At the 16.7 MHz fallback (33.3 MHz clock), edges line up every 30 ns, and the same idea applies with captures 20 ns after each change.
 
 ## 4. A bus cycle
 
@@ -68,37 +69,34 @@ For a bus cycle starting at time 0 (state S0), with the slot grid from spec 5:
 | 70 | | 100 MHz side captures /AS: the access is known |
 | 75 | S3 | Write data valid |
 | 90 | | 100 MHz side captures write data |
-| 100 | S4 | Slot k+1 starts: the SDRAM access begins (ACT) |
-| 110 | | /DTACK asserted (or held back for a wait) |
+| 100 | S4 | Slot k+1 starts: the CPU's memory cycle (cycle 0) puts the address on the SRAM |
+| 110 | | /DTACK asserted |
 | 125 | S5 | fx68k sees /DTACK: no wait state |
-| 140 | | SDRAM read data arrives |
+| 120 | | SRAM read data captured (end of memory cycle 0) |
 | 160 | | Read data driven to fx68k |
 | 175 | S7 | fx68k latches the read data (end of S6) |
 | 200 | | Next cycle can start |
 
-For block RAM, registers and ROM, the data is ready well before 160 ns, so the same timing gives zero wait states.
+Every slot has a CPU memory cycle (cycle 0, spec 5), so a Chip RAM access always finds one at the start of the cycle's second slot. For block RAM, registers and ROM, the data is also ready well before 160 ns. So all targets give zero wait states.
 
 ### 4.2 Wait states
 
 | Target | Wait |
 |--------|------|
-| Chip RAM, access in a slot the CPU can have | 0 |
-| Chip RAM, access meets a busy odd slot, or a sprite or urgent copper fetch takes the slot | 2 clocks per slot of delay (/DTACK held to the next slot) |
+| Chip RAM | 0 |
+| Chip RAM, when a HIGH DMA job or an urgent sprite or copper fetch takes the CPU's memory cycle | 2 clocks (/DTACK held to the next slot's cycle 0) |
 | Boot ROM, block RAM areas, custom registers, system registers | 0 |
 | Interrupt acknowledge | 0 |
-| Fast RAM (CPU board) | 0 |
 
-Waits are always whole slots, 2 CPU clocks each, so the CPU never drifts off the 2-clock grid (spec 5, section 5).
+Waits are always whole slots, 2 CPU clocks each. Since every slot has a CPU cycle, there is no alignment to keep: the next access simply uses the next slot's cycle 0.
 
 ## 5. Address decoding
 
 | Address | Target | Notes |
 |---------|--------|-------|
 | `0x000000`–`0x007FFF` | Boot ROM for reads while the overlay is on; Chip RAM otherwise | Writes always go to Chip RAM (spec 7, section 3.2) |
-| `0x000000`–`0x7FFFFF` | Chip RAM (8 MB) | Through the slot controller |
-| `0x800000`–`0x9FFFFF` | Reserved | Bus error |
-| `0xA00000`–`0xBFFFFF` | Fast RAM (CPU board only) | Bus error on the main path |
-| `0xC00000`–`0xDFFFFF` | Reserved | Bus error |
+| `0x000000`–`0x3FFFFF` | Chip RAM (4 MB SRAM) | Through the slot controller. On boards with 2 MB, Chip RAM ends at `0x1FFFFF` and the rest is a bus error |
+| `0x400000`–`0xDFFFFF` | Reserved | Bus error |
 | `0xE00000`–`0xE0FFFF` | Custom registers, palette, sprite table, descriptor RAM | Internal register bus |
 | `0xE10000`–`0xE13FFF` | Text screen and font | Internal register bus |
 | `0xF00000`–`0xF0FFFF` | System registers | Internal register bus |
@@ -107,7 +105,7 @@ Waits are always whole slots, 2 CPU clocks each, so the CPU never drifts off the
 
 Unused addresses inside a block (e.g. a gap in the custom registers) read as 0 and ignore writes. Only whole unmapped regions give bus errors, so the decoder stays small.
 
-**Byte and word access:** /UDS and /LDS give the bytes. Chip RAM uses them as SDRAM byte masks. A byte write to a register behaves like a 16-bit write that keeps the other byte; the 16-bit-halves rules then apply (spec 10, section 4.1; spec 15, section 6).
+**Byte and word access:** /UDS and /LDS give the bytes. Chip RAM passes them to the SRAM's /UB and /LB. A byte write to a register behaves like a 16-bit write that keeps the other byte; the 16-bit-halves rules then apply (spec 10, section 4.1; spec 15, section 6).
 
 ## 6. Bus errors
 
@@ -129,14 +127,14 @@ IPL0–2 come from the interrupt controller through the 100 MHz to 40 MHz crossi
 ## 8. Reset and halt
 
 - **Reset in:** the system reset (spec 7) drives fx68k's extReset, and at power-on also pwrUp (fx68k's "cold reset" input, which it needs once at start). The enables keep running during reset, so the core resets cleanly.
-- **First bus cycle:** fx68k leaves reset at a fixed point in the slot grid, so its first bus cycle starts on an even slot and the CPU begins aligned (spec 5, section 5).
+- **First bus cycle:** fx68k leaves reset at a fixed point in the slot grid, so its bus cycles line up with the slots the same way every time (spec 5, section 5).
 - **RESET instruction:** fx68k drives its reset output for 124 clocks. The bus interface turns this into the device reset in spec 7, section 2.4.
-- **Halt:** a double bus fault halts the 68000 (fx68k's oHALTEDn). This sets SYSSTAT.HALTED and shows an error code on the LEDs. With SYSCON.HALTRESET set, the computer also resets itself, with RESETWHY.HALTED. Otherwise the watchdog, a reset button or a USB RESET command recovers it.
+- **Halt:** a double bus fault halts the 68000 (fx68k's oHALTEDn). This sets SYSSTAT.HALTED and shows an error code as the screen's background colour (spec 7, section 5). With SYSCON.HALTRESET set, the computer also resets itself, with RESETWHY.HALTED. Otherwise the watchdog, a reset button or a USB RESET command recovers it.
 - **Not used:** /HALT as an input (fx68k does not implement bus retry), /VPA and E (no 6800 devices), and bus arbitration (/BR, /BG, /BGACK: no other bus master; DMA uses memory slots instead).
 
 ## 9. New system registers
 
-Added to the system control registers (spec 7, section 7):
+Added to the system control registers (spec 7, section 9):
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
@@ -146,36 +144,27 @@ Added to the system control registers (spec 7, section 7):
 | `0x824` | BUSERRADDR | 23–0 | Read: address of the last bus error |
 | `0x828` | BUSERRWHY | UNMAPPED (0), ROMWRITE (1), PROTECT (2), CPUSPACE (3) | Read: cause of the last bus error |
 
-## 10. The real 68SEC000 later (phase 8)
-
-The same bus interface serves an external 68SEC000 on the CPU board, with these differences (to be specified with the CPU board):
-
-- The FPGA drives the CPU's 20 MHz clock (master ÷ 10), so the external CPU is phase-locked to the slot grid too.
-- The CPU's signals arrive through the FPGA's I/O pins, registered in the pin flip-flops. Pin and board delays (a few ns each way) eat into the 15 ns margins in section 3, so the capture points may move, and Chip RAM accesses may need 2 extra clocks.
-- Fast RAM (2 MB SRAM) on the CPU board is selected by the FPGA and runs with zero wait states.
-- FC0–2 are wired (design plan D3), so interrupt acknowledge and PROTECT work the same way.
-
-## 11. FPGA resources
+## 10. FPGA resources
 
 | Item | Resource |
 |------|----------|
-| fx68k | ~3,350 LUTs, ~1,440 flip-flops, 3 block RAMs (design plan D10) |
+| fx68k | ~3,340 LUTs, ~1,440 flip-flops, 3 block RAMs (Yosys estimate for Artix-7; design plan D10) |
 | Bus interface: crossing registers, decoder, /DTACK and /BERR logic, register-bus master | Estimate 200–400 LUTs |
 
-## 12. Open points
+## 11. Open points
 
 | # | Item |
 |---|------|
-| B1 | Get fx68k through ISE at 40 MHz with the multicycle constraints, as early as possible (design plan Q1) |
+| B1 | Confirm fx68k meets 40 MHz in Vivado on the XC7A35T-2, with the multicycle constraints |
 | B2 | Confirm in simulation that fx68k's outputs and sampling points match section 4.1 exactly (spec 5, open point M1) |
 | B3 | A hardware debugger: pause the CPU by stopping its enables, single-step, breakpoints on addresses, all controlled from the PC over USB |
 | B4 | Whether a user-mode access to Chip RAM should ever be blocked (memory protection beyond PROTECT): not in version 1 |
 
-## 13. Tests
+## 12. Tests
 
-- **Clock crossing:** in simulation and in an ISE timing report, every 40 ↔ 100 MHz path meets 15 ns, and captures happen only on the edges in section 3.
+- **Clock crossing:** in simulation and in a Vivado timing report, every 40 ↔ 100 MHz path meets 15 ns, and captures happen only on the edges in section 3.
 - **Bus cycles:** reads and writes of bytes and words to every target, with the timing of section 4.1; zero wait states except where section 4.2 says.
-- **Wait states:** with busy DMA, every wait is a whole number of slots and the CPU stays aligned.
+- **Wait states:** with all DMA busy, Chip RAM accesses still have no waits; with HIGH DMA jobs or urgent sprites, every wait is exactly 2 clocks.
 - **Bus errors:** each cause raises vector 2 and records BUSERRADDR and BUSERRWHY; PROTECT blocks user mode only.
 - **Interrupt acknowledge:** each level returns the right vector with no wait.
 - **Reset and halt:** reset at every source; the RESET instruction resets the devices only; a double bus fault sets HALTED and, with HALTRESET, resets with RESETWHY.HALTED.

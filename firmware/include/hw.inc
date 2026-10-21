@@ -9,13 +9,9 @@
 ;   G_REG = register offset within an element, Gn_REG = the same, ready-added.
 
 
-; ---- CHIPRAM: Chip RAM (SDRAM), shared with DMA
+; ---- CHIPRAM: Chip RAM (SRAM, 4 MB; 2 MB boards use the first half), shared with DMA
 CHIPRAM                      equ $0
-CHIPRAM_SIZE                 equ $800000
-
-; ---- FASTRAM: Fast RAM, CPU board only
-FASTRAM                      equ $A00000
-FASTRAM_SIZE                 equ $200000
+CHIPRAM_SIZE                 equ $400000
 
 ; ---- TEXT: Text screen, 128 x 32 cells of 16 bits
 TEXT                         equ $E10000
@@ -732,17 +728,19 @@ SERDROP_COUNT_M              equ $FFFF
 SDCON                        equ $300        ; RW, spec 15/6
 SDCON_EN_B                   equ $0
 SDCON_EN_M                   equ $1
-SDCON_BUS4_B                 equ $1
-SDCON_BUS4_M                 equ $2
-SDCON_AUTOSTOP_B             equ $2
-SDCON_AUTOSTOP_M             equ $4
-SDCON_DETECT_B               equ $3
-SDCON_DETECT_M               equ $8
+SDCON_CS_B                   equ $1
+SDCON_CS_M                   equ $2
+SDCON_INITCLK_B              equ $2
+SDCON_INITCLK_M              equ $4
+SDCON_CRCCHK_B               equ $3
+SDCON_CRCCHK_M               equ $8
+SDCON_AUTOSTOP_B             equ $4
+SDCON_AUTOSTOP_M             equ $10
 SDCON_CLKDIV_B               equ $8
 SDCON_CLKDIV_W               equ $8
 SDCON_CLKDIV_M               equ $FF00
-SDARG                        equ $304        ; RW, spec 15/3.1
-SDCMD                        equ $308        ; W, spec 15/3.1
+SDARG                        equ $304        ; RW, spec 15/3.2
+SDCMD                        equ $308        ; W, spec 15/3.2
 SDCMD_INDEX_B                equ $0
 SDCMD_INDEX_W                equ $6
 SDCMD_INDEX_M                equ $3F
@@ -757,7 +755,9 @@ SDCMD_MULTI_B                equ $C
 SDCMD_MULTI_M                equ $1000
 SDCMD_APP_B                  equ $D
 SDCMD_APP_M                  equ $2000
-SDBLKCNT                     equ $31C        ; RW, spec 15/3.2
+SDCMD_BLK16_B                equ $E
+SDCMD_BLK16_M                equ $4000
+SDBLKCNT                     equ $31C        ; RW, spec 15/3.3
 SDBLKCNT_COUNT_B             equ $0
 SDBLKCNT_COUNT_W             equ $10
 SDBLKCNT_COUNT_M             equ $FFFF
@@ -768,8 +768,8 @@ SDSTAT_DATABUSY_B            equ $1
 SDSTAT_DATABUSY_M            equ $2
 SDSTAT_CARDBUSY_B            equ $2
 SDSTAT_CARDBUSY_M            equ $4
-SDSTAT_CARDIN_B              equ $3
-SDSTAT_CARDIN_M              equ $8
+SDSTAT_INITBUSY_B            equ $3
+SDSTAT_INITBUSY_M            equ $8
 SDSTAT_FIFOCOUNT_B           equ $4
 SDSTAT_FIFOCOUNT_W           equ $C
 SDSTAT_FIFOCOUNT_M           equ $FFF0
@@ -780,16 +780,16 @@ SDIRQ_DATADONE_B             equ $1
 SDIRQ_DATADONE_M             equ $2
 SDIRQ_CMDTIMEOUT_B           equ $2
 SDIRQ_CMDTIMEOUT_M           equ $4
-SDIRQ_CMDCRC_B               equ $3
-SDIRQ_CMDCRC_M               equ $8
+SDIRQ_CMDERR_B               equ $3
+SDIRQ_CMDERR_M               equ $8
 SDIRQ_DATATIMEOUT_B          equ $4
 SDIRQ_DATATIMEOUT_M          equ $10
 SDIRQ_DATACRC_B              equ $5
 SDIRQ_DATACRC_M              equ $20
 SDIRQ_WRITEERR_B             equ $6
 SDIRQ_WRITEERR_M             equ $40
-SDIRQ_CARDCHANGE_B           equ $7
-SDIRQ_CARDCHANGE_M           equ $80
+SDIRQ_TOKENERR_B             equ $7
+SDIRQ_TOKENERR_M             equ $80
 SDIRQEN                      equ $328        ; RW, spec 15/6
 SDIRQEN_CMDDONE_B            equ $0
 SDIRQEN_CMDDONE_M            equ $1
@@ -797,21 +797,21 @@ SDIRQEN_DATADONE_B           equ $1
 SDIRQEN_DATADONE_M           equ $2
 SDIRQEN_CMDTIMEOUT_B         equ $2
 SDIRQEN_CMDTIMEOUT_M         equ $4
-SDIRQEN_CMDCRC_B             equ $3
-SDIRQEN_CMDCRC_M             equ $8
+SDIRQEN_CMDERR_B             equ $3
+SDIRQEN_CMDERR_M             equ $8
 SDIRQEN_DATATIMEOUT_B        equ $4
 SDIRQEN_DATATIMEOUT_M        equ $10
 SDIRQEN_DATACRC_B            equ $5
 SDIRQEN_DATACRC_M            equ $20
 SDIRQEN_WRITEERR_B           equ $6
 SDIRQEN_WRITEERR_M           equ $40
-SDIRQEN_CARDCHANGE_B         equ $7
-SDIRQEN_CARDCHANGE_M         equ $80
+SDIRQEN_TOKENERR_B           equ $7
+SDIRQEN_TOKENERR_M           equ $80
 SDTIMEOUT                    equ $32C        ; RW, spec 15/6
 SDTIMEOUT_MS_B               equ $0
 SDTIMEOUT_MS_W               equ $10
 SDTIMEOUT_MS_M               equ $FFFF
-SDDATA                       equ $330        ; RW, spec 15/3.3
+SDDATA                       equ $330        ; RW, spec 15/3.4
 KBCON                        equ $400        ; RW, spec 16/4
 KBCON_EN_B                   equ $0
 KBCON_EN_M                   equ $1
@@ -819,6 +819,8 @@ KBCON_RAW_B                  equ $1
 KBCON_RAW_M                  equ $2
 KBCON_RESETKEYS_B            equ $2
 KBCON_RESETKEYS_M            equ $4
+KBCON_MATRIX_B               equ $3
+KBCON_MATRIX_M               equ $8
 KBSTAT                       equ $404        ; R, spec 16/4
 KBSTAT_COUNT_B               equ $0
 KBSTAT_COUNT_W               equ $5
@@ -833,7 +835,7 @@ KBDATA_RELEASED_M            equ $8000
 KBDATA_KEY_B                 equ $0
 KBDATA_KEY_W                 equ $9
 KBDATA_KEY_M                 equ $1FF
-KBSEND                       equ $40C        ; W, spec 16/3.4
+KBSEND                       equ $40C        ; W, spec 16/3.5
 KBSEND_BYTE_B                equ $0
 KBSEND_BYTE_W                equ $8
 KBSEND_BYTE_M                equ $FF
@@ -905,7 +907,7 @@ RESETWHY_KEYBOARD_B          equ $6
 RESETWHY_KEYBOARD_M          equ $40
 RESETWHY_HALTED_B            equ $7
 RESETWHY_HALTED_M            equ $80
-SYSCON                       equ $810        ; RW, spec 7/7
+SYSCON                       equ $810        ; RW, spec 7/9
 SYSCON_OVERLAY_B             equ $0
 SYSCON_OVERLAY_M             equ $1
 SYSCON_ROMWE_B               equ $1
@@ -920,14 +922,11 @@ SYSRESET                     equ $814        ; W, spec 7/2.1
 SYSRESET_KEY_B               equ $0
 SYSRESET_KEY_W               equ $10
 SYSRESET_KEY_M               equ $FFFF
-SYSLED                       equ $818        ; RW, spec 7/5
-SYSLED_LEDS_B                equ $0
-SYSLED_LEDS_W                equ $8
-SYSLED_LEDS_M                equ $FF
-SYSSW                        equ $81C        ; R, spec 7/5
-SYSSW_SWITCHES_B             equ $0
-SYSSW_SWITCHES_W             equ $4
-SYSSW_SWITCHES_M             equ $F
+SYSBTN                       equ $818        ; R, spec 7/5
+SYSBTN_MULTIFACE_B           equ $0
+SYSBTN_MULTIFACE_M           equ $1
+SYSBTN_DIVMMC_B              equ $1
+SYSBTN_DIVMMC_M              equ $2
 SYSSTAT                      equ $820        ; R, spec 1/8
 SYSSTAT_HALTED_B             equ $0
 SYSSTAT_HALTED_M             equ $1
@@ -944,28 +943,56 @@ BUSERRWHY_PROTECT_B          equ $2
 BUSERRWHY_PROTECT_M          equ $4
 BUSERRWHY_CPUSPACE_B         equ $3
 BUSERRWHY_CPUSPACE_M         equ $8
+I2CCON                       equ $840        ; RW, spec 7/6
+I2CCON_EN_B                  equ $0
+I2CCON_EN_M                  equ $1
+I2CCON_CLKDIV_B              equ $8
+I2CCON_CLKDIV_W              equ $8
+I2CCON_CLKDIV_M              equ $FF00
+I2CDATA                      equ $844        ; RW, spec 7/6
+I2CDATA_BYTE_B               equ $0
+I2CDATA_BYTE_W               equ $8
+I2CDATA_BYTE_M               equ $FF
+I2CCMD                       equ $848        ; W, spec 7/6
+I2CCMD_START_B               equ $0
+I2CCMD_START_M               equ $1
+I2CCMD_STOP_B                equ $1
+I2CCMD_STOP_M                equ $2
+I2CCMD_WRITE_B               equ $2
+I2CCMD_WRITE_M               equ $4
+I2CCMD_READ_B                equ $3
+I2CCMD_READ_M                equ $8
+I2CCMD_ACK_B                 equ $4
+I2CCMD_ACK_M                 equ $10
+I2CSTAT                      equ $84C        ; R, spec 7/6
+I2CSTAT_BUSY_B               equ $0
+I2CSTAT_BUSY_M               equ $1
+I2CSTAT_NACK_B               equ $1
+I2CSTAT_NACK_M               equ $2
+I2CSTAT_ARBLOST_B            equ $2
+I2CSTAT_ARBLOST_M            equ $4
 SDRESP_NUM                   equ $4
-SDRESP0                      equ $30C        ; R, spec 15/3.1
-SDRESP1                      equ $310        ; R, spec 15/3.1
-SDRESP2                      equ $314        ; R, spec 15/3.1
-SDRESP3                      equ $318        ; R, spec 15/3.1
+SDRESP0                      equ $30C        ; R, spec 15/3.2
+SDRESP1                      equ $310        ; R, spec 15/3.2
+SDRESP2                      equ $314        ; R, spec 15/3.2
+SDRESP3                      equ $318        ; R, spec 15/3.2
 KBMAP_NUM                    equ $10
-KBMAP0                       equ $440        ; R, spec 16/3.3
-KBMAP1                       equ $444        ; R, spec 16/3.3
-KBMAP2                       equ $448        ; R, spec 16/3.3
-KBMAP3                       equ $44C        ; R, spec 16/3.3
-KBMAP4                       equ $450        ; R, spec 16/3.3
-KBMAP5                       equ $454        ; R, spec 16/3.3
-KBMAP6                       equ $458        ; R, spec 16/3.3
-KBMAP7                       equ $45C        ; R, spec 16/3.3
-KBMAP8                       equ $460        ; R, spec 16/3.3
-KBMAP9                       equ $464        ; R, spec 16/3.3
-KBMAP10                      equ $468        ; R, spec 16/3.3
-KBMAP11                      equ $46C        ; R, spec 16/3.3
-KBMAP12                      equ $470        ; R, spec 16/3.3
-KBMAP13                      equ $474        ; R, spec 16/3.3
-KBMAP14                      equ $478        ; R, spec 16/3.3
-KBMAP15                      equ $47C        ; R, spec 16/3.3
+KBMAP0                       equ $440        ; R, spec 16/3.4
+KBMAP1                       equ $444        ; R, spec 16/3.4
+KBMAP2                       equ $448        ; R, spec 16/3.4
+KBMAP3                       equ $44C        ; R, spec 16/3.4
+KBMAP4                       equ $450        ; R, spec 16/3.4
+KBMAP5                       equ $454        ; R, spec 16/3.4
+KBMAP6                       equ $458        ; R, spec 16/3.4
+KBMAP7                       equ $45C        ; R, spec 16/3.4
+KBMAP8                       equ $460        ; R, spec 16/3.4
+KBMAP9                       equ $464        ; R, spec 16/3.4
+KBMAP10                      equ $468        ; R, spec 16/3.4
+KBMAP11                      equ $46C        ; R, spec 16/3.4
+KBMAP12                      equ $470        ; R, spec 16/3.4
+KBMAP13                      equ $474        ; R, spec 16/3.4
+KBMAP14                      equ $478        ; R, spec 16/3.4
+KBMAP15                      equ $47C        ; R, spec 16/3.4
 ; TMR0..TMR3: 4 x 32 bytes, spec 12/6
 TMR_NUM                      equ $4
 TMR_SPAN                     equ $20

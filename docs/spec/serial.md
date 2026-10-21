@@ -2,41 +2,45 @@
 
 Status: **draft for review**
 
-The USB serial link connects the computer to a PC through the miniSpartan6+'s USB port. It carries the console (text in and out), program and file uploads, and debug commands. On the PC it appears as an ordinary serial port, so any terminal program works.
+The USB serial link connects the computer to a PC through a small FT232H USB module plugged onto the KS3's accelerator port. It carries the console (text in and out), program and file uploads, and debug commands. On the PC it appears as an ordinary serial port, so any terminal program works.
 
 ## 1. Summary
 
 | Item | Value |
 |------|-------|
-| Hardware | FT2232H on the miniSpartan6+: channel A programs the FPGA (JTAG); **channel B** is this link, wired to the FPGA as an 8-bit parallel FIFO |
+| Hardware | An **FT232H USB module** (e.g. FTDI UM232H-B or an FT232H breakout board) on the KS3's accelerator port (`accel_io`, 3.3 V), wired to the FPGA as an 8-bit parallel FIFO. The module is powered from its own USB cable |
 | On the PC | A normal serial port (e.g. `/dev/ttyUSB1` or `COM5`). The baud rate setting is ignored |
-| Speed | Several MB/s each way (the FT2232H's asynchronous FIFO mode allows up to about 8 MB/s; the PC side usually sets the real limit) |
+| Speed | Several MB/s each way (the FT232H's asynchronous FIFO mode allows up to about 8 MB/s; the PC side usually sets the real limit) |
 | Flow control | Automatic in hardware, both ways: no data is ever lost and no XON/XOFF or RTS/CTS is needed |
-| Buffers | 2 KB receive and 2 KB transmit FIFOs in the FPGA, plus the FT2232H's own 4 KB each way |
+| Buffers | 2 KB receive and 2 KB transmit FIFOs in the FPGA, plus the FT232H's own 1 KB each way |
 | CPU access | A data register for bytes, status with counts, interrupts on thresholds and a timeout |
 | DMA | DMA engine port 1 (spec 11): bulk transfers with no CPU work |
-| Low delay | The FPGA tells the FT2232H to send at once when the transmit FIFO empties, so console text appears without the usual 16 ms USB delay |
+| Low delay | The FPGA tells the FT232H to send at once when the transmit FIFO empties, so console text appears without the usual 16 ms USB delay |
 | Control commands | A special 16-byte sequence from the PC triggers NMI (break into the debugger), reset, or reset into the upload loader, even when the 68000 has hung |
 
 ## 2. How the FIFO link works
 
-The FT2232H channel B runs in **asynchronous 245 FIFO mode**. Its EEPROM must be set for this (design plan Q6; the FTDI FT_Prog tool does it once).
+The FT232H runs in **asynchronous 245 FIFO mode**. Its EEPROM must be set for this once, with FTDI's free FT_Prog tool (open point U1). The module plugs onto the accelerator port (the Raspberry Pi header, 28 GPIO pins at 3.3 V); which `accel_io` pins carry which signal is still to be decided (open point U6). It uses 13 signals plus ground:
 
 | Signal | Direction | Meaning |
 |--------|-----------|---------|
 | D7–D0 | Both | Data byte |
-| RXF# | FTDI → FPGA | Low: the FT2232H has a byte from the PC waiting |
+| RXF# | FTDI → FPGA | Low: the FT232H has a byte from the PC waiting |
 | RD# | FPGA → FTDI | Pulse low to read that byte |
-| TXE# | FTDI → FPGA | Low: the FT2232H has room for a byte to the PC |
+| TXE# | FTDI → FPGA | Low: the FT232H has room for a byte to the PC |
 | WR# | FPGA → FTDI | Pulse high-to-low to write a byte |
 | SIWU# | FPGA → FTDI | "Send immediate": send what it holds to the PC now |
 
 **Flow control comes for free:**
 
-- **PC to computer:** the FPGA only reads from the FT2232H while its receive FIFO has room. When the FIFO is full, the FT2232H's buffer fills, and USB then holds the PC back. Nothing is dropped, however fast the PC sends or however slowly software reads.
-- **Computer to PC:** the FPGA only writes when TXE# says there is room. If the PC isn't reading, the FT2232H's buffer and then the transmit FIFO fill up (section 4.3).
+- **PC to computer:** the FPGA only reads from the FT232H while its receive FIFO has room. When the FIFO is full, the FT232H's buffer fills, and USB then holds the PC back. Nothing is dropped, however fast the PC sends or however slowly software reads.
+- **Computer to PC:** the FPGA only writes when TXE# says there is room. If the PC isn't reading, the FT232H's buffer and then the transmit FIFO fill up (section 4.3).
 
-**Low delay:** the FT2232H normally waits up to 16 ms (its latency timer) before sending a small amount of data. When the FPGA's transmit FIFO becomes empty after sending, it pulses SIWU#, so short console messages reach the PC straight away.
+**Low delay:** the FT232H normally waits up to 16 ms (its latency timer) before sending a small amount of data. When the FPGA's transmit FIFO becomes empty after sending, it pulses SIWU#, so short console messages reach the PC straight away.
+
+**Later, faster:** the FT232H also has a **synchronous 245 FIFO mode**, up to about 40 MB/s. It needs two more signals, the module's 60 MHz clock output (CLKOUT) and OE#. The accelerator port has pins to spare, so this can be added later without new hardware (open point U5).
+
+**Without the module:** the KS3's ESP8266 WiFi module is wired to the FPGA by a UART. It could carry a slow console (a few hundred KB/s at most) if no FT232H is fitted. Not planned for version 1.
 
 ## 3. Control commands from the PC
 
@@ -84,7 +88,7 @@ A typical console driver sets RXLEVEL = 1 (interrupt on every key) or a larger l
 
 ### 4.3 When nothing is reading on the PC
 
-If no program on the PC has the port open, sent data piles up: first in the FT2232H, then in the transmit FIFO. Software can treat a full FIFO as "nobody listening". With **SERCON.TXDROP** set, the oldest bytes are dropped to make room instead, so debug output never holds a program up. Dropped bytes are counted in SERSTAT.DROPPED.
+If no program on the PC has the port open, sent data piles up: first in the FT232H, then in the transmit FIFO. Software can treat a full FIFO as "nobody listening". With **SERCON.TXDROP** set, the oldest bytes are dropped to make room instead, so debug output never holds a program up. Dropped bytes are counted in SERDROP.
 
 ### 4.4 Bulk transfers with the DMA engine
 
@@ -109,19 +113,20 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 
 | Item | Resource |
 |------|----------|
-| Receive and transmit FIFOs, 2 KB each | 2 block RAMs (already in the design plan's budget as "SDRAM and USB FIFOs") |
+| Receive and transmit FIFOs, 2 KB each | 2 block RAMs (in the design plan's budget) |
 | FIFO interface, control-sequence matcher, timers, registers | Estimate 250–400 LUTs |
-| Pins | 13, already wired on the board (not the headers) |
+| Pins | 13 on the accelerator port (15 with synchronous mode later) |
 
 ## 7. Open points
 
 | # | Item |
 |---|------|
-| U1 | Check the miniSpartan6+'s FT2232H EEPROM has channel B in 245 FIFO mode (design plan Q6); set it with FT_Prog if not |
+| U1 | Set the FT232H module's EEPROM to 245 FIFO mode with FT_Prog (once, before first use) |
 | U2 | Measure real throughput with Linux and Windows drivers |
 | U3 | The boot ROM's upload protocol (with the boot ROM spec) |
 | U4 | Should the link offer several logical channels (e.g. console and debugger at once)? For now software can share the one stream |
-| U5 | Synchronous 245 FIFO mode (up to about 40 MB/s) needs the FT2232H's 60 MHz clock output, which the board may not wire to the FPGA; check the schematic |
+| U5 | Synchronous 245 FIFO mode (up to about 40 MB/s): needs the FT232H's 60 MHz CLKOUT and OE# on two more accelerator-port pins |
+| U6 | Which `accel_io` pins carry the 13 signals, and which FT232H module to recommend (pin order, how it plugs onto the Pi header) |
 
 ## 8. Tests
 

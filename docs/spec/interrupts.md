@@ -11,7 +11,7 @@ The interrupt controller gathers every interrupt request in the machine and pass
 | Sources | 24, plus NMI |
 | Vectors | One per source: vector = VECBASE + source number (default VECBASE = 64, the first 68000 user vector) |
 | Levels | Each source can be set to level 1–6, or 0 (off). Defaults follow the design plan |
-| NMI (level 7) | The NMI button, and a "break" request from the USB host |
+| NMI (level 7) | The KS3's NMI (Multiface) button, and a "break" request from the USB host |
 | Within a level | Lower source number goes first |
 | Software interrupt | The CPU can raise one for itself, to do work later at a lower priority |
 | Spurious requests | Handled with the 68000's spurious-interrupt vector (24) |
@@ -32,7 +32,7 @@ The interrupt controller gathers every interrupt request in the machine and pass
 1. A unit (video, audio, DMA engine, timer…) sets a status flag. If that flag's enable is on in the unit, the unit raises its **request line** to the controller. Each unit keeps its own flags and enables, as described in its spec.
 2. If the source is enabled in **INTENA** and the master enable is on, the request is **pending**.
 3. The controller finds the highest level with a pending source and drives the 68000's IPL lines with that level.
-4. When the CPU's interrupt mask allows it, the 68000 runs an **interrupt-acknowledge cycle** for that level. The controller answers with the vector of the pending source at that level with the lowest source number, and asserts /DTACK. This is a normal internal bus cycle, with no SDRAM slot and no wait states, so it never knocks the CPU off its slot grid (spec 5, section 5).
+4. When the CPU's interrupt mask allows it, the 68000 runs an **interrupt-acknowledge cycle** for that level. The controller answers with the vector of the pending source at that level with the lowest source number, and asserts /DTACK. This is a normal internal bus cycle, with no memory cycle and no wait states (spec 5, section 5).
 5. The handler clears the cause in the unit (usually by writing 1 to the unit's sticky flag). The request drops. If another source at the same level is still pending, the CPU is interrupted again straight after the handler returns.
 
 Requests are **level-sensitive**: a source stays pending until its unit's flag is cleared, so no interrupt is ever lost.
@@ -64,7 +64,7 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 | 16 | 80 | SD | SD card: command or data done, error, card inserted/removed (spec 15) | 2 |
 | 17 | 81 | KEYB | Keyboard: key event, keyboard reply, error (spec 16) | 2 |
 | 18 | 82 | SOFT | Software interrupt (SOFTINT) | 1 |
-| 19–23 | 83–87 | – | Reserved (e.g. GPIO pins on the headers, the CPU board) | 0 (off) |
+| 19–23 | 83–87 | – | Reserved (e.g. mouse, joysticks, accelerator-port pins) | 0 (off) |
 
 The video flags that share one source (VIDERR) and the audio flags (AUDSTR, AUDCH) are told apart by reading the unit's status register in the handler.
 
@@ -74,7 +74,9 @@ The video flags that share one source (VIDERR) and the audio flags (AUDSTR, AUDC
 
 Level 7 cannot be masked by the 68000. It is kept for getting control back from a hung or misbehaving program:
 
-- **NMI button:** a button on a spare header pin, debounced in the FPGA.
+- **NMI button:** the KS3's NMI button (the one the Next uses for its Multiface), debounced in the FPGA.
+
+The KS3's third button, DivMMC, is not an interrupt source: software reads it in a system register, and the boot ROM uses it as the "monitor" button (spec 7).
 - **USB break:** a BREAK command from the PC over the USB link (spec 14, section 3), so a debugger on the PC can stop the 68000 at any moment.
 
 Both use vector 31, the 68000's usual level 7 vector; the controller supplies it during the acknowledge like any other vector. NMISTAT says which one it was. NMIEN can turn each off, for example so the USB break only works while debugging. NMI is edge-triggered on the 68000, so each press or break gives exactly one interrupt.
@@ -115,7 +117,7 @@ After reset everything except NMI is off, so the boot ROM can set up its vector 
 
 | # | Item |
 |---|------|
-| I1 | Which header pins carry the NMI button and any GPIO interrupts (spec 7) |
+| I1 | Whether any accelerator-port pins should be able to raise interrupts (sources 19–23) |
 | I3 | Use of the reserved sources 19–23 |
 
 ## 10. Tests

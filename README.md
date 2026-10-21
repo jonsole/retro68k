@@ -1,67 +1,68 @@
 # retro68k
 
-A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA handling video and audio. It starts as a 68000 core inside the FPGA and later gains a real 68SEC000 CPU board.
+A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA handling video and audio. It runs on a **ZX Spectrum Next KS3** board: the 68000 is a core inside the board's Artix-7 FPGA, and main memory is the board's fast SRAM.
 
 ## Goals
 
-- **CPU:** 68000 at 20 MHz: the fx68k core inside the FPGA first (16.7 MHz fallback), then a real MC68SEC000 (3.3 V, 20 MHz)
-- **Memory:** Amiga-style Chip RAM (SDRAM shared with DMA in fixed slots), plus CPU-only Fast RAM on the later CPU board
+- **CPU:** 68000 at 20 MHz, the fx68k core inside the FPGA
+- **Memory:** 4 MB of Amiga-style Chip RAM in fast SRAM, shared with DMA in fixed memory cycles; the CPU has its own cycle in every slot, so it never waits for the display or sound
 - **ROM:** boot ROM with a monitor, held in FPGA block RAM
-- **Video + audio:** one FPGA that the CPU sees as memory-mapped registers and VRAM
-- **I/O:** UART, SD card, PS/2 or USB keyboard, timers, interrupts
-- Easy to build: 2–4 layer PCB, parts you can still buy
+- **Video:** HDMI and VGA, programmable modes from 640×480 to 1280×720, 4 layers, 64 sprites, a copper
+- **Audio:** 16 sample channels with sinc resampling, plus a stereo stream
+- **DMA engine:** copies, fills and blits, and feeds the SD card and USB serial
+- **I/O:** USB serial (FT232H module), SD card, PS/2 and Spectrum keyboards, real-time clock, timers, interrupts
 
-## Block diagram (with the later CPU board)
+## Block diagram
 
 ```
-            +-----------+       address / data / control bus        +------------------+
- Clock ---> |  MC68000  |<==========================================>|  FPGA (video +   |---> VGA / HDMI
- Reset ---> |  (16-bit) |        |              |          |        |  audio + glue)   |---> I2S / PWM audio
-            +-----------+        |              |          |        +------------------+
-                  ^              v              v          v                 |
-                  |        +----------+   +----------+  +-------+     +-------------+
-                  +--------| Boot ROM |   |  SRAM    |  |  I/O  |     | Video SRAM  |
-              IPL / DTACK  | (flash)  |   | (fast)   |  | UART, |     | (FPGA side) |
-                           +----------+   +----------+  | SD... |     +-------------+
-                                                       +-------+
+                       ZX Spectrum Next KS3
+ +---------------------------------------------------------------+
+ |  Artix-7 XC7A35T FPGA                                         |
+ |  +--------+   +-----------+   +-----------------------------+ |      +-----------+
+ |  | fx68k  |<->| bus, glue |<->| SRAM controller (slots)     |<------>| 4 MB SRAM |
+ |  | 68000  |   | boot ROM  |   +-----------------------------+ |      +-----------+
+ |  +--------+   +-----------+     ^      ^      ^      ^        |
+ |                    |           video  audio  copper DMA engine|---> HDMI, VGA
+ |                    v                                          |---> audio jack
+ |         timers, interrupts, SD, keyboard, serial, I2C         |
+ +---------------------------------------------------------------+
+            |            |              |              |
+         SD card    PS/2 + Spectrum   FT232H USB    RTC (I2C)
+                      keyboards       (accelerator port)
 ```
 
 ## Design plan
 
-Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Main choices so far: a **68000 core inside the FPGA** first, a real **MC68SEC000** later, **Xilinx Spartan-6 LX25** FPGA on a Scarab miniSpartan6+ dev board first, HDMI 640×480, PCM sample audio, aimed at both a home computer and a game machine.
+Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Each block has a spec in [`docs/spec/`](docs/spec/).
 
 ## Repository layout
 
 | Folder              | Contents                                       |
 |---------------------|------------------------------------------------|
-| `docs/`             | Design notes, memory map, timing, parts list   |
-| `hardware/kicad/`   | Schematic and PCB                              |
-| `fpga/rtl/`         | Verilog for video, audio and bus interface     |
+| `docs/`             | Design plan and specs                          |
+| `fpga/`             | Register map source (`regmap.def`); Verilog in `fpga/rtl/` |
 | `firmware/boot/`    | 68000 assembly boot ROM / monitor              |
-| `tools/`            | Register map generator (`regmap.py`); later build scripts and the USB loader |
 | `firmware/include/` | Generated hardware definitions for assembler (`hw.inc`) and C (`hw.h`) |
+| `tools/`            | Register map generator (`regmap.py`); later build scripts and the USB loader |
+| `hardware/`         | Wiring for the FT232H module                   |
 
 ## Toolchain
 
 - **68000 code:** `vasm` (Motorola syntax) or `m68k-elf-gcc`
-- **FPGA:** Xilinx ISE 14.7 WebPACK (Spartan-6); simulation with Verilator and Icarus Verilog
-- **PCB:** KiCad 8+
-- **Emulation:** MAME or a custom emulator to test firmware before hardware
+- **FPGA:** Vivado (free edition), scripted with Tcl; simulation with Verilator and Icarus Verilog
+- **Loading:** JTAG during development; installed as a Next core when finished
 
 ## Roadmap
 
-The 68000 starts as a core inside the FPGA, so the whole computer runs on the miniSpartan6+ board alone. A real 68SEC000 board comes later. Details are in [`docs/design-plan.md`](docs/design-plan.md).
-
-1. [ ] FPGA bring-up: HDMI test pattern, USB serial echo
+1. [ ] FPGA bring-up: HDMI/VGA test pattern, USB serial echo
 2. [ ] Whole computer in simulation: prints "hello"
-3. [ ] Computer on the board: "hello" on an HDMI monitor
-4. [ ] SDRAM main memory and a boot monitor
-5. [ ] Video: bitmap modes, palette, scrolling, sprites
-6. [ ] Audio: PCM sample channels
-7. [ ] Home computer: SD card, keyboard, BASIC
-8. [ ] Upgrade: real 68SEC000 CPU board with fast SRAM
-9. [ ] Final PCB
+3. [ ] Computer on the board: "hello" on a monitor, RAM test, boot monitor
+4. [ ] Video: bitmap layers, palette, scrolling, sprites, copper
+5. [ ] Audio: sample channels and stream
+6. [ ] DMA engine
+7. [ ] Home computer: SD card, keyboards, real-time clock, BASIC
+8. [ ] Installed as a Next core
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see `LICENSE`. The fx68k core, when added, is GPL-3.0, so FPGA builds that include it are covered by the GPL.

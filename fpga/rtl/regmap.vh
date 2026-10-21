@@ -6,13 +6,9 @@
 `define RETRO68K_REGMAP_VH
 
 
-// ---- CHIPRAM: Chip RAM (SDRAM), shared with DMA
+// ---- CHIPRAM: Chip RAM (SRAM, 4 MB; 2 MB boards use the first half), shared with DMA
 `define RM_CHIPRAM_BASE                     24'h000000
-`define RM_CHIPRAM_SIZE                     25'h800000
-
-// ---- FASTRAM: Fast RAM, CPU board only
-`define RM_FASTRAM_BASE                     24'hA00000
-`define RM_FASTRAM_SIZE                     25'h200000
+`define RM_CHIPRAM_SIZE                     25'h400000
 
 // ---- TEXT: Text screen, 128 x 32 cells of 16 bits
 `define RM_TEXT_BASE                        24'hE10000
@@ -293,9 +289,10 @@
 `define RM_SERDROP_COUNT                    15:0
 `define RM_SDCON                            16'h0300
 `define RM_SDCON_EN                         0
-`define RM_SDCON_BUS4                       1
-`define RM_SDCON_AUTOSTOP                   2
-`define RM_SDCON_DETECT                     3
+`define RM_SDCON_CS                         1
+`define RM_SDCON_INITCLK                    2
+`define RM_SDCON_CRCCHK                     3
+`define RM_SDCON_AUTOSTOP                   4
 `define RM_SDCON_CLKDIV                     15:8
 `define RM_SDARG                            16'h0304
 `define RM_SDCMD                            16'h0308
@@ -305,32 +302,33 @@
 `define RM_SDCMD_WRITE                      11
 `define RM_SDCMD_MULTI                      12
 `define RM_SDCMD_APP                        13
+`define RM_SDCMD_BLK16                      14
 `define RM_SDBLKCNT                         16'h031C
 `define RM_SDBLKCNT_COUNT                   15:0
 `define RM_SDSTAT                           16'h0320
 `define RM_SDSTAT_CMDBUSY                   0
 `define RM_SDSTAT_DATABUSY                  1
 `define RM_SDSTAT_CARDBUSY                  2
-`define RM_SDSTAT_CARDIN                    3
+`define RM_SDSTAT_INITBUSY                  3
 `define RM_SDSTAT_FIFOCOUNT                 15:4
 `define RM_SDIRQ                            16'h0324
 `define RM_SDIRQ_CMDDONE                    0
 `define RM_SDIRQ_DATADONE                   1
 `define RM_SDIRQ_CMDTIMEOUT                 2
-`define RM_SDIRQ_CMDCRC                     3
+`define RM_SDIRQ_CMDERR                     3
 `define RM_SDIRQ_DATATIMEOUT                4
 `define RM_SDIRQ_DATACRC                    5
 `define RM_SDIRQ_WRITEERR                   6
-`define RM_SDIRQ_CARDCHANGE                 7
+`define RM_SDIRQ_TOKENERR                   7
 `define RM_SDIRQEN                          16'h0328
 `define RM_SDIRQEN_CMDDONE                  0
 `define RM_SDIRQEN_DATADONE                 1
 `define RM_SDIRQEN_CMDTIMEOUT               2
-`define RM_SDIRQEN_CMDCRC                   3
+`define RM_SDIRQEN_CMDERR                   3
 `define RM_SDIRQEN_DATATIMEOUT              4
 `define RM_SDIRQEN_DATACRC                  5
 `define RM_SDIRQEN_WRITEERR                 6
-`define RM_SDIRQEN_CARDCHANGE               7
+`define RM_SDIRQEN_TOKENERR                 7
 `define RM_SDTIMEOUT                        16'h032C
 `define RM_SDTIMEOUT_MS                     15:0
 `define RM_SDDATA                           16'h0330
@@ -338,6 +336,7 @@
 `define RM_KBCON_EN                         0
 `define RM_KBCON_RAW                        1
 `define RM_KBCON_RESETKEYS                  2
+`define RM_KBCON_MATRIX                     3
 `define RM_KBSTAT                           16'h0404
 `define RM_KBSTAT_COUNT                     4:0
 `define RM_KBSTAT_TXBUSY                    8
@@ -389,10 +388,9 @@
 `define RM_SYSCON_HALTRESET                 4
 `define RM_SYSRESET                         16'h0814
 `define RM_SYSRESET_KEY                     15:0
-`define RM_SYSLED                           16'h0818
-`define RM_SYSLED_LEDS                      7:0
-`define RM_SYSSW                            16'h081C
-`define RM_SYSSW_SWITCHES                   3:0
+`define RM_SYSBTN                           16'h0818
+`define RM_SYSBTN_MULTIFACE                 0
+`define RM_SYSBTN_DIVMMC                    1
 `define RM_SYSSTAT                          16'h0820
 `define RM_SYSSTAT_HALTED                   0
 `define RM_BUSERRADDR                       16'h0824
@@ -402,6 +400,21 @@
 `define RM_BUSERRWHY_ROMWRITE               1
 `define RM_BUSERRWHY_PROTECT                2
 `define RM_BUSERRWHY_CPUSPACE               3
+`define RM_I2CCON                           16'h0840
+`define RM_I2CCON_EN                        0
+`define RM_I2CCON_CLKDIV                    15:8
+`define RM_I2CDATA                          16'h0844
+`define RM_I2CDATA_BYTE                     7:0
+`define RM_I2CCMD                           16'h0848
+`define RM_I2CCMD_START                     0
+`define RM_I2CCMD_STOP                      1
+`define RM_I2CCMD_WRITE                     2
+`define RM_I2CCMD_READ                      3
+`define RM_I2CCMD_ACK                       4
+`define RM_I2CSTAT                          16'h084C
+`define RM_I2CSTAT_BUSY                     0
+`define RM_I2CSTAT_NACK                     1
+`define RM_I2CSTAT_ARBLOST                  2
 `define RM_SDRESP_BASE                      16'h030C
 `define RM_SDRESP_NUM                       4
 `define RM_KBMAP_BASE                       16'h0440

@@ -8,13 +8,13 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 
 | Item | Value |
 |------|-------|
-| Channels | 4, running at the same time and taking turns burst by burst |
+| Channels | 4, running at the same time and taking turns memory cycle by memory cycle |
 | Programming | Chains of 32-byte **descriptors** (job descriptions) in Chip RAM or in a small descriptor RAM inside the FPGA |
 | Jobs | Copy, fill, transparent copy (colour key), logic operations and add, in 1D (linear) or 2D (rectangles with a stride); MIX for audio voices |
 | Pixel formats | Bytes, or 1, 2, 4 or 8 bits per pixel, positioned to the pixel |
 | Sources and destinations | Chip RAM, the FPGA's block RAM areas (palette, sprite table, text screen, font, ROM), the custom hardware registers, or a peripheral port (SD card, USB) |
-| Memory slots | Normally only spare ones, so the CPU is never slowed. A **HIGH** bit per job lets it take CPU slots, like the Amiga's "blitter nasty" |
-| Speed at 640×480 | Copy 10–34 MB/s, fill 16–56 MB/s, depending on how busy the CPU is (section 7). A 68000 at 20 MHz copies about 4.5 MB/s |
+| Memory cycles | Normally only spare ones, so the CPU is never slowed. A **HIGH** bit per job lets it take the CPU's cycles, like the Amiga's "blitter nasty" |
+| Speed at 640×480 | Copy about 20–33 MB/s, fill 40–66 MB/s, depending on how busy the CPU is and on wide fetch (section 7). A 68000 at 20 MHz copies about 4.5 MB/s |
 | Finishing | Interrupt per descriptor if asked, status flags per channel |
 
 ## 2. Comparison with the Amiga
@@ -56,7 +56,7 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
 | 7–4 | FN | LOGIC: truth table, result bit = FN[src × 2 + dst]. For example `0x8` = AND, `0xE` = OR, `0x6` = XOR, `0x5` = NOT destination. ADD: bit 4 = saturate, bit 5 = signed (see below) |
 | 9–8 | BPP | 0 = 1, 1 = 2, 2 = 4, 3 = 8 bits per pixel |
 | 10 | DESC | Run backwards (last byte first), for overlapping copies |
-| 11 | HIGH | May take CPU slots (section 5) |
+| 11 | HIGH | May take the CPU's memory cycles (section 5) |
 | 12 | IRQ | Raise the channel's interrupt when this descriptor finishes |
 | 14–13 | SRCKIND | 0 = memory, 1 = port, 2 = none (FILL), 3 = VALUE (ADD a constant) |
 | 16–15 | DSTKIND | 0 = memory, 1 = port |
@@ -84,7 +84,7 @@ A job is a 32-byte descriptor. Each one can point to the next, so a chain of job
   - Mixing 8-bit signed audio samples with signed saturation (linear job, BPP = 8).
 - To subtract, add the two's complement, e.g. add 0xFF to subtract 1 at 8bpp with wrap.
 
-**Linear jobs** (memcpy, memset, port transfers): BPP = 8, HEIGHT = 1, WIDTH = length in bytes (up to 8 MB).
+**Linear jobs** (memcpy, memset, port transfers): BPP = 8, HEIGHT = 1, WIDTH = length in bytes (up to the whole of Chip RAM).
 
 **2D jobs** (blits): WIDTH × HEIGHT pixels, with each row starting STRIDE bytes after the last. Source and destination can have different strides, so an image can be copied out of a sprite sheet into a screen.
 
@@ -134,7 +134,7 @@ MIX adds one voice into a 16-bit stereo audio buffer, for the audio stream (spec
 
 At the end of the job, POS, FRAC and ENDED are written back to the descriptor, so the same descriptor carries on smoothly in the next block. To start a new note, software writes POS, FRAC = 0, END, LOOP, STEP and the volumes, and clears ENDED.
 
-**Cost:** about 1 memory slot per stereo frame at normal pitch (sample read, buffer read, buffer write), a little more at higher pitches. The multiplies use 2 DSP slices.
+**Cost:** about 5 memory cycles per stereo frame at normal pitch (one sample read, a 4-byte buffer read and a 4-byte buffer write), a little more at higher pitches. The multiplies use 2 DSP slices.
 
 ### 3.2 REGLIST: a list of register writes
 
@@ -157,9 +157,9 @@ Uses:
 
 **DMA addresses are CPU addresses** (24-bit). A job sees memory exactly as the CPU does:
 
-| Address | Area | Uses SDRAM slots? |
+| Address | Area | Uses Chip RAM cycles? |
 |---------|------|-------------------|
-| `0x000000`–`0x7FFFFF` | **Chip RAM** (8 MB) | Yes |
+| `0x000000`–`0x3FFFFF` | **Chip RAM** (4 MB; 2 MB boards: `0x000000`–`0x1FFFFF`) | Yes |
 | Internal areas below | The FPGA's block RAM areas and the custom registers | **No** |
 
 **Internal areas:**
@@ -190,32 +190,29 @@ Anything else, including the system area at `0xF00000` (interrupt controller, ti
 
 When a port isn't ready, that channel waits and the other channels keep running. Port addresses don't increment.
 
-## 5. Memory slots and priority
+## 5. Memory cycles and priority
 
-The engine replaces "blitter" and "storage" in the slot lists of spec 5.
+The engine is the last user of the free pool in spec 5 (section 6), after sprites, audio and the copper.
 
-- **Reads** move up to 12 bytes per slot, **writes** up to 8 bytes (spec 5, section 4.2). A copy of 24 bytes takes 2 read slots and 3 write slots.
-- **Normal jobs** use:
-  - free odd slots, after the CPU, sprites and the copper,
-  - even slots the CPU is not using.
-  The CPU is never slowed.
-- **HIGH jobs** may also take the CPU's even slots, but always leave the CPU a share of them, so it can still run interrupts and code from Chip RAM. The share is set per channel by CPUSHARE in CHCTRL: **1 in 2, 1 in 4 (default) or 1 in 8** of its even slots. Each slot taken costs the CPU 2 clocks, as for sprites. Use HIGH when the CPU would only be waiting for the job anyway.
-- **Peripheral transfers** also get the **2 fixed odd slots per line** that spec 5 reserved for storage, so SD and USB always get at least 24 bytes per line (about 750 KB/s at 640×480), however busy the screen is.
-- **Between channels:** ready channels take turns, one burst each.
-- **Descriptors** in Chip RAM take 3 read slots each to load. Descriptors in the descriptor RAM take none, which suits short, frequent jobs.
+- **One memory cycle** (20 ns) reads or writes 2 bytes at any address (spec 5, section 4.2). A copy costs 2 cycles per 2 bytes (one read, one write); a fill costs 1.
+- **Normal jobs** use free-pool cycles: cycle 3 when wide fetch is off, cycle 4 outside the fixed users, display cycles no layer needs (including all of blanking), and cycle 0 whenever the CPU isn't using it. **The CPU is never slowed.**
+- **HIGH jobs** may also take the CPU's cycle 0, but always leave the CPU a share of them, so it can still run interrupts and code from Chip RAM. The share is set per channel by CPUSHARE in CHCTRL: **1 in 2, 1 in 4 (default) or 1 in 8** of its cycle 0s. Each cycle taken costs the CPU 2 clocks, as for urgent sprites. Use HIGH when the CPU would only be waiting for the job anyway.
+- **Peripheral transfers** also get the **2 fixed cycles per line** that spec 5 (section 7) reserves for them, so SD and USB always get at least 4 bytes per line (about 125 KB/s at 640×480), however busy the screen is. In practice they get far more from the free pool: the SD card's 3 MB/s is a few percent of it.
+- **Between channels:** ready channels take turns, one group of up to 8 cycles each, so a long blit can't hold up a peripheral transfer for more than a fraction of a microsecond.
+- **Descriptors** in Chip RAM take 16 read cycles (32 bytes) to load. Descriptors in the descriptor RAM take none, which suits short, frequent jobs.
 
 ## 6. How a blit works
 
-Each burst goes through the same four steps:
+The engine works through each row in groups of up to 8 words (16 bytes). Each group goes through the same four steps:
 
-1. **Read:** a burst of up to 12 bytes from the source into the engine's 64-byte buffer. Jobs that read the destination (LOGIC, ADD, and edge bytes at 1, 2 or 4bpp) also read the matching destination burst.
+1. **Read:** up to 16 bytes from the source into the engine's 64-byte buffer, one word per memory cycle. Jobs that read the destination (LOGIC, ADD, and edge bytes at 1, 2 or 4bpp) also read the matching destination words.
 2. **Shift** (1, 2 and 4bpp only): when the source and destination start at different pixels within a byte (SRCBIT ≠ DSTBIT), the data is shifted by the difference. Bits carry from one word into the next, as in the Amiga's barrel shifter. At 8bpp there is never any shifting, because every pixel starts on a byte.
 3. **Combine:** key compare (KEYCOPY), logic function (LOGIC) or per-pixel add (ADD).
-4. **Write:** up to 8 bytes, using the SDRAM's byte write masks to leave untouched bytes alone.
+4. **Write:** one word per memory cycle, using the SRAM's byte selects (/UB, /LB) to leave an untouched byte alone.
 
 **Edge masks are automatic.** The engine works out which pixels of the first and last bytes in each row belong to the job from DSTBIT and WIDTH. There are no mask registers to set, unlike the Amiga's first-word and last-word masks.
 
-**Read-modify-write:** the SDRAM can only skip whole bytes when writing. When a write would change only some pixels in a byte, the engine reads the destination, merges, and writes it back. This happens:
+**Read-modify-write:** the SRAM can only skip whole bytes when writing. When a write would change only some pixels in a byte, the engine reads the destination, merges, and writes it back. This happens:
 
 - at the row edges of 1, 2 and 4bpp jobs that don't start or end on a byte,
 - for every byte of KEYCOPY at 1, 2 and 4bpp (two or more pixels share a byte),
@@ -225,21 +222,30 @@ At 8bpp, COPY, FILL and KEYCOPY never need it: a skipped key pixel is simply a b
 
 ## 7. Speed
 
-At 640×480, wide fetch off (65 free odd slots and 160 even slots per line):
+At 640×480 (320 slots = 1,600 memory cycles per 32 µs line), a visible line has these free-pool cycles before sprites and the copper take their share:
 
-| Situation | Copy | Fill | Chip RAM → block RAM |
-|-----------|------|------|----------------------|
-| CPU busy in Chip RAM, normal job (free odd slots only) | 9.8 MB/s | 16 MB/s | 24 MB/s |
-| CPU busy, HIGH job, CPU keeps 1 in 2 | 22 MB/s | 36 MB/s | 54 MB/s |
-| CPU busy, HIGH job, CPU keeps 1 in 4 (default) | 28 MB/s | 46 MB/s | 69 MB/s |
-| CPU busy, HIGH job, CPU keeps 1 in 8 | 31 MB/s | 51 MB/s | 77 MB/s |
-| CPU idle, waiting or running from ROM/block RAM (all spare slots) | 34 MB/s | 56 MB/s | 84 MB/s |
+| Source of free cycles | Wide fetch off | Wide fetch on |
+|-----------------------|----------------|---------------|
+| Cycle 3 | 320 | 64 (blanking only) |
+| Cycle 4 outside the fixed users | 282 | 282 |
+| Cycles 1–2 in horizontal blanking | 128 | 128 |
+| **Total without cycle 0** | **730** | **474** |
 
-Jobs that read the destination are slower: LOGIC and ADD at 8bpp need 7 slots per 24 bytes instead of 5, so they run at about 70% of the copy speed.
+Plus the CPU's cycle 0s it doesn't use: a 20 MHz 68000 running flat out from Chip RAM uses at most 160 of the 320, so at least 160 are free; an idle CPU leaves all 320.
 
-For comparison, a 68000 at 20 MHz copies about 4–4.5 MB/s (`MOVE.L (A0)+,(A1)+` or `MOVEM.L`). Clearing a 640×480 8bpp screen (300 KB) takes about 5–19 ms with the engine. That fits in one 60 Hz frame (16.7 ms) unless the CPU is busy in Chip RAM and the job is not HIGH.
+| Situation (wide fetch off) | Free cycles per line | Copy | Fill | Chip RAM → block RAM |
+|-----------|------|------|------|----------------------|
+| CPU busy in Chip RAM, normal job | 890 | 28 MB/s | 56 MB/s | 56 MB/s |
+| CPU busy, HIGH job, CPU keeps 1 in 4 (default) | 970 | 30 MB/s | 61 MB/s | 61 MB/s |
+| CPU busy, HIGH job, CPU keeps 1 in 8 | 1,010 | 32 MB/s | 63 MB/s | 63 MB/s |
+| CPU idle, waiting or running from ROM/block RAM | 1,050 | 33 MB/s | 66 MB/s | 66 MB/s |
+| CPU busy, normal job, **wide fetch on** | 634 | 20 MB/s | 40 MB/s | 40 MB/s |
 
-With wide fetch on, the free odd slots in the visible area go to video, so normal jobs mostly run during blanking and in the CPU's unused slots.
+HIGH with "1 in 2" gives the same speed as a normal job, since the CPU never uses more than 1 in 2 cycle 0s anyway; it only guarantees the order. Sprites, the copper and audio top-ups come first and lower these figures a little, typically by less than 10%. During vertical blanking all display cycles are free, so the engine runs up to about 50% faster there.
+
+Jobs that read the destination are slower: LOGIC and ADD need 3 cycles per 2 bytes instead of 2, so they run at about 67% of the copy speed.
+
+For comparison, a 68000 at 20 MHz copies about 4–4.5 MB/s (`MOVE.L (A0)+,(A1)+` or `MOVEM.L`). Clearing a 640×480 8bpp screen (300 KB) takes about 5–8 ms with the engine, well within one 60 Hz frame (16.7 ms), even with the CPU busy and wide fetch on.
 
 ## 8. Channels and registers
 
@@ -250,7 +256,7 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
 | `+0x0` | CHDESC | 23–0 | Write: first descriptor of a chain. Read: the descriptor now running |
-| `+0x4` | CHCTRL | START (0), STOP (1), PAUSE (2), CPUSHARE (5–4) | START begins the chain at CHDESC. STOP ends it after the current burst. PAUSE holds it. CPUSHARE: even slots the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
+| `+0x4` | CHCTRL | START (0), STOP (1), PAUSE (2), CPUSHARE (5–4) | START begins the chain at CHDESC. STOP ends it after the current group of cycles. PAUSE holds it. CPUSHARE: cycle 0s the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
 | `+0x8` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | DONE and ERR are sticky, write 1 to clear |
 | `+0xC` | CHERR | 23–0 | Address that caused an error |
 
@@ -308,7 +314,7 @@ Software decides, but a sensible default:
 - **MIX:** 8- and 16-bit voices, looping and one-shot, OVER and MONO, pitches from 1/16× to 4×; positions written back and continuing exactly across blocks; compare with a Python reference mixer.
 - **Chains:** a chain of mixed jobs in Chip RAM and in descriptor RAM; IRQ only on the marked ones.
 - **Channels:** all 4 running at once; a stalled port channel does not hold up the others.
-- **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least its CPUSHARE of even slots (check all three settings), and every CPU delay is 2 clocks.
+- **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least its CPUSHARE of cycle 0s (check all three settings), and every CPU delay is 2 clocks.
 - **Errors:** a bad address (including the system area) stops only that channel, sets ERR and CHERR, and raises its interrupt.
 - **Registers:** block COPY into a layer's registers and a REGLIST give exactly the same result as CPU writes; a REGLIST that starts another channel works; register reads into memory; misaligned register access is an error; a CPU register access during a DMA register write is never delayed by more than one clock.
 - **Speed:** measure the figures in section 7 in simulation.

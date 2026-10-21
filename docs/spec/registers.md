@@ -11,14 +11,12 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 | CPU address | Size | What | Spec |
 |-------------|------|------|------|
 | `0x000000`–`0x007FFF` | 32 KB | Boot ROM overlay for CPU reads after reset (writes go to Chip RAM) | 7, section 3.2 |
-| `0x000000`–`0x7FFFFF` | 8 MB | **Chip RAM** (SDRAM), shared by the CPU and all DMA | 5 |
-| `0x800000`–`0x9FFFFF` | 2 MB | Reserved (bus error) | |
-| `0xA00000`–`0xBFFFFF` | 2 MB | **Fast RAM** on the CPU board (bus error on the main path) | 5, section 9 |
-| `0xC00000`–`0xDFFFFF` | 2 MB | Reserved (bus error) | |
+| `0x000000`–`0x3FFFFF` | 4 MB | **Chip RAM** (the KS3's SRAM), shared by the CPU and all DMA. On 2 MB boards: `0x000000`–`0x1FFFFF`, and the rest is a bus error | 5 |
+| `0x400000`–`0xDFFFFF` | 10 MB | Reserved (bus error) | |
 | `0xE00000`–`0xE0FFFF` | 64 KB | **Custom block**: video, sprites, copper, DMA engine, audio registers; palette, sprite table, descriptor RAM | Section 3 |
 | `0xE10000`–`0xE11FFF` | 8 KB | Text screen | 4, section 4.7 |
 | `0xE12000`–`0xE12FFF` | 4 KB | Font | 4, section 4.7 |
-| `0xF00000`–`0xF0FFFF` | 64 KB | **System block**: interrupts, timers, serial, SD card, keyboard, system control | Section 4 |
+| `0xF00000`–`0xF0FFFF` | 64 KB | **System block**: interrupts, timers, serial, SD card, keyboard, system control, I2C | Section 4 |
 | `0xF80000`–`0xF87FFF` | 32 KB | **Boot ROM** | 7, section 3 |
 | Everything else | | Unmapped (bus error) | 1, section 6 |
 
@@ -253,18 +251,18 @@ SERDROP clearing on read is the one other exception to rule 4 (section 2). It is
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
 | `0x300` | SDCON | RW | 15, 6 |
-| `0x304` | SDARG | RW | 15, 3.1 |
-| `0x308` | SDCMD | W (starts a command) | 15, 3.1 |
-| `0x30C` | SDRESP0 | R | 15, 3.1 |
-| `0x310` | SDRESP1 | R | 15, 3.1 |
-| `0x314` | SDRESP2 | R | 15, 3.1 |
-| `0x318` | SDRESP3 | R | 15, 3.1 |
-| `0x31C` | SDBLKCNT | RW | 15, 3.2 |
+| `0x304` | SDARG | RW | 15, 3.2 |
+| `0x308` | SDCMD | W (starts a command) | 15, 3.2 |
+| `0x30C` | SDRESP0 | R | 15, 3.2 |
+| `0x310` | SDRESP1 | R | 15, 3.2 |
+| `0x314` | SDRESP2 | R (reserved, reads 0) | 15, 6 |
+| `0x318` | SDRESP3 | R (reserved, reads 0) | 15, 6 |
+| `0x31C` | SDBLKCNT | RW | 15, 3.3 |
 | `0x320` | SDSTAT | R | 15, 6 |
 | `0x324` | SDIRQ | W1C | 15, 6 |
 | `0x328` | SDIRQEN | RW | 15, 6 |
 | `0x32C` | SDTIMEOUT | RW | 15, 6 |
-| `0x330` | SDDATA | RW (reading takes 4 bytes) | 15, 3.3 |
+| `0x330` | SDDATA | RW (reading takes 4 bytes) | 15, 3.4 |
 
 ### 4.6 Keyboard (`0xF00400`)
 
@@ -273,11 +271,11 @@ SERDROP clearing on read is the one other exception to rule 4 (section 2). It is
 | `0x400` | KBCON | RW | 16, 4 |
 | `0x404` | KBSTAT | R | 16, 4 |
 | `0x408` | KBDATA | R (reading takes an event) | 16, 3.2 |
-| `0x40C` | KBSEND | W | 16, 3.4 |
+| `0x40C` | KBSEND | W | 16, 3.5 |
 | `0x410` | KBREPLY | R | 16, 3.2 |
 | `0x414` | KBIRQ | R, W1C | 16, 4 |
 | `0x418` | KBIRQEN | RW | 16, 4 |
-| `0x440`–`0x47C` | KBMAP0–15 | R | 16, 3.3 |
+| `0x440`–`0x47C` | KBMAP0–15 | R | 16, 3.4 |
 
 ### 4.7 System control (`0xF00800`)
 
@@ -287,13 +285,16 @@ SERDROP clearing on read is the one other exception to rule 4 (section 2). It is
 | `0x804` | SYSVER | R | 7, 5 |
 | `0x808` | SYSCFG | R | 7, 5 |
 | `0x80C` | RESETWHY | R | 7, 2.1 |
-| `0x810` | SYSCON | RW | 7, 7; 1, 9 |
+| `0x810` | SYSCON | RW | 7, 9; 1, 9 |
 | `0x814` | SYSRESET | W | 7, 2.1 |
-| `0x818` | SYSLED | RW | 7, 5 |
-| `0x81C` | SYSSW | R | 7, 5 |
+| `0x818` | SYSBTN | R | 7, 5 |
 | `0x820` | SYSSTAT | R | 1, 8 |
 | `0x824` | BUSERRADDR | R | 1, 6 |
 | `0x828` | BUSERRWHY | R | 1, 6 |
+| `0x840` | I2CCON | RW | 7, 6 |
+| `0x844` | I2CDATA | RW | 7, 6 |
+| `0x848` | I2CCMD | W | 7, 6 |
+| `0x84C` | I2CSTAT | R | 7, 6 |
 
 ## 5. Interrupt sources and vectors
 

@@ -122,7 +122,7 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 
 | # | Item |
 |---|------|
-| T1 | A real-time clock (date and time that survives power-off) needs a battery-backed chip on the final PCB; until then the time of day can be set from the USB host or the SD card |
+| T1 | ~~A real-time clock that survives power-off.~~ Resolved: the KS3 has a battery-backed real-time clock on its I2C bus. Software reads and sets the date and time through the system I2C master (spec 7), and can then keep time with the 64-bit counter |
 | T2 | Capture mode (save COUNT when an external pin changes), e.g. for measuring pulses on spare header pins |
 | T3 | Should timers also be able to start the copper (COPJMP) or a sound channel? |
 

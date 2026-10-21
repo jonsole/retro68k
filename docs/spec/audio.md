@@ -20,7 +20,7 @@ Sound comes from two sources that are mixed together and sent to the audio jack:
 | Loops | Loop start and length; queued next sample, as on the Amiga |
 | Stream | 16-bit stereo, played from a ring buffer in Chip RAM, interrupt at the half-way point and at the end |
 | Mixer | 24-bit sum, master volume, saturated to 16 bits |
-| Output | Second-order sigma-delta DAC at 100 MHz on the miniSpartan6+'s two audio pins and stereo jack |
+| Output | Second-order sigma-delta DAC at 100 MHz on the KS3's audio pins (`audioext_l`, `audioext_r` to the audio jack; `audioint` to the internal speaker) |
 | CPU work | None while channels play; the CPU only starts notes and changes settings |
 
 ## 2. Comparison with the Amiga (Paula)
@@ -62,7 +62,7 @@ The sum is kept at 24 bits, so nothing clips until the final step. Sixteen loud 
 
 ### 3.3 DAC
 
-The miniSpartan6+ drives its stereo jack from two FPGA pins through a filter on the board. A second-order sigma-delta modulator running at 100 MHz turns each 16-bit sample into a fast 1-bit stream on each pin. The real quality depends on the board's filter and has to be measured (open point A1). An I2S DAC chip (e.g. PCM5102A) can be added on the final PCB for better quality; the mixer output stays the same.
+The KS3 drives its audio jack from two FPGA pins (`audioext_l`, `audioext_r`) through a filter on the board, and its internal speaker from a third (`audioint`, fed the mono sum). A second-order sigma-delta modulator running at 100 MHz turns each 16-bit sample into a fast 1-bit stream on each pin. The real quality depends on the board's filter and has to be measured (open point A1). Sound can also go over HDMI later (open point A4).
 
 ## 4. Hardware channels
 
@@ -127,9 +127,9 @@ With CTRL.NEAREST set, the channel skips the filter and takes the nearest source
 ### 4.7 Sample cache and memory
 
 - Each channel has a **64-byte sample cache** (32 samples at 16-bit) in block RAM, holding the samples around its position and a little ahead.
-- A **fetcher** keeps the caches topped up, reading 12-byte bursts from Chip RAM. It always serves the channel whose cache is lowest first.
-- **Guaranteed bandwidth:** 6 of audio's 8 fixed slots per line (spec 5, section 7.1) are shared by the 16 channels. That is at least 2.2 MB/s, or 140 KB/s per channel with all 16 playing. A 16-bit channel at 48 kHz needs 96 KB/s at STEP 1, so with octave copies (which keep the effective step at 1 or below) all 16 channels always fit.
-- **Beyond that:** fast pitch-ups without octave copies, or many 16-bit channels at high steps, can need more. When a cache runs low, the fetcher also takes free odd slots, after the CPU and sprites but before the copper and the DMA engine (spec 5, section 6).
+- A **fetcher** keeps the caches topped up, reading one 16-bit word per memory cycle from Chip RAM. It always serves the channel whose cache is lowest first.
+- **Guaranteed bandwidth:** 32 fixed memory cycles per line (spec 5, section 7) are shared by the 16 channels: 64 bytes per line, at least 2 MB/s, or 125 KB/s per channel with all 16 playing. A 16-bit channel at 48 kHz needs 96 KB/s at STEP 1, so with octave copies (which keep the effective step at 1 or below) all 16 channels always fit.
+- **Beyond that:** fast pitch-ups without octave copies, or many 16-bit channels at high steps, can need more. When a cache runs low, the fetcher also takes free-pool cycles, after sprites but before the copper and the DMA engine (spec 5, section 6).
 - If a cache runs empty, the channel repeats its last value until data arrives and STARVED is set. This should not happen within the guaranteed limits.
 
 ## 5. Stream
@@ -139,7 +139,7 @@ The stream plays a stereo buffer that software fills: 16-bit signed samples, lef
 - **STRBASE** and **STRLEN** (in frames, one frame = left + right = 4 bytes) define the ring. The stream plays from start to end and wraps round.
 - **Interrupts** at the half-way point and at the end. Each one means the other half is now free to refill.
 - **STRPOS** reads back the frame being played.
-- The stream reads from Chip RAM through the other 2 fixed audio slots per line: 24 bytes per line, against 6 needed at 48 kHz.
+- The stream reads from Chip RAM through its own 4 fixed memory cycles per line: 8 bytes per line (at least 250 KB/s), against about 6 needed at 48 kHz.
 
 The DMA engine's MIX operation (spec 11, section 3.1) was meant for filling the stream with many mixed voices. It is on hold; with 16 good-quality hardware channels it may not be needed at all.
 
@@ -198,10 +198,10 @@ Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addres
 
 | # | Item |
 |---|------|
-| A1 | Measure the audio quality through the miniSpartan6+'s filter; decide whether the final PCB needs an I2S DAC |
+| A1 | Measure the audio quality through the KS3's filter |
 | A2 | Treble loss between octave copies: a second coefficient table with a lower cut-off could reduce it, at the cost of 2 more block RAMs |
 | A3 | Is 128 filter phases enough? Rounding the position to 1/128 of a sample adds a little noise; interpolating between phases or using 256 phases would remove it |
-| A4 | Audio over HDMI (video spec open point V6) |
+| A4 | Audio over HDMI (video spec open points V6 and V11) |
 | A5 | Effects such as echo or reverb in hardware, using spare engine time |
 
 ## 9. Tests

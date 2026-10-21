@@ -19,7 +19,7 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Depth | Each sprite chooses where it sits among the 4 layers |
 | Images | Taken from anywhere in Chip RAM, with a stride, so frames can come straight from a sprite sheet |
 | Collision | Sprite–sprite (by groups) and sprite–layer, per pixel, latched each frame |
-| Fetch | On the line the sprite is shown, starting a fixed 64 slots before its first pixel (sprites near the left edge start at the end of the line before). Can borrow a CPU slot when needed |
+| Fetch | On the line the sprite is shown, starting a fixed 128 slots before its first pixel (sprites near the left edge start at the end of the line before). Can borrow the CPU's memory cycle when needed |
 
 ## 2. Comparison with the Amiga (OCS/ECS)
 
@@ -78,8 +78,8 @@ Pixel value 0 is always transparent. An 8bpp sprite uses PALOFS in steps of 16 l
 
 Before any sprite on line L can be fetched, the hardware has to know which sprites are on that line and where they start. This **selection** is the one step that happens ahead of the fetch.
 
-- **Selection point:** a fixed **72 slots before line L begins** (7.2 µs). At 640×480 that is slot 248 of line L−1, just before its horizontal blanking.
-- At the selection point, the sprite unit reads EN, X, Y and HEIGHT from all 64 table entries (block RAM, 10 entries per slot, so 7 slots) and picks those that cover line L. The extra 8 slots before the earliest possible fetch (72 = 64 + 8) are the time this takes.
+- **Selection point:** a fixed **136 slots before line L begins** (13.6 µs). At 640×480 that is slot 184 of line L−1.
+- At the selection point, the sprite unit reads EN, X, Y and HEIGHT from all 64 table entries (block RAM, 10 entries per slot, so 7 slots) and picks those that cover line L. The extra 8 slots before the earliest possible fetch (136 = 128 + 8) are the time this takes.
 - **Up to 16 sprites per line,** taken in table order. If more than 16 cover a line, the extras are not drawn on that line and SPROVF is set in VIDSTAT. Putting the most important sprites first in the table makes sure they always show.
 - Each picked sprite is given one of **16 sprite units**. A unit holds the sprite's data for one line in its **data register**: 32 bytes, double-buffered, because a unit can be fetching for line L while still drawing a sprite at the right-hand end of line L−1. 16 units × 64 bytes = 1 KB, built from FPGA logic.
 
@@ -87,30 +87,29 @@ Before any sprite on line L can be fetched, the hardware has to know which sprit
 
 This replaces the fetch window in spec 4, section 5.4.
 
-- **Fetch point:** every sprite's fetch starts exactly **D = 64 slots (6.4 µs) before the slot holding its first visible pixel**. At 640×480 that is 160 pixels ahead; at 1280×720, 427 pixels.
+- **Fetch point:** every sprite's fetch starts exactly **D = 128 slots (12.8 µs) before the slot holding its first visible pixel**. At 640×480 that is 320 pixels ahead; at 1280×720, 853 pixels.
   - Sprites far enough right are fetched on the line they are shown.
   - Sprites nearer the left edge than that have their fetch point at the end of the line before.
 - **At the fetch point,** the unit reads the rest of the sprite's settings: PTR, STRIDE, CTRL, SCALE and COLL. It works out the source line (from Y, VSTEP and VFLIP) and starts fetching.
-- A line of up to 12 bytes takes 1 burst, up to 24 bytes 2 bursts, up to 32 bytes 3 bursts. The bursts are done in the slots right after the fetch point, and are always complete before the first pixel in the cases listed below.
-- **Slots a sprite can use, in order of preference** (unchanged from spec 4):
-  1. Free odd slots
-  2. Display-fetch slots that no layer needs at that moment
-  3. Even slots the CPU is not using
-  4. **Even slots the CPU wants, only when the sprite would otherwise miss its first pixel**
-- **What always fits:** a 64-slot window has 16 `hslot % 4 == 3` slots and 32 even slots besides the layers' own slots.
-  - With wide fetch off: 16 sprites of 3 bursts (48 bursts) all starting at the same X still fit.
-  - With wide fetch on, the odd slots are taken, so the even slots must carry it: 16 sprites of up to 2 bursts, or 10 sprites of 3 bursts, all at the same X. Spread out across the line, all 16 fit.
+- A line of up to 32 bytes takes up to 16 memory cycles (16 bits each, any address). They are done in the cycles right after the fetch point, and are always complete before the first pixel in the cases listed below.
+- **Cycles a sprite can use, in order of preference:**
+  1. Free-pool cycles (spec 5, section 6)
+  2. Display cycles that no layer needs at that moment
+  3. **The CPU's cycle 0, only when the sprite would otherwise miss its first pixel**
+- **What always fits:** a 128-slot window has 128 cycle-3s, at least 90 free cycle-4s, and at least 64 cycle-0s the CPU leaves even when running flat out.
+  - With wide fetch off: at least 282 cycles. 16 full-size sprites (32 bytes each = 256 cycles) all starting at the same X fit, without touching the CPU.
+  - With wide fetch on, cycle 3 is taken in the visible part, leaving at least 154 cycles: 16 sprites of up to 16 bytes, or 9 full-size sprites, at the same X without touching the CPU; up to 13 full-size by borrowing CPU cycles. Spread out across the line, all 16 fit.
   - If a sprite still misses its first pixel, its line is transparent and SPRMISS is set.
-- **Cost to the CPU:** each slot taken costs 2 CPU clocks, and only if the CPU wanted that slot.
-  - Typical (sprites spread out, wide fetch off): nothing.
-  - Worst case (16 full-size sprites at the same X, wide fetch on, CPU running flat out from Chip RAM): 48 slots, 96 CPU clocks, 15% of a 640×480 line, on that line only.
+- **Cost to the CPU:** each cycle taken costs 2 CPU clocks, and only if the CPU wanted that cycle.
+  - Typical (sprites spread out, or wide fetch off): nothing.
+  - Worst case (13 full-size sprites at the same X, wide fetch on, CPU running flat out from Chip RAM): 64 cycles, 128 CPU clocks, 20% of a 640×480 line, on that line only.
 
 ### 5.1 When writes take effect
 
 | Settings | Read at | To change a sprite on line L, write before |
 |----------|---------|---------------------------------------------|
-| EN, X, Y, HEIGHT (which lines it is on, and where) | The selection point | 72 slots before line L begins |
-| PTR, STRIDE, CTRL, SCALE, COLL (what it looks like) | The sprite's own fetch point | 64 slots before the sprite's first pixel on line L |
+| EN, X, Y, HEIGHT (which lines it is on, and where) | The selection point | 136 slots before line L begins |
+| PTR, STRIDE, CTRL, SCALE, COLL (what it looks like) | The sprite's own fetch point | 128 slots before the sprite's first pixel on line L |
 
 - The appearance deadline is a fixed distance before each sprite, wherever it is on the screen. A copper program or interrupt can change a sprite's image, colours or scale a fixed time ahead of where it is drawn, even part-way down the screen.
 - **Reusing a table entry lower down the screen** (Amiga-style multiplexing, for more than 64 sprites in a frame): change its Y, X and PTR before the selection point of the first line it should appear on.
@@ -168,17 +167,17 @@ The PRIO register's SPRPOS field (spec 4, section 4.8) is replaced by each sprit
 
 | # | Item |
 |---|------|
-| S1 | Check the 16 sprite units fit and meet timing at 66.7 MHz pixel clock on the LX25. If not, 8 sprites per line is the fallback |
+| S1 | Check the 16 sprite units fit and meet timing at 66.7 MHz pixel clock on the XC7A35T. If not, 8 sprites per line is the fallback |
 | S2 | Sprite reuse further right on the same line (more than 16 per line): possible later with the just-in-time fetch |
-| S3 | Should 64-pixel 8bpp sprites (64 bytes per line) be allowed, at 6 bursts? It would need bigger data registers |
+| S3 | Should 64-pixel 8bpp sprites (64 bytes per line, 32 memory cycles) be allowed? It would need bigger data registers |
 | S4 | Shrinking sprites (HSTEP above `0x0100`) would need more data per line; left out for now |
 
 ## 11. Tests
 
 - **Golden images:** render sprites at every width, depth, flip and scale, clipped at each edge, in front of and behind layers, and compare with a Python reference model.
 - **Line limit:** 17 sprites on a line: the first 16 by table index are drawn and SPROVF is set.
-- **Fetch:** 16 full-size sprites at the same X with wide fetch off: no SPRMISS, no CPU slots taken. With wide fetch on: exactly the cases in section 5 fit, and every CPU delay is 2 clocks.
+- **Fetch:** 16 full-size sprites at the same X with wide fetch off: no SPRMISS, no CPU cycles taken. With wide fetch on: exactly the cases in section 5 fit, and every CPU delay is 2 clocks.
 - **Depth:** two overlapping sprites, one behind a layer and one in front: the front one always shows, whatever their table order.
 - **Collision:** set up known overlaps between groups and layers; check SPRHIT and CLXGRP after the frame, including a sprite hidden behind a layer.
 - **Write timing:** a position write just before line L's selection point changes line L, just after it changes line L+1. An appearance write just before a sprite's fetch point changes that line, just after it changes the next one. Check this for sprites at several X positions, including near the left edge.
-- **Fixed offset:** for sprites at many X positions, assert the fetch starts exactly 64 slots before the first pixel.
+- **Fixed offset:** for sprites at many X positions, assert the fetch starts exactly 128 slots before the first pixel.

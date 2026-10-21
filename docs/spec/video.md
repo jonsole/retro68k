@@ -4,13 +4,13 @@ Status: **draft for review**
 
 ## 1. Goals
 
-- DVI output over the HDMI connector, from 640×480 up to 1280×720. The **pixel clock is the master clock divided by a whole number**, and the timing is programmable
+- DVI output over the HDMI connector, and at the same time **24-bit VGA** through the KS3's ADV7125 video DAC, from 640×480 up to 1280×720. The **pixel clock is the master clock divided by a whole number**, and the timing is programmable
 - **Four independent layers**, each with its own display window, source address, pixel format, scroll, scale and palette. The Amiga has one display window and one or two playfields
 - **Video memory is fetched on demand by DMA, just in time, as the beam scans**, like the Amiga's bitplane DMA. There are no line buffers. Each layer has only a 48-byte buffer, the equivalent of the Amiga's bitplane data registers
 - **Fetch is automatic:** the hardware works out what to fetch from each layer's window, so there are no fetch start/stop registers to keep in step (the Amiga's DDFSTRT/DDFSTOP)
 - **Free scaling:** each layer has its own horizontal and vertical step in 1/256ths of a pixel, so 2× and 4× pixels, odd sizes and simple zoom effects all use the same mechanism
 - Fully programmable horizontal and vertical timing, with presets for standard modes at 50 and 60 Hz; beam position registers, vertical-blank and line interrupts
-- **Everything runs from one master clock, as on the Amiga.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line, in every mode. Layers only use DMA slots (spec 5), so they never slow the CPU. Sprites can borrow a CPU slot when they would otherwise be late (section 5.4)
+- **Everything runs from one master clock, as on the Amiga.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line, in every mode. Layers only use DMA memory cycles (spec 5), so they never slow the CPU. Sprites can borrow the CPU's cycle only when they would otherwise be late (section 5.4)
 
 Sprites ([spec 9](sprites.md)), the copper and the blitter get their own specs.
 
@@ -26,18 +26,18 @@ Sprites ([spec 9](sprites.md)), the copper and the blitter get their own specs.
 | Line-to-line source step | Modulo (bytes skipped) | Stride (bytes from line to line), signed, so images can be flipped vertically |
 | Scrolling | Fine scroll 0–15 px via BPLCON1, plus pointer arithmetic | Scroll X and Y registers per layer, added by hardware |
 | Pixel size | Lores/hires (fixed 2:1), line doubling by copper tricks | Any horizontal and vertical step, 1/256 pixel precision |
-| Text mode | None | A text layer from block RAM (no SDRAM cost) |
+| Text mode | None | A text layer from block RAM (no Chip RAM cost) |
 | Video timing | Fixed (OCS); programmable on ECS | Pixel clock = master ÷ N (N = 3–8); horizontal and vertical timing programmable |
 
 ## 3. Clocks, timing, retrace and the beam
 
 ### 3.1 One master clock, divided by whole numbers
 
-One PLL, set once at power-on and never changed, makes a 200 MHz master clock from the board's 50 MHz oscillator (50 × 16 = 800 MHz, ÷ 4). Every other clock is the master divided by a whole number, so they all stay in a fixed relationship:
+One MMCM (the Artix-7's clock generator), set once at power-on and never changed, makes a 200 MHz master clock from the KS3's 50 MHz oscillator (50 × 16 = 800 MHz, ÷ 4). Every other clock is the master divided by a whole number, so they all stay in a fixed relationship:
 
 | Clock | Master ÷ | Frequency |
 |-------|----------|-----------|
-| System / SDRAM | 2 | 100 MHz |
+| System / SRAM controller | 2 | 100 MHz |
 | fx68k master clock | 5 | 40 MHz (→ 20 MHz 68000) |
 | Memory slot | 20 | 100 ns |
 | **Pixel clock** | **N = 3–8, programmable** | 66.7 MHz down to 25 MHz |
@@ -51,25 +51,27 @@ One PLL, set once at power-on and never changed, makes a 200 MHz master clock fr
 | 4 | 50.0 MHz | 5 |
 | 3 | 66.7 MHz | 6.67 |
 
-N = 2 (100 MHz) would need 1 Gbit/s per HDMI lane, which is past what the Spartan-6 serialisers do reliably. N above 8 would go below DVI's 25 MHz minimum.
+N = 2 (100 MHz) would need 1 Gbit/s per HDMI lane; the Artix-7 -2 might manage it, but it is not assumed. N above 8 would go below DVI's 25 MHz minimum.
 
 If fx68k cannot reach 40 MHz (the 16.7 MHz fallback in spec 5), the slot becomes 24 master clocks (120 ns), and the rule in 3.2 becomes "a multiple of 48". The pixel clocks stay the same.
 
 ### 3.2 Every line is a whole number of slots
 
-**Rule: HTOTAL × N must be a multiple of 40.** A line then lasts exactly `S = HTOTAL × N ÷ 20` slots, and S is even.
+**Rule: HTOTAL × N must be a multiple of 20.** A line then lasts exactly `S = HTOTAL × N ÷ 20` slots.
 
 - The slot counter `hslot` restarts at 0 at the start of every line. **DMA is locked to the beam:** every fixed DMA slot happens at the same horizontal position on every line, as on the Amiga.
-- Because S is even, the even/odd pattern carries on unbroken from one line to the next. The CPU's even slots (spec 5) are the same in every video mode, and changing mode never disturbs the CPU.
+- Every slot has the CPU's memory cycle (spec 5), so changing mode never disturbs the CPU.
 - VTOTAL has no such rule.
 
 ### 3.3 The HDMI serialiser clock
 
-HDMI sends 10 bits per pixel, so the Spartan-6 serialisers (OSERDES2) need clocks at 10× and 2× the pixel clock. A whole-number divider can only make slower clocks, so a second PLL is used **only as a ×10 multiplier**. It takes the divided pixel clock as its input and gives back 1×, 2× and 10× copies, kept in phase with its input. HDMI transmitter chips do the same thing inside.
+HDMI sends 10 bits per pixel, so the Artix-7 serialisers (OSERDESE2) need clocks at 5× (with double data rate) and 1× the pixel clock. A whole-number divider can only make slower clocks, so a second MMCM is used **only as a multiplier**. It takes the divided pixel clock as its input and gives back 1× and 5× copies, kept in phase with its input. HDMI transmitter chips do the same thing inside.
 
-- The multiplier has two settings, loaded through the PLL's reconfiguration port when N changes, to keep its internal oscillator in range: ×20 internally for N = 4–8, ×10 for N = 3.
+- The multiplier's internal oscillator must stay in its range (600–1440 MHz on the -2 grade), so it has two settings, loaded through its reconfiguration port when N changes: ×30 internally for N = 5–8, ×15 for N = 3–4.
 - When N changes, the multiplier relocks in well under a millisecond while video is off, and PCLKLOCK in VIDSTAT sets. The master clock, the slots and the CPU are not affected.
-- The fastest mode, N = 3, needs 667 Mbit/s per HDMI lane. That is comfortably inside the Spartan-6 limit, so any speed grade will do.
+- The fastest mode, N = 3, needs 667 Mbit/s per HDMI lane, comfortably inside the Artix-7's limit.
+
+**VGA:** the KS3's ADV7125 DAC takes 8 bits per colour, sent over 4 pins per colour at double rate (the top 4 bits on one clock edge, the bottom 4 on the other). It is clocked from the pixel clock and shows exactly the same picture and timing as HDMI.
 
 ### 3.4 Programmable timing
 
@@ -78,7 +80,7 @@ All values are in pixels (horizontal) or lines (vertical). `hpixel` counts from 
 | Register | Meaning |
 |----------|---------|
 | PCLKDIV | N: pixel clock = 200 MHz ÷ N |
-| HVISIBLE, HSYNCSTART, HSYNCEND, HTOTAL | Horizontal: visible width, sync position, total pixels per line. HTOTAL × N must be a multiple of 40 |
+| HVISIBLE, HSYNCSTART, HSYNCEND, HTOTAL | Horizontal: visible width, sync position, total pixels per line. HTOTAL × N must be a multiple of 20 |
 | VVISIBLE, VSYNCSTART, VSYNCEND, VTOTAL | Vertical: visible lines, sync position, total lines per frame |
 | SYNCPOL | Horizontal and vertical sync polarity |
 
@@ -133,17 +135,17 @@ Each has an enable bit in VIDINTEN and a sticky flag in VIDSTAT, cleared by writ
 There are 4 layers (L0–L3), a sprite layer and a background colour. For every pixel, the hardware takes the colour of the highest-priority layer whose pixel is not transparent. If no layer has a pixel there, the background colour shows.
 
 ```
- SDRAM ──DMA, just in time──▶ 48-byte buffers L0..L3 ──┐
-                                                        ├─▶ priority mux ─▶ palette ─▶ DVI encoder ─▶ HDMI
+ Chip RAM ─DMA, just in time─▶ 48-byte buffers L0..L3 ──┐
+                                                        ├─▶ priority mux ─▶ palette ─▶ HDMI and VGA
  block RAM (text) ─▶ text layer ────────────────────────┤        ▲
- SDRAM ──DMA, just before X──▶ sprite data registers ───┘   PRIO register
+ Chip RAM ─DMA, just before X─▶ sprite data registers ───┘   PRIO register
 ```
 
 ### 4.2 Layer types and pixel formats
 
-| Type | Source | Formats | SDRAM slots |
+| Type | Source | Formats | Uses Chip RAM cycles |
 |------|--------|---------|-------------|
-| Bitmap | Chip RAM (SDRAM) | 1, 2, 4 or 8 bits per pixel, chunky, most significant pixel first in each byte | Yes (section 5) |
+| Bitmap | Chip RAM | 1, 2, 4 or 8 bits per pixel, chunky, most significant pixel first in each byte | Yes (section 5) |
 | Text | Text buffer in block RAM | 8×16 character cells | None |
 
 Only one layer at a time can be a text layer (there is one text buffer).
@@ -230,13 +232,13 @@ Any order is allowed, unlike the Amiga's fixed playfield-pair rules. Each sprite
 
 There are no line buffers. Video data is fetched by DMA during the line it is shown on, a few pixels ahead of the beam, as the Amiga does with bitplane DMA.
 
-- Each bitmap layer has a **48-byte buffer** (4 bursts of 12 bytes), made from FPGA logic, not block RAM. It does the job of the Amiga's bitplane data registers. The pixel output takes data from the front of the buffer, and DMA tops it up from the back.
-- **Display fetch slots** are fixed beam positions in every line (spec 5, section 7):
-  - **Normal:** every slot with `hslot % 4 == 1`: 12 bytes every 4 slots.
-  - **Wide fetch** (VIDCON.WIDE = 1): also the `hslot % 4 == 3` slots in the visible part of the line that are not fixed refresh, audio or peripheral slots. Those come out of the free pool, so the CPU, copper and blitter lose them while it is on, and sprites are more likely to borrow CPU slots. Layers never touch the CPU's even slots.
-- **Which layer or sprite gets each slot:** whichever will run out of data soonest (earliest deadline first). With a given screen setup this always works out the same, so the fetch pattern repeats exactly on every line and every frame.
-- **Prefetch:** before a layer's window starts, its buffer is filled with its first 2 bursts. For windows that start at the left edge, this happens in the horizontal blanking before the line. For windows that start further right, it happens in display slots just before the window. This replaces the Amiga's DDFSTRT, which had to be set by hand earlier than the display window.
-- Bursts start at the even address holding the first pixel, and leading pixels are skipped to give the exact SCROLLX position. A burst that would cross the end of a 1 KB SDRAM row is cut short there, which costs about 1% of the budget.
+- Each bitmap layer has a **48-byte buffer** (24 words), made from FPGA logic, not block RAM. It does the job of the Amiga's bitplane data registers. The pixel output takes data from the front of the buffer, and DMA tops it up from the back, one 16-bit word per memory cycle.
+- **Display fetch cycles** are fixed in every slot of every line (spec 5, section 4.3):
+  - **Normal:** memory cycles 1 and 2 of every slot: 4 bytes every 100 ns.
+  - **Wide fetch** (VIDCON.WIDE = 1): also cycle 3 in the visible part of the line, 6 bytes every 100 ns. Cycle 3 comes out of the free pool, so the copper and DMA engine get less while it is on. Layers never touch the CPU's cycle 0.
+- **Which layer or sprite gets each cycle:** whichever will run out of data soonest (earliest deadline first). With a given screen setup this always works out the same, so the fetch pattern repeats exactly on every line and every frame.
+- **Prefetch:** before a layer's window starts, its buffer is filled with its first 16 bytes. For windows that start at the left edge, this happens in the horizontal blanking before the line. For windows that start further right, it happens in display cycles just before the window. This replaces the Amiga's DDFSTRT, which had to be set by hand earlier than the display window.
+- Fetching starts at the word holding the first pixel, and leading pixels are skipped to give the exact SCROLLX position. The SRAM has no rows or bursts, so any address costs the same.
 - **Vertical scaling** re-fetches the source line for each screen line it appears on. There is nothing kept from the line before.
 
 The buffers sit between the 100 MHz DMA side and the pixel clock. Both come from the same master clock, so the hand-over is fully predictable.
@@ -247,18 +249,18 @@ Because data is fetched while it is shown, the budget is a **rate**: how many by
 
 | Fetch | Bytes per pixel |
 |-------|-----------------|
-| Normal | 0.15 × N |
-| Wide | 0.3 × N (a little less in modes where fixed slots run into the visible line) |
+| Normal | 0.2 × N |
+| Wide | 0.3 × N |
 
 A layer needs `bits per pixel ÷ 8 × HSTEP ÷ 256` bytes per screen pixel. At every point across the screen, **the layers whose windows cover that point must add up to no more than the budget.** The 48-byte buffers smooth out small differences, but not a whole line's worth.
 
 | Mode | N | Normal | Wide |
 |------|---|--------|------|
-| 640×480 @ 60 or 50 | 8 | 1.2 | 2.4 |
-| 720×576 @ 50, 720×480 @ 60 | 7 | 1.05 | 2.1 |
-| 800×600 @ 60 | 5 | 0.75 | 1.5 |
-| 800×600 @ 72 | 4 | 0.6 | 1.2 |
-| 1024×768 @ 60, 1280×720 @ 60 or 50 | 3 | 0.45 | 0.9 |
+| 640×480 @ 60 or 50 | 8 | 1.6 | 2.4 |
+| 720×576 @ 50, 720×480 @ 60 | 7 | 1.4 | 2.1 |
+| 800×600 @ 60 | 5 | 1.0 | 1.5 |
+| 800×600 @ 72 | 4 | 0.8 | 1.2 |
+| 1024×768 @ 60, 1280×720 @ 60 or 50 | 3 | 0.6 | 0.9 |
 
 What one layer costs:
 
@@ -274,14 +276,14 @@ What one layer costs:
 
 | Screen setup | Bytes per pixel | Fits? |
 |--------------|-----------------|-------|
-| 640×480: one full layer at 8bpp | 1.0 | Normal (1.2) |
-| 640×480: two full layers at 4bpp (like dual playfield) | 1.0 | Normal |
+| 640×480: one full layer at 8bpp | 1.0 | Normal (1.6) |
+| 640×480: 8bpp layer + 4bpp overlay | 1.5 | Normal |
 | 640×480: two 320×240 8bpp layers at 2× + text | 1.0 | Normal |
 | 640×480: 8bpp layer + full-screen 8bpp overlay | 2.0 | Wide (2.4) |
-| 720×576: two 360×288 8bpp layers at 2× | 1.0 | Normal (1.05) |
-| 800×600 @ 60: one full layer at 8bpp | 1.0 | Wide (1.5) |
-| 1024×768: one full layer at 4bpp | 0.5 | Wide (0.9) |
-| 1280×720: one full layer at 4bpp | 0.5 | Wide (0.9) |
+| 720×576: two 360×288 8bpp layers at 2× | 1.0 | Normal (1.4) |
+| 800×600 @ 60: one full layer at 8bpp | 1.0 | Normal (1.0) |
+| 1024×768: one full layer at 4bpp | 0.5 | Normal (0.6) |
+| 1280×720: one full layer at 4bpp | 0.5 | Normal (0.6) |
 | 1280×720: 640×360 8bpp at 2× + 1280×720 2bpp overlay | 0.5 + 0.25 = 0.75 | Wide (0.9) |
 | 1280×720: one full layer at 8bpp | 1.0 | **No** (0.9) |
 
@@ -289,11 +291,11 @@ Windows help: a status bar that sits below a game area, not on top of it, adds n
 
 ### 5.4 Sprites: fetched just before they are drawn
 
-Sprite data is fetched on demand, just before the beam reaches each sprite, using the same slots as layers plus, when needed, the CPU's. Nothing is fetched a line ahead. [Spec 9](sprites.md), section 5 has the details:
+Sprite data is fetched on demand, just before the beam reaches each sprite, from the free pool and, only when needed, the CPU's cycle. Nothing is fetched a line ahead. [Spec 9](sprites.md), section 5 has the details:
 
-- Each sprite's fetch starts exactly 64 slots before its first pixel, on the line it is shown (or at the end of the line before, for sprites near the left edge).
-- It uses free odd slots and spare display slots first, then even slots the CPU isn't using, and takes a slot the CPU wants only when the sprite would otherwise be late (2 CPU clocks each).
-- Sprites never take the layers' slots, so they don't count towards the layer budget in section 5.2.
+- Each sprite's fetch starts exactly 128 slots before its first pixel, on the line it is shown (or at the end of the line before, for sprites near the left edge).
+- It uses free-pool cycles and display cycles no layer needs first, and takes the CPU's cycle only when the sprite would otherwise be late (2 CPU clocks each).
+- Sprites never take cycles a layer needs, so they don't count towards the layer budget in section 5.2.
 
 ### 5.5 When a layer runs short
 
@@ -377,7 +379,7 @@ Layer *n* is at `0x100 + n × 0x40`.
 
 The layer buffers (4 × 48 bytes) and sprite data registers (spec 9) are small enough to build from FPGA logic. The sprite table takes 1 more block RAM (spec 9).
 
-Clocks use two of the LX25's four PLLs: one for the fixed master clocks, one as the HDMI ×10 multiplier.
+Clocks use two of the XC7A35T's five MMCMs: one for the fixed master clocks, one as the HDMI multiplier.
 
 ## 8. Open points
 
@@ -388,19 +390,19 @@ Clocks use two of the LX25's four PLLs: one for the fixed master clocks, one as 
 | V4 | 16-bit direct-colour and tile-map layer types (version 2) |
 | V5 | Horizontal wrap for bitmap layers (scroll around a fixed-width ring), so endless side-scrollers need less copying |
 | V6 | HDMI audio (sending sound over HDMI as well as the jack): possible later, needs the HDMI data-island encoder |
-| V7 | Confirm the FPGA speed grade from the chip marking (HDMI now tops out at 667 Mbit/s, so any grade should do) |
-| V8 | Check the pixel pipeline (layers, priority, palette) meets timing at 66.7 MHz in ISE |
-| V10 | Check in ISE that the ×10 PLL can take the divided pixel clock from a global clock buffer, and that its jitter is low enough for HDMI |
+| V8 | Check the pixel pipeline (layers, priority, palette) meets timing at 66.7 MHz in Vivado |
+| V10 | Check in Vivado that the multiplier MMCM can take the divided pixel clock from a global clock buffer, and that its jitter is low enough for HDMI |
+| V11 | The Next sends audio over HDMI; doing the same (V6) would make the KS3 work with TVs' built-in speakers |
 | V9 | Some TVs expect HDMI info packets for 576p/720p and may not accept plain DVI; test, and add the packets if needed (same work as V6) |
 
 ## 9. Tests
 
-- **Timing:** check sync positions and frame rate for every preset in simulation; check real monitors lock on to each.
-- **Clock change:** switch between presets at run time; the ×10 PLL relocks and PCLKLOCK sets, with no effect on the CPU or memory side.
-- **Beam lock:** for every preset, assert that each fixed DMA slot falls at the same `hslot` on every line, and that the CPU's even slots stay even across line boundaries.
+- **Timing:** check sync positions and frame rate for every preset in simulation; check real monitors lock on to each, on HDMI and VGA.
+- **Clock change:** switch between presets at run time; the multiplier MMCM relocks and PCLKLOCK sets, with no effect on the CPU or memory side.
+- **Beam lock:** for every preset, assert that each fixed DMA cycle falls at the same `hslot` on every line.
 - **Fetch budget:** for every example in 5.3, assert no layer buffer runs empty; for over-budget setups, assert OVERRUN is set on the right layer only.
 - **Fetch pattern:** assert the DMA pattern is identical on every line for a fixed screen setup.
 - **Sprites:** see spec 9, section 11.
 - **Golden images:** render test screens in simulation (windows, scroll, scale, priority, transparency, palette) and compare frame dumps with images made by a Python reference model.
 - **Register timing:** a write during line L−1's visible part changes line L exactly; a write during its blanking changes line L+1.
-- **CPU slowdown:** with all layers on and wide fetch, layers never take an even slot; the CPU only waits on busy odd slots (spec 5 CPU wait test).
+- **CPU slowdown:** with all layers on and wide fetch, layers never take the CPU's cycle 0 (spec 5 CPU zero-wait test).

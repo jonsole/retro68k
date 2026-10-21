@@ -11,13 +11,9 @@
 #define HW_REG32(addr) (*(volatile uint32_t *)(uintptr_t)(addr))
 
 
-/* ---- CHIPRAM: Chip RAM (SDRAM), shared with DMA */
+/* ---- CHIPRAM: Chip RAM (SRAM, 4 MB; 2 MB boards use the first half), shared with DMA */
 #define CHIPRAM_BASE                       0x0u
-#define CHIPRAM_SIZE                       0x800000u
-
-/* ---- FASTRAM: Fast RAM, CPU board only */
-#define FASTRAM_BASE                       0xA00000u
-#define FASTRAM_SIZE                       0x200000u
+#define CHIPRAM_SIZE                       0x400000u
 
 /* ---- TEXT: Text screen, 128 x 32 cells of 16 bits */
 #define TEXT_BASE                          0xE10000u
@@ -618,18 +614,20 @@
 #define SDCON                              HW_REG32(SYSTEM_BASE + SDCON_OFS)
 #define SDCON_EN_SHIFT                     0
 #define SDCON_EN_MASK                      0x1u
-#define SDCON_BUS4_SHIFT                   1
-#define SDCON_BUS4_MASK                    0x2u
-#define SDCON_AUTOSTOP_SHIFT               2
-#define SDCON_AUTOSTOP_MASK                0x4u
-#define SDCON_DETECT_SHIFT                 3
-#define SDCON_DETECT_MASK                  0x8u
+#define SDCON_CS_SHIFT                     1
+#define SDCON_CS_MASK                      0x2u
+#define SDCON_INITCLK_SHIFT                2
+#define SDCON_INITCLK_MASK                 0x4u
+#define SDCON_CRCCHK_SHIFT                 3
+#define SDCON_CRCCHK_MASK                  0x8u
+#define SDCON_AUTOSTOP_SHIFT               4
+#define SDCON_AUTOSTOP_MASK                0x10u
 #define SDCON_CLKDIV_SHIFT                 8
 #define SDCON_CLKDIV_MASK                  0xFF00u
-/* SDARG: RW, spec 15/3.1 */
+/* SDARG: RW, spec 15/3.2 */
 #define SDARG_OFS                          0x304u
 #define SDARG                              HW_REG32(SYSTEM_BASE + SDARG_OFS)
-/* SDCMD: W, spec 15/3.1 */
+/* SDCMD: W, spec 15/3.2 */
 #define SDCMD_OFS                          0x308u
 #define SDCMD                              HW_REG32(SYSTEM_BASE + SDCMD_OFS)
 #define SDCMD_INDEX_SHIFT                  0
@@ -644,7 +642,9 @@
 #define SDCMD_MULTI_MASK                   0x1000u
 #define SDCMD_APP_SHIFT                    13
 #define SDCMD_APP_MASK                     0x2000u
-/* SDBLKCNT: RW, spec 15/3.2 */
+#define SDCMD_BLK16_SHIFT                  14
+#define SDCMD_BLK16_MASK                   0x4000u
+/* SDBLKCNT: RW, spec 15/3.3 */
 #define SDBLKCNT_OFS                       0x31Cu
 #define SDBLKCNT                           HW_REG32(SYSTEM_BASE + SDBLKCNT_OFS)
 #define SDBLKCNT_COUNT_SHIFT               0
@@ -658,8 +658,8 @@
 #define SDSTAT_DATABUSY_MASK               0x2u
 #define SDSTAT_CARDBUSY_SHIFT              2
 #define SDSTAT_CARDBUSY_MASK               0x4u
-#define SDSTAT_CARDIN_SHIFT                3
-#define SDSTAT_CARDIN_MASK                 0x8u
+#define SDSTAT_INITBUSY_SHIFT              3
+#define SDSTAT_INITBUSY_MASK               0x8u
 #define SDSTAT_FIFOCOUNT_SHIFT             4
 #define SDSTAT_FIFOCOUNT_MASK              0xFFF0u
 /* SDIRQ: W1C, spec 15/6 */
@@ -671,16 +671,16 @@
 #define SDIRQ_DATADONE_MASK                0x2u
 #define SDIRQ_CMDTIMEOUT_SHIFT             2
 #define SDIRQ_CMDTIMEOUT_MASK              0x4u
-#define SDIRQ_CMDCRC_SHIFT                 3
-#define SDIRQ_CMDCRC_MASK                  0x8u
+#define SDIRQ_CMDERR_SHIFT                 3
+#define SDIRQ_CMDERR_MASK                  0x8u
 #define SDIRQ_DATATIMEOUT_SHIFT            4
 #define SDIRQ_DATATIMEOUT_MASK             0x10u
 #define SDIRQ_DATACRC_SHIFT                5
 #define SDIRQ_DATACRC_MASK                 0x20u
 #define SDIRQ_WRITEERR_SHIFT               6
 #define SDIRQ_WRITEERR_MASK                0x40u
-#define SDIRQ_CARDCHANGE_SHIFT             7
-#define SDIRQ_CARDCHANGE_MASK              0x80u
+#define SDIRQ_TOKENERR_SHIFT               7
+#define SDIRQ_TOKENERR_MASK                0x80u
 /* SDIRQEN: RW, spec 15/6 */
 #define SDIRQEN_OFS                        0x328u
 #define SDIRQEN                            HW_REG32(SYSTEM_BASE + SDIRQEN_OFS)
@@ -690,22 +690,22 @@
 #define SDIRQEN_DATADONE_MASK              0x2u
 #define SDIRQEN_CMDTIMEOUT_SHIFT           2
 #define SDIRQEN_CMDTIMEOUT_MASK            0x4u
-#define SDIRQEN_CMDCRC_SHIFT               3
-#define SDIRQEN_CMDCRC_MASK                0x8u
+#define SDIRQEN_CMDERR_SHIFT               3
+#define SDIRQEN_CMDERR_MASK                0x8u
 #define SDIRQEN_DATATIMEOUT_SHIFT          4
 #define SDIRQEN_DATATIMEOUT_MASK           0x10u
 #define SDIRQEN_DATACRC_SHIFT              5
 #define SDIRQEN_DATACRC_MASK               0x20u
 #define SDIRQEN_WRITEERR_SHIFT             6
 #define SDIRQEN_WRITEERR_MASK              0x40u
-#define SDIRQEN_CARDCHANGE_SHIFT           7
-#define SDIRQEN_CARDCHANGE_MASK            0x80u
+#define SDIRQEN_TOKENERR_SHIFT             7
+#define SDIRQEN_TOKENERR_MASK              0x80u
 /* SDTIMEOUT: RW, spec 15/6 */
 #define SDTIMEOUT_OFS                      0x32Cu
 #define SDTIMEOUT                          HW_REG32(SYSTEM_BASE + SDTIMEOUT_OFS)
 #define SDTIMEOUT_MS_SHIFT                 0
 #define SDTIMEOUT_MS_MASK                  0xFFFFu
-/* SDDATA: RW, spec 15/3.3 */
+/* SDDATA: RW, spec 15/3.4 */
 #define SDDATA_OFS                         0x330u
 #define SDDATA                             HW_REG32(SYSTEM_BASE + SDDATA_OFS)
 /* KBCON: RW, spec 16/4 */
@@ -717,6 +717,8 @@
 #define KBCON_RAW_MASK                     0x2u
 #define KBCON_RESETKEYS_SHIFT              2
 #define KBCON_RESETKEYS_MASK               0x4u
+#define KBCON_MATRIX_SHIFT                 3
+#define KBCON_MATRIX_MASK                  0x8u
 /* KBSTAT: R, spec 16/4 */
 #define KBSTAT_OFS                         0x404u
 #define KBSTAT                             HW_REG32(SYSTEM_BASE + KBSTAT_OFS)
@@ -733,7 +735,7 @@
 #define KBDATA_RELEASED_MASK               0x8000u
 #define KBDATA_KEY_SHIFT                   0
 #define KBDATA_KEY_MASK                    0x1FFu
-/* KBSEND: W, spec 16/3.4 */
+/* KBSEND: W, spec 16/3.5 */
 #define KBSEND_OFS                         0x40Cu
 #define KBSEND                             HW_REG32(SYSTEM_BASE + KBSEND_OFS)
 #define KBSEND_BYTE_SHIFT                  0
@@ -813,7 +815,7 @@
 #define RESETWHY_KEYBOARD_MASK             0x40u
 #define RESETWHY_HALTED_SHIFT              7
 #define RESETWHY_HALTED_MASK               0x80u
-/* SYSCON: RW, spec 7/7 */
+/* SYSCON: RW, spec 7/9 */
 #define SYSCON_OFS                         0x810u
 #define SYSCON                             HW_REG32(SYSTEM_BASE + SYSCON_OFS)
 #define SYSCON_OVERLAY_SHIFT               0
@@ -831,16 +833,13 @@
 #define SYSRESET                           HW_REG32(SYSTEM_BASE + SYSRESET_OFS)
 #define SYSRESET_KEY_SHIFT                 0
 #define SYSRESET_KEY_MASK                  0xFFFFu
-/* SYSLED: RW, spec 7/5 */
-#define SYSLED_OFS                         0x818u
-#define SYSLED                             HW_REG32(SYSTEM_BASE + SYSLED_OFS)
-#define SYSLED_LEDS_SHIFT                  0
-#define SYSLED_LEDS_MASK                   0xFFu
-/* SYSSW: R, spec 7/5 */
-#define SYSSW_OFS                          0x81Cu
-#define SYSSW                              HW_REG32(SYSTEM_BASE + SYSSW_OFS)
-#define SYSSW_SWITCHES_SHIFT               0
-#define SYSSW_SWITCHES_MASK                0xFu
+/* SYSBTN: R, spec 7/5 */
+#define SYSBTN_OFS                         0x818u
+#define SYSBTN                             HW_REG32(SYSTEM_BASE + SYSBTN_OFS)
+#define SYSBTN_MULTIFACE_SHIFT             0
+#define SYSBTN_MULTIFACE_MASK              0x1u
+#define SYSBTN_DIVMMC_SHIFT                1
+#define SYSBTN_DIVMMC_MASK                 0x2u
 /* SYSSTAT: R, spec 1/8 */
 #define SYSSTAT_OFS                        0x820u
 #define SYSSTAT                            HW_REG32(SYSTEM_BASE + SYSSTAT_OFS)
@@ -862,6 +861,40 @@
 #define BUSERRWHY_PROTECT_MASK             0x4u
 #define BUSERRWHY_CPUSPACE_SHIFT           3
 #define BUSERRWHY_CPUSPACE_MASK            0x8u
+/* I2CCON: RW, spec 7/6 */
+#define I2CCON_OFS                         0x840u
+#define I2CCON                             HW_REG32(SYSTEM_BASE + I2CCON_OFS)
+#define I2CCON_EN_SHIFT                    0
+#define I2CCON_EN_MASK                     0x1u
+#define I2CCON_CLKDIV_SHIFT                8
+#define I2CCON_CLKDIV_MASK                 0xFF00u
+/* I2CDATA: RW, spec 7/6 */
+#define I2CDATA_OFS                        0x844u
+#define I2CDATA                            HW_REG32(SYSTEM_BASE + I2CDATA_OFS)
+#define I2CDATA_BYTE_SHIFT                 0
+#define I2CDATA_BYTE_MASK                  0xFFu
+/* I2CCMD: W, spec 7/6 */
+#define I2CCMD_OFS                         0x848u
+#define I2CCMD                             HW_REG32(SYSTEM_BASE + I2CCMD_OFS)
+#define I2CCMD_START_SHIFT                 0
+#define I2CCMD_START_MASK                  0x1u
+#define I2CCMD_STOP_SHIFT                  1
+#define I2CCMD_STOP_MASK                   0x2u
+#define I2CCMD_WRITE_SHIFT                 2
+#define I2CCMD_WRITE_MASK                  0x4u
+#define I2CCMD_READ_SHIFT                  3
+#define I2CCMD_READ_MASK                   0x8u
+#define I2CCMD_ACK_SHIFT                   4
+#define I2CCMD_ACK_MASK                    0x10u
+/* I2CSTAT: R, spec 7/6 */
+#define I2CSTAT_OFS                        0x84Cu
+#define I2CSTAT                            HW_REG32(SYSTEM_BASE + I2CSTAT_OFS)
+#define I2CSTAT_BUSY_SHIFT                 0
+#define I2CSTAT_BUSY_MASK                  0x1u
+#define I2CSTAT_NACK_SHIFT                 1
+#define I2CSTAT_NACK_MASK                  0x2u
+#define I2CSTAT_ARBLOST_SHIFT              2
+#define I2CSTAT_ARBLOST_MASK               0x4u
 #define SDRESP_NUM                         4
 #define SDRESP_OFS(n)                      (0x30Cu + 4u * (n))
 #define SDRESP(n)                          HW_REG32(SYSTEM_BASE + SDRESP_OFS(n))

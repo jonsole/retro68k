@@ -13,7 +13,7 @@ The copper is a tiny processor that follows the beam. It runs a list of instruct
 | Can write | The custom register block: all registers, the palette, sprite table and descriptor RAM. Not the system area, and not the text screen or font (start a DMA job for those) |
 | Wait precision | One pixel, in any video mode |
 | Write speed | One instruction per 10 ns from its queue: up to 16 instructions (8 full 32-bit registers) in under a pixel at 640×480, right after a WAIT |
-| Memory use | A 64-byte prefetch queue; typically a few slots per line. Urgent only when the queue runs low |
+| Memory use | A 64-byte prefetch queue; typically a few memory cycles per line. Urgent only when the queue runs low |
 | Frame start | The list restarts from COPLC at the start of vertical blanking, in time to set up line 0 |
 
 ## 2. Comparison with the Amiga
@@ -93,16 +93,16 @@ Register writes have exactly the same effect as CPU writes, including their timi
 - **Execution:** the copper runs one instruction per 100 MHz clock (10 ns) while its queue has instructions. That is less than half a pixel at 640×480.
 - **After a WAIT:** the queue had the whole wait to fill, so up to **16 instructions** (for example 8 full 32-bit registers) run back to back straight after the WAIT, always with the same timing.
 - **Palette changes mid-line:** a palette write takes effect at a fixed number of pixels after the WAIT that comes before it. The exact delay (a few pixels) depends on the pixel pipeline and will be given per video mode in the register map. It never changes, so colour bars and split colours line up the same way every time.
-- **Long runs:** more than 16 instructions in a row are limited by fetching: 3 instructions per memory slot when the copper is urgent.
+- **Long runs:** more than 16 instructions in a row are limited by fetching: each instruction is 2 memory cycles (two 16-bit words), so about 1–2 instructions per 100 ns slot from the free pool, more when urgent.
 
-## 6. Memory slots
+## 6. Memory cycles
 
-The copper reads its list in 12-byte bursts (3 instructions) into a **64-byte prefetch queue** (16 instructions).
+The copper reads its list one 16-bit word per memory cycle (2 cycles per instruction) into a **64-byte prefetch queue** (16 instructions).
 
-- **Normally** it uses spare slots, after the CPU, sprites and audio and before the DMA engine (spec 5, section 6). Most lists need only a few slots per line.
-- **When the queue is less than half full,** the copper becomes **urgent** and goes ahead of the CPU, in odd and even slots. This keeps its timing exact even when the CPU is busy in Chip RAM or wide fetch has taken the spare odd slots. Each slot it takes from the CPU costs the CPU 2 clocks, as for sprites.
+- **Normally** it uses free-pool cycles, after sprites and audio and before the DMA engine (spec 5, section 6). Most lists need only a few cycles per line.
+- **When the queue is less than half full,** the copper becomes **urgent** and may also take the CPU's cycle 0. This keeps its timing exact even when wide fetch has taken spare cycles. Each cycle it takes from the CPU costs the CPU 2 clocks, as for sprites.
 - A dense list (dozens of instructions per line) can slow the CPU a little, as the copper could on the Amiga. A typical list (a WAIT and a few MOVEs on some lines) costs the CPU almost nothing.
-- While waiting with a full queue, the copper uses no slots.
+- While waiting with a full queue, the copper uses no memory cycles.
 
 ## 7. Registers
 
@@ -198,5 +198,5 @@ loop:   WAITH  0                       ; start of the next line
 - **Instructions:** every opcode, MOVEN with odd counts and padding, ADD wrap within 16 bits, nested CALL to depth 4, both counters, SKIP before and after its position.
 - **Halves:** a high-half write alone changes nothing; the low-half write applies both at once; a low-half write alone keeps the high half; the same rules for CPU writes.
 - **Errors:** unknown opcode, a write to the system area, deeper than 4 calls: the copper stops, ERR and COPERR set, interrupt raised.
-- **Busy system:** with the CPU flat out in Chip RAM and wide fetch on, a list with 16 instructions after each WAIT still keeps exact timing; measure the CPU slots taken.
+- **Busy system:** with the CPU flat out in Chip RAM and wide fetch on, a list with 16 instructions after each WAIT still keeps exact timing; measure the CPU cycles taken.
 - **COPLC switch:** changing COPLC mid-frame takes effect only at the next vertical blanking.
