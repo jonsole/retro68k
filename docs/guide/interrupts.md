@@ -303,7 +303,7 @@ Three read-only registers show the controller's state. They are useful for debug
 
 - **INTRAW** shows each source's request line, before INTENA. A bit is 1 when the unit is asking (its flag and its own enable are both on).
 - **INTPEND** shows the sources that are both requesting and enabled in INTENA, with INTCON.MASTER on. These are the ones that can interrupt the CPU.
-- **LASTSRC** holds the source number given at the last interrupt acknowledge (not counting the NMI). If you suspect the wrong handler is being called, read LASTSRC.
+- **INTID** holds the source number given at the last interrupt acknowledge (not counting the NMI). If you suspect the wrong handler is being called, read INTID.
 
 ### Interrupt controller registers (part 1)
 
@@ -313,7 +313,7 @@ Three read-only registers show the controller's state. They are useful for debug
 | INTENA | `$004` | Set/clear | Bit 31 SET/CLR for sources 15-23 (bits 24-16); bit 15 SET/CLR for sources 0-14 (bits 14-0). All off after reset |
 | INTPEND | `$008` | R | Same bits: sources requesting and enabled |
 | INTRAW | `$00C` | R | Same bits: sources requesting, before INTENA |
-| LASTSRC | `$024` | R | Bits 4-0: source given at the last acknowledge |
+| INTID | `$024` | R | Bits 4-0: source given at the last acknowledge |
 
 ---
 
@@ -1078,7 +1078,7 @@ All registers are in the system block. Addresses are `SYSTEM` (`$F00000`) plus t
 | `$F00018` | INTLEVEL2 | RW | Levels of sources 16-23 |
 | `$F0001C` | VECBASE | RW | VEC (7-0): first vector, 64-232 |
 | `$F00020` | SOFTINT | W | SET (0), CLR (1): the software interrupt |
-| `$F00024` | LASTSRC | R | SRC (4-0): source at the last acknowledge |
+| `$F00024` | INTID | R | SRC (4-0): source at the last acknowledge |
 | `$F00028` | NMICON | RW | BUTTONEN (0), USBEN (1) |
 | `$F0002C` | NMISTAT | W1C | BUTTON (0), USB (1) |
 

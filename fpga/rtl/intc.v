@@ -33,7 +33,7 @@ module intc (
     reg  [95:0] levels;               // 4 bits per source; bit 3 of each unused
     reg  [7:0]  vecbase;
     reg         soft;
-    reg  [4:0]  lastsrc;
+    reg  [4:0]  intid;
     reg  [1:0]  nmicon, nmistat;
     reg         nmi_pend;
     reg         btn_d;
@@ -93,7 +93,7 @@ module intc (
             levels   <= LEVELS_DEFAULT;
             vecbase  <= 8'd64;
             soft     <= 1'b0;
-            lastsrc  <= 5'd0;
+            intid  <= 5'd0;
             nmicon   <= 2'b11;
             nmistat  <= 2'b00;
             nmi_pend <= 1'b0;
@@ -105,7 +105,7 @@ module intc (
 
             if (iack) begin
                 if (iack_level == 3'd7) nmi_pend <= 1'b0;
-                else if (ack_found)     lastsrc  <= ack_src;
+                else if (ack_found)     intid  <= ack_src;
             end
 
             level <= nmi_pend ? 3'd7 : maxl;
@@ -148,7 +148,7 @@ module intc (
             `RM_INTLEVEL1: rb_rdata <= levels[63:32];
             `RM_INTLEVEL2: rb_rdata <= levels[95:64];
             `RM_VECBASE:   rb_rdata <= {24'd0, vecbase};
-            `RM_LASTSRC:   rb_rdata <= {27'd0, lastsrc};
+            `RM_INTID:   rb_rdata <= {27'd0, intid};
             `RM_NMICON:    rb_rdata <= {30'd0, nmicon};
             `RM_NMISTAT:   rb_rdata <= {30'd0, nmistat};
             default: ;

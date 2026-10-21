@@ -98,7 +98,7 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 | `0x018` | INTLEVEL2 | 8 × 4 bits | Sources 16–23 |
 | `0x01C` | VECBASE | 7–0 | First vector (64–232, default 64). Source n uses VECBASE + n |
 | `0x020` | SOFTINT | SET (0), CLR (1) | Write 1 to raise or clear the software interrupt |
-| `0x024` | LASTSRC | 4–0 | Read: the source given at the last interrupt acknowledge, for debugging |
+| `0x024` | INTID | 4–0 | Read: the source given at the last interrupt acknowledge, for debugging |
 | `0x028` | NMICON | BUTTONEN (0), USBEN (1) | Enable each NMI source. Both on after reset |
 | `0x02C` | NMISTAT | BUTTON (0), USB (1) | Which caused the last NMI; sticky, write 1 to clear |
 

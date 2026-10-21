@@ -639,10 +639,10 @@ SOFTINT_SET_B                equ $0
 SOFTINT_SET_M                equ $1
 SOFTINT_CLR_B                equ $1
 SOFTINT_CLR_M                equ $2
-LASTSRC                      equ $24         ; R, spec 13/7
-LASTSRC_SRC_B                equ $0
-LASTSRC_SRC_W                equ $5
-LASTSRC_SRC_M                equ $1F
+INTID                        equ $24         ; R, spec 13/7
+INTID_SRC_B                  equ $0
+INTID_SRC_W                  equ $5
+INTID_SRC_M                  equ $1F
 NMICON                       equ $28         ; RW, spec 13/5
 NMICON_BUTTONEN_B            equ $0
 NMICON_BUTTONEN_M            equ $1

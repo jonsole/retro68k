@@ -197,7 +197,7 @@ Channel n (0–15) at `0x440 + n × 0x20`:
 | `0x018` | INTLEVEL2 | RW | 13, 7 |
 | `0x01C` | VECBASE | RW | 13, 7 |
 | `0x020` | SOFTINT | W | 13, 6 |
-| `0x024` | LASTSRC | R | 13, 7 |
+| `0x024` | INTID | R | 13, 7 |
 | `0x028` | NMICON | RW | 13, 5 |
 | `0x02C` | NMISTAT | W1C | 13, 5 |
 

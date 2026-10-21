@@ -204,7 +204,7 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             move.l  v_irq,d0
             cmp.l   #1,d0
             bne.s   .irq_bad
-            move.l  LASTSRC(a5),d0
+            move.l  INTID(a5),d0
             cmp.l   #INT_SOFT,d0
 .irq_bad:   bsr     okfail
 

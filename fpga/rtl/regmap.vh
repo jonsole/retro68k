@@ -220,8 +220,8 @@
 `define RM_SOFTINT                          16'h0020
 `define RM_SOFTINT_SET                      0
 `define RM_SOFTINT_CLR                      1
-`define RM_LASTSRC                          16'h0024
-`define RM_LASTSRC_SRC                      4:0
+`define RM_INTID                            16'h0024
+`define RM_INTID_SRC                        4:0
 `define RM_NMICON                           16'h0028
 `define RM_NMICON_BUTTONEN                  0
 `define RM_NMICON_USBEN                     1

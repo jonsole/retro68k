@@ -454,11 +454,11 @@
 #define SOFTINT_SET_MASK                   0x1u
 #define SOFTINT_CLR_SHIFT                  1
 #define SOFTINT_CLR_MASK                   0x2u
-/* LASTSRC: R, spec 13/7 */
-#define LASTSRC_OFS                        0x24u
-#define LASTSRC                            HW_REG32(SYSTEM_BASE + LASTSRC_OFS)
-#define LASTSRC_SRC_SHIFT                  0
-#define LASTSRC_SRC_MASK                   0x1Fu
+/* INTID: R, spec 13/7 */
+#define INTID_OFS                          0x24u
+#define INTID                              HW_REG32(SYSTEM_BASE + INTID_OFS)
+#define INTID_SRC_SHIFT                    0
+#define INTID_SRC_MASK                     0x1Fu
 /* NMICON: RW, spec 13/5 */
 #define NMICON_OFS                         0x28u
 #define NMICON                             HW_REG32(SYSTEM_BASE + NMICON_OFS)
