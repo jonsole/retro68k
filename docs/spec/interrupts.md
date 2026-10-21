@@ -85,7 +85,7 @@ Writing SOFTINT.SET raises source 18; writing SOFTINT.CLR clears it. A typical u
 
 ## 7. Registers
 
-In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers are 32-bit and follow the 16-bit-halves rule (spec 10, section 4.1).
+In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers are 32-bit and follow the 16-bit-halves rule (spec 3, section 2).
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|

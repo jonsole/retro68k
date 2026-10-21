@@ -67,7 +67,6 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 | `0x0700`–`0x07FF` | 256 B | Copper | 10 |
 | `0x0800`–`0x3FFF` | | Free | |
 | `0x4000`–`0x43FF` | 1 KB | Palette: 256 × 32-bit `0x00RRGGBB` | 4, section 6.3 |
-| `0x5000`–`0x57FF` | 2 KB | Sprite table: 64 × 32 bytes | 9, section 3 |
 | `0x6000`–`0x67FF` | 2 KB | DMA descriptor RAM: 64 × 32 bytes | 11, section 8 |
 | `0x6800`–`0xFFFF` | | Free | |
 
@@ -312,5 +311,5 @@ GitHub runs `python3 tools/regmap.py --verify` on every push, which fails if the
 
 - **Decoding:** read every listed register after reset and check its reset value; read every free address and check 0; access every unmapped region and check a bus error.
 - **Halves rules:** for a sample of registers in both blocks, check held high halves, low-half commits, low-half-only writes, byte writes, and captured reads.
-- **Access rights:** the copper can't reach the system block or text screen; DMA can't reach the system block; PROTECT blocks user mode.
+- **Access rights:** the copper can't reach the system block; DMA can't reach the system block; PROTECT blocks user mode.
 - **Generated files:** the assembler, C and Verilog files from the generator agree with this spec.

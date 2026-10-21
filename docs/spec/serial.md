@@ -96,7 +96,7 @@ The DMA engine's **port 1** is this link (spec 11, section 4). A channel can cop
 
 ## 5. Registers
 
-In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers are 32-bit and follow the 16-bit-halves rule (spec 10, section 4.1).
+In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers are 32-bit and follow the 16-bit-halves rule (spec 3, section 2).
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
