@@ -77,7 +77,7 @@ Level 7 cannot be masked by the 68000. It is kept for getting control back from 
 The KS3's third button, DivMMC, is not an interrupt source: software reads it in a system register, and the boot ROM uses it as the "monitor" button (spec 7).
 - **USB break:** a BREAK command from the PC over the USB link (spec 14, section 3), so a debugger on the PC can stop the 68000 at any moment.
 
-Both use vector 31, the 68000's usual level 7 vector; the controller supplies it during the acknowledge like any other vector. NMISTAT says which one it was. NMIEN can turn each off, for example so the USB break only works while debugging. NMI is edge-triggered on the 68000, so each press or break gives exactly one interrupt.
+Both use vector 31, the 68000's usual level 7 vector; the controller supplies it during the acknowledge like any other vector. NMISTAT says which one it was. NMICON can turn each off, for example so the USB break only works while debugging. NMI is edge-triggered on the 68000, so each press or break gives exactly one interrupt.
 
 ## 6. Software interrupt
 

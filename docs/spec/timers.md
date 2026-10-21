@@ -30,7 +30,7 @@ Timers give software a sense of time: a steady tick for the operating system, te
 ## 3. Time counter
 
 - **TIME** is a 64-bit counter that adds 1 every 10 ns from power-on. It cannot be written.
-- Reading it as 16-bit halves (as the 68000 does) could catch it half-way through a carry. So **reading the highest 16 bits captures all 64 bits at that instant**, and the next three reads return the captured rest. Reading TIMEHI then TIMELO with MOVE.L, high first, gives one consistent value.
+- Reading it as 16-bit halves (as the 68000 does) could catch it half-way through a carry. So **reading the highest 16 bits captures all 64 bits at that instant**, and the next three reads return the captured rest. Reading TIMEHI then TIMELO with MOVE.L, high first, gives one consistent value. There is one capture for the whole machine, and every read of TIMEHI's upper half takes a new one: an interrupt handler that reads the time between another program's TIMEHI and TIMELO reads breaks that program's pair. Read the time with interrupts masked, or only in one place.
 - Uses: timestamps, profiling ("how many 10 ns ticks did this routine take"), timeouts that never need resetting.
 
 ## 4. General timers
@@ -72,8 +72,8 @@ Video lines and frames are counted from the video timing (spec 4), so they tick 
 
 The watchdog resets the computer if software hangs.
 
-- Software sets a time (WDTIME, in milliseconds, 1–65,535) and turns it on (WDCTRL.EN).
-- Software must **kick** it before the time runs out, by writing `0x5A5A` to WDKICK. Any other value counts as a failed kick and resets at once, so a program running wild is unlikely to keep it alive by accident.
+- Software sets a time (WDTIME, in milliseconds, 1–65,535; 1000 after reset) and turns it on (WDCTRL.EN). The time counts in whole milliseconds, so the watchdog fires between WDTIME and WDTIME + 1 ms after the last kick. A new WDTIME takes effect at the next kick or WDCTRL write; writing WDCTRL also restarts the count, like a kick.
+- Software must **kick** it before the time runs out, by writing `0x5A5A` to WDKICK (as a 16-bit or 32-bit write). Any other value, or a byte write, counts as a failed kick and resets at once, so a program running wild is unlikely to keep it alive by accident. While the watchdog is off, WDKICK writes are ignored.
 - If it runs out, it **resets the computer**: the CPU and all the custom hardware restart, as at power-on, but the FPGA keeps its configuration.
 - **LOCK:** writing WDCTRL with LOCK set makes the watchdog settings read-only until the next reset, so software cannot turn it off by mistake.
 - **RESETWHY** (spec 7, section 7) tells software after starting up why the last reset happened.
