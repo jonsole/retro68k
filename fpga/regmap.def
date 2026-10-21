@@ -23,55 +23,50 @@
 
 # ---------------------------------------------------------------- memory map
 block CHIPRAM 0x000000 0x400000 "Chip RAM (SRAM, 4 MB; 2 MB boards use the first half), shared with DMA"
-block TEXT    0xE10000 0x002000 "Text screen, 128 x 32 cells of 16 bits"
-block FONT    0xE12000 0x001000 "Font, 256 characters x 16 bytes"
 block ROM     0xF80000 0x008000 "Boot ROM"
 
 # ---------------------------------------------------------------- custom block
-block CUSTOM 0xE00000 0x10000 "Custom registers: video, sprites, DMA engine, audio, copper"
+block CUSTOM 0xE00000 0x10000 "Custom registers: video, DMA engine, audio, copper"
 
 # Video (spec 4)
-reg 0x000 VIDCON     RW   4/6.1  EN=0 WIDE=1 BLANKALL=2
-reg 0x004 VIDSTAT    RW1C 4/6.1  VBLANK=0 LINE=1 OVERRUN=7:4 INVBLANK=8 PCLKLOCK=9 BADTIMING=10 SPRMISS=11 SPROVF=12 COPIRQ=13
-reg 0x008 VIDINTEN   RW   4/6.1  fields=VIDSTAT
-reg 0x00C BEAMPOS    R    4/3.6  VLINE=26:16 HPIXEL=10:0
-reg 0x010 FRAMECOUNT R    4/3.6  COUNT=15:0
-reg 0x014 LINECMP    RW   4/3.7  VLINE=26:16 HPIXEL=10:0
+reg 0x000 VIDCON     RW   4/6.1  EN=0 BLANKALL=2 DIRECT=4
+reg 0x004 VIDSTAT    RW1C 4/6.1  VBLANK=0 LINE=1 OVERRUN=6:4 INVBLANK=8
+reg 0x008 VIDINTEN   RW   4/6.1  VBLANK=0 LINE=1 OVERRUN=6:4
+reg 0x00C BEAMPOS    R    4/3.3  VLINE=26:16 HPIXEL=10:0
+reg 0x010 FRAMECOUNT R    4/3.3  COUNT=15:0
+reg 0x014 LINECMP    RW   4/3.4  VLINE=26:16
 reg 0x018 BGCOLOR    RW   4/6.1  RGB=23:0
-reg 0x01C PRIO       RW   4/4.8  FRONT=1:0 SECOND=3:2 THIRD=5:4 BACK=7:6
-reg 0x020 HVISIBLE   RW   4/3.4  VALUE=10:0
-reg 0x024 HSYNCSTART RW   4/3.4  VALUE=10:0
-reg 0x028 HSYNCEND   RW   4/3.4  VALUE=10:0
-reg 0x02C HTOTAL     RW   4/3.4  VALUE=10:0
-reg 0x030 VVISIBLE   RW   4/3.4  VALUE=10:0
-reg 0x034 VSYNCSTART RW   4/3.4  VALUE=10:0
-reg 0x038 VSYNCEND   RW   4/3.4  VALUE=10:0
-reg 0x03C VTOTAL     RW   4/3.4  VALUE=10:0
-reg 0x040 SYNCPOL    RW   4/3.4  HPOL=0 VPOL=1
-reg 0x044 PCLKDIV    RW   4/3.4  N=3:0
-reg 0x048 SLOTPOS    R    4/3.6  VLINE=26:16 HSLOT=8:0
+reg 0x01C PRIO       RW   4/4.8  FRONT=1:0 MIDDLE=3:2 BACK=5:4
+reg 0x020 VIDSIZE    R    4/6.1  VVISIBLE=26:16 HVISIBLE=10:0
 
 # DMA control (spec 5); its 16-bit value sits in the low half at 0x096, as on the Amiga
-reg 0x094 DMACON     SC   5/8    AUDEN=3 STREN=4 SPREN=5 DMXEN=6 COPEN=7 VIDEN=8 DMAEN=9 SETCLR=15
+reg 0x094 DMACON     SC   5/8    AUDEN=3 STREN=4 DMXEN=6 COPEN=7 VIDEN=8 DMAEN=9 SETCLR=15
 
-# Layers 0-3 (spec 4)
-array L 4 0x100 0x40 4/6.2
-  reg 0x00 CTRL    RW 4/6.2  EN=0 TYPE=1 BPP=3:2 TRANSP=4 PALOFS=15:6
-  reg 0x04 PTR     RW 4/4.4  ADDR=22:0
-  reg 0x08 STRIDE  RW 4/4.4  BYTES=15:0
-  reg 0x0C WINX    RW 4/4.3  XSTART=26:16 XEND=10:0
-  reg 0x10 WINY    RW 4/4.3  YSTART=26:16 YEND=10:0
-  reg 0x14 SCROLLX RW 4/4.4  PIXELS=15:0
-  reg 0x18 SCROLLY RW 4/4.4  LINES=15:0
-  reg 0x1C HSTEP   RW 4/4.5  STEP=15:0
-  reg 0x20 VSTEP   RW 4/4.5  STEP=15:0
+# Layers 0-2 (spec 4): bitmaps with Amiga-style plane pointers, modulo and data registers
+array L 3 0x100 0x80 4/6.2
+  reg 0x00 CTRL    RW 4/6.2  EN=0 PLANAR=1 BPP=3:2 TRANSP=4 HSCALE=7:6 VSCALE=9:8 PALOFS=15:12 PLANES=18:16
+  reg 0x04 WINX    RW 4/4.3  XSTART=26:16 XEND=10:0
+  reg 0x08 WINY    RW 4/4.3  YSTART=26:16 YEND=10:0
+  reg 0x0C SCROLLX RW 4/4.4  FINE=3:0
+  reg 0x10 BPLMOD  RW 4/4.4  BYTES=15:0
+  reg 0x20 BPL0PT  RW 4/4.4  ADDR=22:0
+  reg 0x24 BPL1PT  RW 4/4.4  ADDR=22:0
+  reg 0x28 BPL2PT  RW 4/4.4  ADDR=22:0
+  reg 0x2C BPL3PT  RW 4/4.4  ADDR=22:0
+  reg 0x30 BPL4PT  RW 4/4.4  ADDR=22:0
+  reg 0x34 BPL5PT  RW 4/4.4  ADDR=22:0
+  reg 0x38 BPL6PT  RW 4/4.4  ADDR=22:0
+  reg 0x3C BPL7PT  RW 4/4.4  ADDR=22:0
+  reg 0x40 BPL0DAT RW 4/5.1  DATA=15:0
+  reg 0x44 BPL1DAT RW 4/5.1  DATA=15:0
+  reg 0x48 BPL2DAT RW 4/5.1  DATA=15:0
+  reg 0x4C BPL3DAT RW 4/5.1  DATA=15:0
+  reg 0x50 BPL4DAT RW 4/5.1  DATA=15:0
+  reg 0x54 BPL5DAT RW 4/5.1  DATA=15:0
+  reg 0x58 BPL6DAT RW 4/5.1  DATA=15:0
+  reg 0x5C BPL7DAT RW 4/5.1  DATA=15:0
 end
 
-# Sprite control (spec 9)
-reg 0x200 SPRCON  RW 9/8  EN=0
-reg 0x204 SPRHIT0 R  9/7  HIT=31:0
-reg 0x208 SPRHIT1 R  9/7  HIT=31:0
-reg 0x20C CLXGRP  R  9/7  PAIRS=15:0
 
 # DMA engine channels 0-3 (spec 11)
 array DMX 4 0x300 0x10 11/8
@@ -115,8 +110,7 @@ reg 0x710 COPSTAT RW1C 10/7  WAITING=0 STOPPED=1 ERR=2
 reg 0x714 COPERR  R    10/7  ADDR=22:0
 
 # Memory areas in the custom block
-area PALETTE 0x4000 0x1000 RW 4/6.3
-area SPRTAB  0x5000 0x0800 RW 9/3
+area PALETTE 0x4000 0x0400 RW 4/6.3
 area DESCRAM 0x6000 0x0800 RW 11/8
 
 # ---------------------------------------------------------------- system block
@@ -199,15 +193,6 @@ reg 0x848 I2CCMD     W  7/6    START=0 STOP=1 WRITE=2 READ=3 ACK=4
 reg 0x84C I2CSTAT    R  7/6    BUSY=0 NACK=1 ARBLOST=2
 
 # ---------------------------------------------------------------- layouts in memory
-# Sprite table entry (spec 9, section 3), 64 of them at CUSTOM + SPRTAB
-struct SPR 32 9/3
-  reg 0x00 POS   RW 9/3  X=11:0 Y=27:16
-  reg 0x04 PTR   RW 9/3  ADDR=22:0
-  reg 0x08 SIZE  RW 9/3  HEIGHTM1=9:0 STRIDE=31:16
-  reg 0x0C CTRL  RW 9/3  EN=0 WIDTH=2:1 BPP=4:3 HFLIP=5 VFLIP=6 DEPTH=10:8 PALOFS=21:16
-  reg 0x10 SCALE RW 9/3  HSTEP=15:0 VSTEP=31:16
-  reg 0x14 COLL  RW 9/7  GROUP=1:0 HITGROUPS=7:4 HITLAYERS=11:8
-end
 
 # DMA engine descriptor (spec 11, section 3)
 struct DMXDESC 32 11/3

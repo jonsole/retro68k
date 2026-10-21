@@ -70,9 +70,8 @@ if [ "$do_build" = 1 ]; then
     # ---- boot ROM and memory files
     say "Assembling the boot ROM"
     mkdir -p "$out"
-    "$vasm" -quiet -Fbin -I "$root/firmware/include" -o "$out/boot.bin" "$root/firmware/boot/boot.s"
+    "$vasm" -quiet -Fbin -I "$root/firmware/include" -I "$root/firmware/boot" -o "$out/boot.bin" "$root/firmware/boot/boot.s"
     python3 "$root/tools/bin2hex.py" "$out/boot.bin" "$out/boot.hex"
-    cp "$root/fpga/rtl/font8x16.hex" "$out/"
     cp "$root/fpga/third_party/fx68k/microrom.mem" "$root/fpga/third_party/fx68k/nanorom.mem" "$out/"
 
     # ---- Vivado

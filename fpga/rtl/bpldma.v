@@ -1,0 +1,227 @@
+// Bitplane DMA and the bitplane registers (spec 4, sections 4.4 and 5).
+// 100 MHz domain.
+//
+// As on the Amiga, each plane of each layer has a pointer BPLxPT, which
+// counts up as words are fetched, and a data register BPLxDAT. There are no
+// other buffers: a layer's data registers hold its next 16-pixel group
+// while its shifters (layer_pix.v) show the current one.
+//
+// A layer is "full" once BPL0DAT has been written (by the DMA, which writes
+// the planes high to low and plane 0 last, or by the CPU or copper). The
+// pixel side then takes the group into its shifters when it needs it, and
+// the DMA fetches the next group. Full and taken cross between the clock
+// domains as toggles (fill_t here, take_t there).
+//
+// The DMA uses the display's memory cycles (1 and 2 of each slot). Words
+// are asked for in a fixed order: the lowest-numbered layer that wants a
+// word first. A group is always asked for to the end once started.
+//
+// Line by line: at line_go (start of horizontal blank, from the pixel
+// domain) the line just shown is finished off: each plane pointer it used
+// moves on to the line's start + its length + BPLMOD (or back to the line's
+// start while a vertically scaled line is repeated). Then the next line's
+// fetch starts.
+`include "regmap.vh"
+
+module bpldma (
+    input  wire         clk,
+    input  wire         rst,
+    input  wire         enable,        // video on, DMACON.DMAEN and VIDEN
+
+    input  wire         rb_rd,
+    input  wire         rb_wr,
+    input  wire [23:2]  rb_addr,
+    input  wire [31:0]  rb_wdata,
+    input  wire [3:0]   rb_be,
+    output reg  [31:0]  rb_rdata,
+
+    // The next line, from the pixel domain (stable when line_t toggles)
+    input  wire         line_t,
+    input  wire [2:0]   act,           // the layer shows on the next line
+    input  wire [2:0]   adv,           // ... and its pointers move on after it (last copy of a source line)
+    input  wire [8:0]   planes,        // 3 x 3 bits: planes - 1 (0 for chunky)
+    input  wire [35:0]  ngroups,       // 3 x 12: groups to fetch
+    input  wire [35:0]  len,           // 3 x 12: line length in words per plane
+    output wire         line_go,       // 1 clock: a new line started here
+    output wire         line_gen,      // toggles with line_go
+
+    // To and from the pixel domain
+    output wire [383:0] dat,           // 3 layers x 8 planes x 16 bits, layer 0 plane 0 lowest
+    output reg  [2:0]   fill_t,
+    input  wire [2:0]   take_t,
+
+    // SRAM controller display port
+    output reg          req,
+    output reg  [21:1]  addr,
+    input  wire         ack,
+    input  wire         rvalid,
+    input  wire [15:0]  rdata
+);
+    // ---------------------------------------------------------------- registers
+    wire [15:0] off = {rb_addr[15:2], 2'b00};
+    // Layers at 0x100 + n x 0x80: BPLMOD +0x10, BPLxPT +0x20, BPLxDAT +0x40
+    wire [8:0]  blk = off[15:7];                           // 2, 3, 4 for layers 0, 1, 2
+    wire [1:0]  rn  = blk[1:0] - 2'd2;
+    wire        sel = (rb_addr[23:16] == 8'hE0) && (blk >= 9'd2) && (blk <= 9'd4);
+    wire        sel_mod = sel && off[6:0] == 7'h10;
+    wire        sel_pt  = sel && off[6:5] == 2'b01;
+    wire        sel_dat = sel && off[6:5] == 2'b10;
+    wire [4:0]  ri      = {rn, off[4:2]};                  // layer x 8 + plane
+
+    reg  [22:0] pt  [0:23];
+    reg  [15:0] dr  [0:23];
+    reg  [15:0] mod [0:2];
+
+    genvar g;
+    generate for (g = 0; g < 24; g = g + 1) begin : dout
+        assign dat[16*g +: 16] = dr[g];
+    end endgenerate
+
+    // ---------------------------------------------------------------- fetch state
+    reg  [1:0]  line_s;
+    assign line_go = line_s[1] != line_s[0];
+    reg  [2:0]  gen;
+    assign line_gen = gen[0];
+    reg  [2:0]  take_s1, take_s2;
+    wire [2:0]  full = fill_t ^ take_s2;
+
+    reg  [11:0] left   [0:2];          // groups still to start
+    reg  [11:0] issued [0:2];          // groups started on this line
+    reg  [3:0]  togo   [0:2];          // words of the current group still to ask for
+    reg  [2:0]  busy;                  // a group is on its way (until its plane 0 arrives)
+    // The line being fetched, for finishing it off at the next line_go
+    reg  [2:0]  pv_act, pv_adv;
+    reg  [2:0]  pv_planes [0:2];
+    reg  [11:0] pv_len [0:2];
+
+    // Reads on the way: layer, plane, generation
+    reg  [1:0]  q_layer [0:3];
+    reg  [2:0]  q_plane [0:3];
+    reg         q_gen   [0:3];
+    reg  [1:0]  q_h, q_t;
+
+    // Who asks next: the lowest-numbered layer with a group being asked for,
+    // or able to start one
+    reg  [2:0]  want;
+    reg  [1:0]  pick;
+    integer n;
+    always @(*) begin
+        for (n = 0; n < 3; n = n + 1)
+            want[n] = (togo[n] != 0) || (left[n] != 0 && !busy[n] && !full[n]);
+        pick = want[0] ? 2'd0 : want[1] ? 2'd1 : 2'd2;
+    end
+    // The plane to ask for: high to low, plane 0 last
+    wire [3:0]  pl_n    = (togo[pick] != 0) ? togo[pick] - 1'b1 : {1'b0, planes[3*pick +: 3]};
+    wire [4:0]  pi      = {pick, pl_n[2:0]};
+
+    // Finishing a line: what each plane pointer of layer n gets added:
+    // back to the line's start, then on by its length and BPLMOD
+    wire [22:0] step [0:2];
+    generate for (g = 0; g < 3; g = g + 1) begin : steps
+        assign step[g] = (pv_adv[g] ? {10'd0, pv_len[g], 1'b0} + {{7{mod[g][15]}}, mod[g]} : 23'd0)
+                         - {10'd0, issued[g], 1'b0};
+    end endgenerate
+
+    integer i;
+    always @(posedge clk) begin
+        line_s  <= {line_s[0], line_t};
+        take_s1 <= take_t;
+        take_s2 <= take_s1;
+        if (rst) begin
+            req    <= 1'b0;
+            q_h    <= 2'd0;
+            q_t    <= 2'd0;
+            gen    <= 3'd0;
+            fill_t <= 3'd0;
+            busy   <= 3'd0;
+            pv_act <= 3'd0;
+            pv_adv <= 3'd0;
+            for (n = 0; n < 3; n = n + 1) begin
+                left[n] <= 12'd0;  issued[n] <= 12'd0;  togo[n] <= 4'd0;
+                mod[n]  <= 16'd0;
+                pv_planes[n] <= 3'd0;  pv_len[n] <= 12'd0;
+            end
+            for (i = 0; i < 24; i = i + 1) begin
+                pt[i] <= 23'd0;
+                dr[i] <= 16'd0;
+            end
+        end else begin
+            // Data back from the SRAM
+            if (rvalid) begin
+                if (q_gen[q_h] == gen[q_layer[q_h]]) begin
+                    dr[{q_layer[q_h], q_plane[q_h]}] <= rdata;
+                    if (q_plane[q_h] == 3'd0) begin
+                        fill_t[q_layer[q_h]] <= ~fill_t[q_layer[q_h]];
+                        busy[q_layer[q_h]]   <= 1'b0;
+                    end
+                end
+                q_h <= q_h + 1'b1;
+            end
+
+            // A request was taken
+            if (ack) begin
+                req <= 1'b0;
+                q_t <= q_t + 1'b1;
+            end
+
+            if (line_go) begin
+                // Finish off the line just shown, then start the next one
+                for (i = 0; i < 24; i = i + 1)
+                    if (pv_act[i / 8] && (i % 8) <= pv_planes[i / 8])
+                        pt[i] <= pt[i] + step[i / 8];
+                for (n = 0; n < 3; n = n + 1) begin
+                    left[n]   <= (enable && act[n]) ? ngroups[12*n +: 12] : 12'd0;
+                    issued[n] <= 12'd0;
+                    pv_planes[n] <= planes[3*n +: 3];
+                    pv_len[n]    <= len[12*n +: 12];
+                    fill_t[n] <= take_s2[n];                 // empty: last line's spare group is dropped
+                end
+                pv_act <= enable ? act : 3'd0;
+                pv_adv <= adv;
+                busy   <= 3'd0;
+                gen    <= ~gen;
+                req    <= 1'b0;
+            end else if ((!req || ack) && |want) begin
+                // Ask for the next word
+                req        <= 1'b1;
+                addr       <= pt[pi][21:1];
+                pt[pi]     <= pt[pi] + 23'd2;
+                togo[pick] <= pl_n;
+                if (togo[pick] == 0) begin                   // a new group
+                    left[pick]   <= left[pick] - 1'b1;
+                    issued[pick] <= issued[pick] + 1'b1;
+                    busy[pick]   <= 1'b1;
+                end
+                q_layer[q_t + (ack ? 1'b1 : 1'b0)] <= pick;
+                q_plane[q_t + (ack ? 1'b1 : 1'b0)] <= pl_n[2:0];
+                q_gen[q_t + (ack ? 1'b1 : 1'b0)]   <= gen[pick];
+            end
+
+            // CPU (and later copper) writes win over the DMA's own changes
+            if (rb_wr && sel_mod) begin
+                if (rb_be[1]) mod[rn][15:8] <= rb_wdata[15:8];
+                if (rb_be[0]) mod[rn][7:1]  <= rb_wdata[7:1];
+                mod[rn][0] <= 1'b0;
+            end
+            if (rb_wr && sel_pt) begin
+                if (rb_be[2]) pt[ri][22:16] <= rb_wdata[22:16];
+                if (rb_be[1]) pt[ri][15:8]  <= rb_wdata[15:8];
+                if (rb_be[0]) pt[ri][7:1]   <= rb_wdata[7:1];
+                pt[ri][0] <= 1'b0;
+            end
+            if (rb_wr && sel_dat) begin
+                if (rb_be[1]) dr[ri][15:8] <= rb_wdata[15:8];
+                if (rb_be[0]) dr[ri][7:0]  <= rb_wdata[7:0];
+                // Writing BPL0DAT makes the group complete (spec 4, 5.1)
+                if (off[4:2] == 3'd0 && rb_be[0]) fill_t[rn] <= ~take_s2[rn];
+            end
+        end
+
+        rb_rdata <= 32'd0;
+        if (rb_rd) begin
+            if (sel_mod) rb_rdata <= {16'd0, mod[rn]};
+            if (sel_pt)  rb_rdata <= {9'd0, pt[ri]};
+            if (sel_dat) rb_rdata <= {16'd0, dr[ri]};
+        end
+    end
+endmodule

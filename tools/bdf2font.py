@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""Convert an 8x16 BDF font into the text layer's font RAM contents.
+"""Convert an 8x16 BDF font into a binary font for the boot ROM.
 
-    bdf2font.py font.bdf font8x16.hex
+    bdf2font.py font.bdf font8x16.bin
 
-The font RAM holds 256 characters x 16 bytes (spec 4, section 4.7), one
-byte per pixel row, leftmost pixel in bit 7. The output is a $readmemh file
-of 1024 32-bit words, big-endian (the first byte of each word in bits 31-24),
-the layout the CPU sees at 0xE12000.
+256 characters x 16 bytes, one byte per pixel row, leftmost pixel in
+bit 7 (4096 bytes). The boot ROM includes it to draw its console.
 """
 import sys
 
@@ -56,9 +54,8 @@ def main():
                 v = bits >> (8 * nbytes - 8) if nbytes > 1 else bits
                 v = (v >> bx) if bx >= 0 else (v << -bx)
                 font[code * H + y] = v & 0xFF
-    with open(sys.argv[2], "w") as out:
-        for i in range(0, len(font), 4):
-            out.write(f"{font[i]:02x}{font[i+1]:02x}{font[i+2]:02x}{font[i+3]:02x}\n")
+    with open(sys.argv[2], "wb") as out:
+        out.write(bytes(font))
 
 if __name__ == "__main__":
     main()

@@ -1,422 +1,294 @@
 # Spec 4: Video
 
-Status: **draft for review**
+Status: **v1 scope**
 
 ## 1. Goals
 
-- DVI output over the HDMI connector, and at the same time **24-bit VGA** through the KS3's ADV7125 video DAC, from 640×480 up to 1280×720. The **pixel clock is the master clock divided by a whole number**, and the timing is programmable
-- **Four independent layers**, each with its own display window, source address, pixel format, scroll, scale and palette. The Amiga has one display window and one or two playfields
-- **Video memory is fetched on demand by DMA, just in time, as the beam scans**, like the Amiga's bitplane DMA. There are no line buffers. Each layer has only a 48-byte buffer, the equivalent of the Amiga's bitplane data registers
-- **Fetch is automatic:** the hardware works out what to fetch from each layer's window, so there are no fetch start/stop registers to keep in step (the Amiga's DDFSTRT/DDFSTOP)
-- **Free scaling:** each layer has its own horizontal and vertical step in 1/256ths of a pixel, so 2× and 4× pixels, odd sizes and simple zoom effects all use the same mechanism
-- Fully programmable horizontal and vertical timing, with presets for standard modes at 50 and 60 Hz; beam position registers, vertical-blank and line interrupts
-- **Everything runs from one master clock, as on the Amiga.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line, in every mode. Layers only use DMA memory cycles (spec 5), so they never slow the CPU. Sprites can borrow the CPU's cycle only when they would otherwise be late (section 5.4)
-
-Sprites ([spec 9](sprites.md)), the copper and the blitter get their own specs.
+- DVI output over the HDMI connector and, at the same time, 24-bit VGA through the KS3's ADV7125 video DAC.
+- **One fixed video mode, chosen when the FPGA is built:** 640×480 at 60 Hz (the default) or 800×600 at 60 Hz. There are no timing registers.
+- **Three bitmap layers**, each with its own display window, scroll, scale and palette block. Each layer is **planar** (1 to 8 Amiga-style bitplanes) or **chunky** (1, 2, 4 or 8 bits per pixel).
+- **Amiga-style bitplane DMA:** each plane has a pointer (BPLxPT) that moves through memory as the picture is shown, a modulo (BPLMOD) added at the end of each line, and a data register (BPLxDAT). The copper (or the CPU) resets the pointers every frame.
+- **No hidden buffers.** Each plane has just its data register and its shift register, as on the Amiga. The DMA loads the data registers just in time; the copper or CPU can load them too.
+- **Fetch is automatic:** the hardware works out when and what to fetch from each layer's window, so there are no fetch start and stop registers (the Amiga's DDFSTRT/DDFSTOP).
+- **Direct colour:** the three layers can be joined into one direct-colour picture, one layer per channel (red, green, blue), up to 24 bits per pixel.
+- **Everything runs from one master clock.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line. The display uses only its own memory cycles (spec 5), so it never slows the CPU.
 
 ## 2. Comparison with the Amiga (OCS/ECS)
 
-| Feature | Amiga | retro68k |
-|---------|-------|----------|
-| Display window | One per screen (DIWSTRT/DIWSTOP) | One per layer, anywhere on screen |
-| Playfields | 1, or 2 in dual-playfield mode | Up to 4 layers + sprites, any priority order |
-| Pixel layout | Bitplanes (planar) | Chunky: 1, 2, 4 or 8 bits per pixel, packed in bytes |
-| Colours | 32 from 4096 (64 with EHB, 4096 with HAM) | 1024-entry palette of 24-bit colours (16.7 M); each layer picks its palette block |
-| Fetch | Bitplane DMA during the line into data registers; DDFSTRT/DDFSTOP set by hand | DMA during the line into small per-layer buffers; timing worked out from each layer's window and scale |
-| Line-to-line source step | Modulo (bytes skipped) | Stride (bytes from line to line), signed, so images can be flipped vertically |
-| Scrolling | Fine scroll 0–15 px via BPLCON1, plus pointer arithmetic | Scroll X and Y registers per layer, added by hardware |
-| Pixel size | Lores/hires (fixed 2:1), line doubling by copper tricks | Any horizontal and vertical step, 1/256 pixel precision |
-| Text mode | None | A text layer from block RAM (no Chip RAM cost) |
-| Video timing | Fixed (OCS); programmable on ECS | Pixel clock = master ÷ N (N = 3–8); horizontal and vertical timing programmable |
+| Feature | Amiga | retro68k v1 |
+|---------|-------|-------------|
+| Playfields | 1, or 2 in dual-playfield mode | 3 layers, in any order |
+| Pixel layout | Planar, 1–6 planes | Per layer: planar with 1–8 planes, or chunky with 1, 2, 4 or 8 bits per pixel |
+| Colours | 32 from 4096 (EHB, HAM) | 256-entry palette of 24-bit colours; each layer of up to 4 bits picks a 16-colour block. Direct colour up to 24 bits |
+| Plane pointers | BPLxPT, moved on by the fetch and BPLxMOD; rewritten by the copper each frame | The same, per layer: BPL0PT–BPL7PT and BPLMOD |
+| Data registers | BPLxDAT, loaded by DMA; writing BPL1DAT starts the shifters | The same: BPL0DAT–BPL7DAT; writing BPL0DAT completes a group |
+| Display window | One per screen (DIWSTRT/DIWSTOP) | One per layer (WINX/WINY) |
+| Fetch window | DDFSTRT/DDFSTOP, set by hand | Worked out from each layer's window and scroll |
+| Scrolling | Fine scroll 0–15 px via BPLCON1, coarse by pointers | The same: SCROLLX (0–15 px) and pointers |
+| Pixel size | Lores/hires, line doubling by copper tricks | 1×, 2×, 4× or 8× per layer, horizontal and vertical separately |
+| Video timing | Fixed (PAL or NTSC) | Fixed when the FPGA is built |
 
-## 3. Clocks, timing, retrace and the beam
+## 3. Clocks, timing and the beam
 
-### 3.1 One master clock, divided by whole numbers
+### 3.1 Clocks
 
-One MMCM (the Artix-7's clock generator), set once at power-on and never changed, makes a 200 MHz master clock from the KS3's 50 MHz oscillator (50 × 16 = 800 MHz, ÷ 4). Every other clock is the master divided by a whole number, so they all stay in a fixed relationship:
+The KS3 build has one MMCM (the Artix-7's clock generator). It runs at 1000 MHz internally from the board's 50 MHz oscillator, and every clock is a whole-number division of that:
 
-| Clock | Master ÷ | Frequency |
-|-------|----------|-----------|
-| System / SRAM controller | 2 | 100 MHz |
-| fx68k master clock | 5 | 40 MHz (→ 20 MHz 68000) |
-| Memory slot | 20 | 100 ns |
-| **Pixel clock** | **N = 3–8, programmable** | 66.7 MHz down to 25 MHz |
+| Clock | Frequency | Use |
+|-------|-----------|-----|
+| System / SRAM controller | 100 MHz | Memory slots of 100 ns (spec 5) |
+| fx68k | 40 MHz | 20 MHz 68000 |
+| Pixel clock | 25 MHz (640×480) or 40 MHz (800×600) | Video |
+| HDMI serialiser | 5 × pixel clock | Double-rate serialisers (OSERDESE2) |
 
-| N | Pixel clock | Pixels per slot |
-|---|-------------|-----------------|
-| 8 | 25.0 MHz | 2.5 |
-| 7 | 28.57 MHz | 2.86 |
-| 6 | 33.3 MHz | 3.33 |
-| 5 | 40.0 MHz | 4 |
-| 4 | 50.0 MHz | 5 |
-| 3 | 66.7 MHz | 6.67 |
+The pixel clock is the 200 MHz "master" divided by N: N = 8 for 640×480 and N = 5 for 800×600. In simulation it is modelled as the 200 MHz master passed through a clock buffer with an enable, which lets every Nth edge through.
 
-**KS3 build, version 1:** all clocks, the pixel clock and the HDMI 5× clock included, come from the one MMCM (VCO 1000 MHz, every output a whole-number division), with N fixed when the FPGA is built; PCLKLOCK reads 1 only when PCLKDIV matches it. Changing N at run time (with the MMCM's reconfiguration port, or a second MMCM) comes later. In simulation, the pixel clock is modelled as the 200 MHz master passed through a clock buffer with an enable (BUFGCE) that lets every Nth edge through, so its edges always line up with the master's, and signals cross between it and the 100 MHz system clock as ordinary timed paths.
+**VGA:** the ADV7125 takes 8 bits per colour over 4 pins at double rate. It shows the same picture and timing as HDMI.
 
-N = 2 (100 MHz) would need 1 Gbit/s per HDMI lane; the Artix-7 -2 might manage it, but it is not assumed. N above 8 would go below DVI's 25 MHz minimum.
+### 3.2 The two modes
 
-If fx68k cannot reach 40 MHz (the 16.7 MHz fallback in spec 5), the slot becomes 24 master clocks (120 ns), and the rule in 3.2 becomes "a multiple of 48". The pixel clocks stay the same.
+| Mode | N | Pixel clock | Total (H × V) | Sync (H, V) | Slots per line | Refresh |
+|------|---|-------------|---------------|-------------|----------------|---------|
+| 640×480 (default) | 8 | 25.0 MHz | 800 × 525 | 656–752, 490–492, both negative | 320 | 59.5 Hz |
+| 800×600 | 5 | 40.0 MHz | 1056 × 628 | 840–968, 601–605, both positive | 264 | 60.3 Hz |
 
-### 3.2 Every line is a whole number of slots
+640×480 uses 25.0 MHz instead of VGA's 25.175 MHz; monitors accept this. 800×600 is exactly the VESA mode.
 
-**Rule: HTOTAL × N must be a multiple of 20.** A line then lasts exactly `S = HTOTAL × N ÷ 20` slots.
+Each line is a whole number of 100 ns slots, so DMA happens at the same beam positions on every line, as on the Amiga.
 
-- The slot counter `hslot` restarts at 0 at the start of every line. **DMA is locked to the beam:** every fixed DMA slot happens at the same horizontal position on every line, as on the Amiga.
-- Every slot has the CPU's memory cycle (spec 5), so changing mode never disturbs the CPU.
-- VTOTAL has no such rule.
+`hpixel` counts from 0 at the first visible pixel, `vline` from 0 at the first visible line. Blanking (front porch, sync, back porch) follows the visible part. Lines VVISIBLE to VTOTAL − 1 are the vertical retrace.
 
-### 3.3 The HDMI serialiser clock
+The build picks the mode with `PIX_N` (8 or 5) in `fpga/ks3/build.sh`. Software reads the screen size from VIDSIZE.
 
-HDMI sends 10 bits per pixel, so the Artix-7 serialisers (OSERDESE2) need clocks at 5× (with double data rate) and 1× the pixel clock. A whole-number divider can only make slower clocks, so a second MMCM is used **only as a multiplier**. It takes the divided pixel clock as its input and gives back 1× and 5× copies, kept in phase with its input. HDMI transmitter chips do the same thing inside.
-
-- The multiplier's internal oscillator must stay in its range (600–1440 MHz on the -2 grade), so it has two settings, loaded through its reconfiguration port when N changes: ×30 internally for N = 5–8, ×15 for N = 3–4.
-- When N changes, the multiplier relocks in well under a millisecond while video is off, and PCLKLOCK in VIDSTAT sets. The master clock, the slots and the CPU are not affected.
-- The fastest mode, N = 3, needs 667 Mbit/s per HDMI lane, comfortably inside the Artix-7's limit.
-
-**VGA:** the KS3's ADV7125 DAC takes 8 bits per colour, sent over 4 pins per colour at double rate (the top 4 bits on one clock edge, the bottom 4 on the other). It is clocked from the pixel clock and shows exactly the same picture and timing as HDMI.
-
-### 3.4 Programmable timing
-
-All values are in pixels (horizontal) or lines (vertical). `hpixel` counts from 0 at the first visible pixel, `vline` from 0 at the first visible line. Blanking (front porch, sync, back porch) follows the visible part.
-
-| Register | Meaning |
-|----------|---------|
-| PCLKDIV | N: pixel clock = 200 MHz ÷ N |
-| HVISIBLE, HSYNCSTART, HSYNCEND, HTOTAL | Horizontal: visible width, sync position, total pixels per line. HTOTAL × N must be a multiple of 20 |
-| VVISIBLE, VSYNCSTART, VSYNCEND, VTOTAL | Vertical: visible lines, sync position, total lines per frame |
-| SYNCPOL | Horizontal and vertical sync polarity |
-
-The timing and clock registers can only be changed while video is off (VIDCON.EN = 0). Turning video on with an HTOTAL that breaks the rule is refused, and VIDSTAT.BADTIMING is set.
-
-Horizontal blanking is the horizontal retrace; lines VVISIBLE to VTOTAL−1 are the vertical retrace.
-
-### 3.5 Presets
-
-The boot ROM has a table of these modes. Software can also set any timing that follows the rule.
-
-| Mode | N | Pixel clock | Total (H × V) | Slots per line | Refresh | Compared with the standard |
-|------|---|-------------|---------------|----------------|---------|----------------------------|
-| 640×480 | 8 | 25.0 MHz | 800 × 525 | 320 | 59.5 Hz | VGA is 25.175 MHz; monitors accept 25.0. Power-on default |
-| 640×480 | 8 | 25.0 MHz | 800 × 625 | 320 | 50.0 Hz | Non-standard; test per monitor |
-| 720×576 | 7 | 28.57 MHz | 920 × 621 | 322 | 50.0 Hz | 576p is 27.0 MHz, 864 × 625. Line rate 0.6% low |
-| 720×480 | 7 | 28.57 MHz | 920 × 517 | 322 | 60.1 Hz | 480p is 27.0 MHz, 858 × 525. Line rate 1.3% low |
-| 800×600 | 5 | 40.0 MHz | 1056 × 628 | 264 | 60.3 Hz | Exactly VESA 800×600 @ 60 |
-| 800×600 | 4 | 50.0 MHz | 1040 × 666 | 208 | 72.2 Hz | Exactly VESA 800×600 @ 72 |
-| 1024×768 | 3 | 66.7 MHz | 1360 × 817 | 204 | 60.0 Hz | VESA is 65 MHz, 1344 × 806 |
-| 1280×720 | 3 | 66.7 MHz | 1480 × 750 | 222 | 60.06 Hz | 720p is 74.25 MHz, 1650 × 750; same line and frame rate, shorter blanking |
-| 1280×720 | 3 | 66.7 MHz | 1760 × 758 | 264 | 49.97 Hz | 720p50 is 74.25 MHz, 1980 × 750 |
-
-**The cost of whole-number division:** the TV modes (576p, 480p, 720p) use a different pixel clock and blanking from the standard. Their line and frame rates are matched as closely as possible by adjusting the totals. Computer monitors accept this; some TVs check timing strictly (open point V9). The Amiga had the same issue, which is why PAL and NTSC machines had different crystals.
-
-Low-resolution looks (320×240, 360×288 etc.) are made with layer scaling (section 4.5), not by changing the timing. This keeps the screen locked to one mode and lets low- and high-resolution layers be shown together.
-
-### 3.6 Beam position
+### 3.3 Beam position
 
 | Register | Contents |
 |----------|----------|
-| BEAMPOS (read) | `vline` (bits 26–16), `hpixel` (bits 10–0) as one 32-bit read so they always match |
-| SLOTPOS (read) | `vline` (bits 26–16), `hslot` (bits 8–0): the beam position in memory slots |
-| FRAMECOUNT (read) | Frame counter, 16-bit, increments at the start of vertical blanking |
+| BEAMPOS (read) | `vline` (bits 26–16) and `hpixel` (bits 10–0), as one 32-bit read so they always match |
+| FRAMECOUNT (read) | Frame counter, 16 bits, counts up at the start of vertical blanking |
 
-### 3.7 Video interrupts
+### 3.4 Video interrupts
 
-They reach the CPU through the interrupt controller (spec 13) as four sources with their own vectors: VBLANK, LINE, COPPER and VIDERR (OVERRUN, SPRMISS, SPROVF, BADTIMING). Default level 5.
+These reach the CPU through the interrupt controller (spec 13), as the sources VBLANK, LINE and VIDERR. The default level is 5.
 
-| Source | When |
-|--------|------|
+| Flag | When |
+|------|------|
 | VBLANK | Start of vertical blanking (`vline` = VVISIBLE, `hpixel` = 0) |
-| LINE | `vline` and `hpixel` match LINECMP, for raster effects without the copper |
-| OVERRUN | A layer did not get all its data for a line (section 5.4) |
+| LINE | Start of line `vline` = LINECMP (`hpixel` = 0), for raster effects without the copper |
+| OVERRUN | A layer's next group was not ready when its shifters needed it (section 5.3); goes to VIDERR |
 
-Each has an enable bit in VIDINTEN and a sticky flag in VIDSTAT, cleared by writing 1.
+Each flag has an enable bit in VIDINTEN and a sticky flag in VIDSTAT, which is cleared by writing 1.
 
 ## 4. Layers
 
 ### 4.1 Overview
 
-There are 4 layers (L0–L3), a sprite layer and a background colour. For every pixel, the hardware takes the colour of the highest-priority layer whose pixel is not transparent. If no layer has a pixel there, the background colour shows.
+There are three bitmap layers, L0–L2. For every pixel, the hardware takes the colour of the highest-priority layer whose pixel is not transparent. Where no layer has a pixel, the background colour shows. In direct-colour mode (section 4.9) the three layers make one picture instead.
 
 ```
- Chip RAM ─DMA, just in time─▶ 48-byte buffers L0..L3 ──┐
-                                                        ├─▶ priority mux ─▶ palette ─▶ HDMI and VGA
- block RAM (text) ─▶ text layer ────────────────────────┤        ▲
- Chip RAM ─DMA, just before X─▶ sprite data registers ───┘   PRIO register
+          per layer, per plane
+ Chip RAM ──DMA──▶ BPLxDAT ──▶ shifter ──┐
+                     ▲                   ├─▶ priority ─▶ palette ─▶ HDMI and VGA
+               CPU / copper   L0, L1, L2 ┘     (or direct colour)
 ```
 
-### 4.2 Layer types and pixel formats
+Each layer runs on its own: its own pointers, data registers, shifters, window, scroll and scale. The layers only meet at the end, where one pixel is picked from them.
 
-| Type | Source | Formats | Uses Chip RAM cycles |
-|------|--------|---------|-------------|
-| Bitmap | Chip RAM | 1, 2, 4 or 8 bits per pixel, chunky, most significant pixel first in each byte | Yes (section 5) |
-| Text | Text buffer in block RAM | 8×16 character cells | None |
+### 4.2 Pixel formats
 
-Only one layer at a time can be a text layer (there is one text buffer).
-
-Planned for later versions: 16-bit direct colour (RGB565), tile-map layers.
+| Format | Layout |
+|--------|--------|
+| **Planar**, 1–8 planes | As on the Amiga: each plane holds one bit of every pixel, 16 pixels per word, leftmost pixel in bit 15. Plane 0 gives bit 0 of the pixel value, plane 1 bit 1, and so on |
+| **Chunky**, 1, 2, 4 or 8 bits per pixel | Pixels packed in words, leftmost pixel in the most significant bits. A chunky layer is one plane: it uses only BPL0PT and BPL0DAT |
 
 ### 4.3 Display window
 
-Each layer has a rectangle: `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND`, in screen pixels and lines. Outside its window a layer is transparent.
+Each layer has a rectangle `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND` (WINX, WINY) in screen pixels and lines: the layer's display start and stop. Outside it the layer is transparent. Windows can overlap or sit side by side, so status bars and split screens need no copper. A full-screen layer is simply 0, 0, HVISIBLE, VVISIBLE.
 
-- Windows can overlap, sit side by side, or cover only part of the screen. This makes split screens, status bars, picture-in-picture and borders possible without the copper.
-- A full-screen layer is simply 0, 0, HVISIBLE, VVISIBLE.
+### 4.4 Plane pointers, modulo and scroll
 
-### 4.4 Source address, stride and scroll
-
-For each layer:
+**Each plane has its own pointer, BPLxPT, which counts up through memory as the plane's words are fetched**, as on the Amiga.
 
 | Register | Bits | Meaning |
 |----------|------|---------|
-| PTR | 23 | Byte address in Chip RAM of the layer's top-left source pixel (before scrolling) |
-| STRIDE | 16, signed | Bytes from one source line to the next. Negative values flip the image vertically |
-| SCROLLX | 16 | Source pixels skipped at the left |
-| SCROLLY | 16 | Source lines skipped at the top |
+| BPL0PT–BPL7PT | 23 (even) | Byte address in Chip RAM of the plane's next word |
+| BPLMOD | 16, signed (even) | Bytes added to every pointer of the layer at the end of each line, as the Amiga's BPL1MOD/BPL2MOD |
+| SCROLLX | 4 | Fine scroll: pixels (0–15) skipped at the start of each line, as the Amiga's BPLCON1 delay |
 
-The address of the first source line is `PTR + SCROLLY × STRIDE`. The first pixel on each line is source pixel `SCROLLX`. Because these are pixel counts, the hardware takes care of fine scrolling at any bit depth. There is no separate fine-scroll register as on the Amiga.
+- **At the end of each line** inside the layer's window, each pointer the layer uses ends up at the line's start plus **the line's length plus BPLMOD**. The line's length is the window width in source pixels × bits per pixel ÷ 8, rounded up to whole words (for planar layers, one plane's worth, so 1 bit per pixel). Fine scroll does not change it: with fine scroll, one extra word is fetched and not counted.
+- **The pointers are not reset by the hardware.** As on the Amiga, the copper (spec 10) writes them at the start of every frame, normally in the vertical blank (or the CPU does it in its VBLANK interrupt). If nothing rewrites them, the next frame carries on through memory.
+- Vertical scrolling and coarse horizontal scrolling are done by changing the pointers. Split screens are done by writing new pointers mid-frame.
+- BPLMOD = 0 shows a picture whose lines follow each other. A 320-pixel window into a 640-pixel-wide 4bpp chunky picture has a line length of 160 bytes, so BPLMOD = 160. A negative BPLMOD shows lines again or flips the picture: −(row bytes + line length) steps back one row.
+- With vertical scaling, the pointers return to the line's start after each copy of a source line except the last.
+- **Fine scroll** on a chunky layer stays within a word: SCROLLX is taken modulo 16 ÷ bits per pixel (0–1 at 8bpp, 0–3 at 4bpp, 0–7 at 2bpp, 0–15 at 1bpp).
 
-A large virtual screen, for example 2048×1024 at 8bpp with STRIDE = 2048, can be scrolled in any direction just by changing SCROLLX and SCROLLY.
+| Layout | Pointers | BPLMOD |
+|--------|----------|--------|
+| Chunky 320×240 at 8bpp | BPL0PT = base | 0 |
+| Planar 320×256, 5 planes, separate as on the Amiga | BPLpPT = base + p × 10240 | 0 |
+| Planar 320×256, 5 planes, interleaved (plane lines next to each other) | BPLpPT = base + p × 40 | 4 × 40 = 160 |
 
 ### 4.5 Scaling
 
-| Register | Format | Meaning |
-|----------|--------|---------|
-| HSTEP | 8.8 fixed point | Source pixels per screen pixel |
-| VSTEP | 8.8 fixed point | Source lines per screen line |
-
-| Value | Effect |
-|-------|--------|
-| `0x0100` | 1:1 |
-| `0x0080` | 2× bigger (320×240 fills the screen) |
-| `0x0040` | 4× bigger (160×120 fills the screen) |
-| `0x0200` | Half size (shows twice as much; costs twice the fetch bandwidth) |
-| `0x00C0` | 1.33× bigger (480-pixel-wide image fills 640) |
-
-- Scaling uses nearest-neighbour: no filtering, so pixels stay sharp.
-- HSTEP above `0x0100` shrinks the image and fetches more data per line. Section 5 covers the budget.
-- VSTEP accumulates per line. When the integer part steps, the source line moves on by STRIDE (or by a multiple of STRIDE for VSTEP ≥ 2).
+CTRL.HSCALE and CTRL.VSCALE each pick 1×, 2×, 4× or 8× (values 0–3). Each source pixel is repeated that many times across and each source line that many times down: 2× shows a 320×240 picture full-screen at 640×480. There is no fractional scaling or shrinking.
 
 ### 4.6 Transparency and palette
 
-- Each layer has a palette offset (0–1023, in steps of 16). The colour index for a pixel is `offset + pixel value`. This lets a 4bpp layer use any 16-colour block and an 8bpp layer any of the four 256-colour banks.
-- If the layer's TRANSP bit is set, pixel value 0 is transparent and lower layers show through. If it is clear, the layer is solid.
-- **Palette:** 1024 entries × 24-bit RGB, memory-mapped so the CPU and copper can write any entry at any time. A write takes effect from the next pixel, so mid-line colour changes (copper bars) work.
+- **Palette:** 256 entries of 24-bit RGB, memory-mapped. The CPU and copper can write any entry at any time; a write takes effect from the next pixel, so mid-line colour changes work.
+- For layers of up to 4 bits per pixel (chunky 1, 2 or 4bpp, planar 1–4 planes), the colour index is `PALOFS × 16 + pixel value`. Deeper layers (chunky 8bpp, planar 5–8 planes) use the pixel value directly and ignore PALOFS.
+- If CTRL.TRANSP is set, pixel value 0 is transparent and lower layers show through. If it is clear, the layer is solid inside its window.
 
-### 4.7 Text layer
+### 4.7 Text
 
-| Item | Value |
-|------|-------|
-| Character cell | 8×16 pixels |
-| Text buffer | 128 columns × 32 rows of 16-bit cells in block RAM (8 KB); 80×30 visible at 640×480. Higher resolutions use a window or 2× scaling, because the buffer is 128×32 cells |
-| Cell format | Bits 7–0 character code, bits 11–8 foreground colour, bits 15–12 background colour |
-| Font | 256 characters × 16 bytes in block RAM (4 KB), writable, so the font can be redefined |
-| Colours | Palette offset + 0–15; with TRANSP set, background colour 0 is transparent so text can sit over graphics |
-| Scrolling | SCROLLX/SCROLLY in pixels, wrapping around the 128×32 buffer. A console can scroll by moving SCROLLY a row at a time without copying memory |
-| Scaling | HSTEP/VSTEP as for bitmaps (e.g. `0x0080` horizontally for 40 columns) |
-
-The text layer uses PTR as the cell offset into the text buffer, and ignores STRIDE.
-
-**Layout seen by the CPU:** cell n is the 16-bit word at `0xE10000 + 2n` (row r, column c is cell `128r + c`); the character code is its low byte, at the odd address. Character k's 16 rows are the bytes at `0xE12000 + 16k`, leftmost pixel in bit 7. At power-on the font holds Spleen 8×16 in code page 437 (BSD licence, `third_party/spleen`).
+There is no text layer. Text is drawn into a bitmap by software, as on the Amiga; the boot ROM draws its console with an 8×16 font (Spleen, code page 437, BSD licence, `third_party/spleen`) into a 1-plane layer.
 
 ### 4.8 Priority
 
-The PRIO register lists the order of the four layers and where sprites sit:
+PRIO lists the layer numbers from front to back:
 
 | Bits | Field | Meaning |
 |------|-------|---------|
-| 1–0 | FRONT | Layer number in front |
-| 3–2 | SECOND | |
-| 5–4 | THIRD | |
-| 7–6 | BACK | Layer number at the back |
+| 1–0 | FRONT | Layer in front |
+| 3–2 | MIDDLE | |
+| 5–4 | BACK | Layer at the back |
 
-Any order is allowed, unlike the Amiga's fixed playfield-pair rules. Each sprite sets its own depth among the layers (spec 9, section 6).
+Any order is allowed; the value 3 names no layer. The default is L0 in front, then L1, then L2.
+
+### 4.9 Direct colour
+
+With VIDCON.DIRECT set, the palette and priority are not used. Every visible pixel is made from the three layers' pixel values:
+
+| Channel | From | Depth |
+|---------|------|-------|
+| Red | L0 | L0's planes (planar) or bits per pixel (chunky) |
+| Green | L1 | L1's |
+| Blue | L2 | L2's |
+
+- Each channel's value is widened to 8 bits by repeating its bits (a 5-bit value `abcde` becomes `abcdeabc`), so full scale stays full scale.
+- One rule covers 24-bit (8/8/8 planes or 8bpp chunky), 16-bit (5/6/5), Amiga 12-bit (4/4/4) and 9-bit (3/3/3) colour. The bandwidth is the total number of planes (section 5.2).
+- Software sets the three layers to the same window, scroll and scale. Where a layer has no pixel (outside its window, not enabled, or out of data), its channel is 0.
+- CTRL.TRANSP and PALOFS have no effect in direct colour.
 
 ## 5. Fetch
 
-### 5.1 Fetched on demand, as the beam scans
+### 5.1 Data registers and shifters
 
-There are no line buffers. Video data is fetched by DMA during the line it is shown on, a few pixels ahead of the beam, as the Amiga does with bitplane DMA.
+- Each plane of each layer has a data register **BPLxDAT** and a 16-bit **shift register**. There is no other storage: the data registers hold the layer's next group of 16 source pixels (one word per plane), while the shifters show the current group.
+- **A group is complete when BPL0DAT is written.** The DMA writes a group's words from the highest plane down, with plane 0 last. The CPU or copper can also write the data registers (for example with DMA off), and its write of BPL0DAT completes the group the same way.
+- When a layer's shifters need a new group (at the first pixel of its window, then every 16 source pixels), they take all of its data registers at once. That empties the data registers, and the DMA fetches the next group.
+- The display owns **memory cycles 1 and 2 of every slot**: 4 bytes every 100 ns (spec 5, section 4.3). It never touches the CPU's cycle 0.
+- **Order:** when several layers want a word, the lowest-numbered layer goes first. A layer's group is always asked for to the end once started. With a given screen setup, the fetch pattern is the same on every line and every frame.
+- **Start and stop:** at the start of the horizontal blank, each layer whose window covers the next line gets its first group fetched; the number of groups on the line comes from the window width, scale and fine scroll. Nothing is fetched outside the windows.
+- With vertical scaling, each source line is fetched again for every screen line it appears on.
 
-- Each bitmap layer has a **48-byte buffer** (24 words), made from FPGA logic, not block RAM. It does the job of the Amiga's bitplane data registers. The pixel output takes data from the front of the buffer, and DMA tops it up from the back, one 16-bit word per memory cycle.
-- **Display fetch cycles** are fixed in every slot of every line (spec 5, section 4.3):
-  - **Normal:** memory cycles 1 and 2 of every slot: 4 bytes every 100 ns.
-  - **Wide fetch** (VIDCON.WIDE = 1): also cycle 3 in the visible part of the line, 6 bytes every 100 ns. Cycle 3 comes out of the free pool, so the copper and DMA engine get less while it is on. Layers never touch the CPU's cycle 0.
-- **Which layer or sprite gets each cycle:** whichever will run out of data soonest (earliest deadline first). With a given screen setup this always works out the same, so the fetch pattern repeats exactly on every line and every frame.
-- **Prefetch:** before a layer's window starts, its buffer is filled with its first 16 bytes. For windows that start at the left edge, this happens in the horizontal blanking before the line. For windows that start further right, it happens in display cycles just before the window. This replaces the Amiga's DDFSTRT, which had to be set by hand earlier than the display window.
-- Fetching starts at the word holding the first pixel, and leading pixels are skipped to give the exact SCROLLX position. The SRAM has no rows or bursts, so any address costs the same.
-- **Vertical scaling** re-fetches the source line for each screen line it appears on. There is nothing kept from the line before.
+### 5.2 Budget
 
-The buffers sit between the 100 MHz DMA side and the pixel clock. Both come from the same master clock, so the hand-over is fully predictable.
+Data is fetched while it is shown, so the budget is a **rate**: the bytes that can be fetched for each pixel the beam passes.
 
-### 5.1.1 Version 1 (fpga/rtl/vfetch.v, layer_pix.v)
+| Mode | Budget (bytes per pixel) |
+|------|--------------------------|
+| 640×480 | 1.6 |
+| 800×600 | 1.0 |
 
-What the first implementation does, where it is simpler than the text above:
+A layer needs `bits per pixel ÷ 8 ÷ HS` bytes per screen pixel (for planar, bits per pixel = planes). At every point across the screen, the layers whose windows cover it must add up to no more than the budget.
 
-- **Which layer gets a cycle:** the one with the emptiest buffer (fewest words in it or on the way), lowest layer number on a tie. For layers that use data at the same rate this is the same as earliest deadline first; a true deadline order comes with sprites.
-- **Wide fetch** gives cycle 3 to the display on the whole line, not just its visible part.
-- **Buffer:** 24 words in use, in a 32-word store (LUT RAM).
-- **Per line:** at the start of horizontal blanking the next line's start address and word count are worked out (over three pixel clocks), and the fetcher fills each buffer from then on. A layer moves on by at most one word per pixel, so HSTEP may not take more than 16 bits of source per screen pixel (e.g. 2.0 at 8 bpp); that is past the budget in any case.
-- **PTR written mid-frame:** the next line starts at the new PTR (source line 0); SCROLLY applies again from the next frame.
+| Screen setup | Bytes per pixel | 640×480 | 800×600 |
+|--------------|-----------------|---------|---------|
+| One 8bpp layer at 1× | 1.0 | Fits | Fits |
+| 5 planes at 1× (Amiga 32 colours) | 0.625 | Fits | Fits |
+| 5 planes + 3 planes at 2× (dual playfield) | 0.5 | Fits | Fits |
+| 8bpp layer + 4bpp layer at 1× | 1.5 | Fits | **No** |
+| Direct colour 16-bit (5/6/5) at 2× across | 1.0 | Fits | Fits |
+| Direct colour 24-bit at 2× across (320 wide) | 1.5 | Fits | **No** |
+| Two 8bpp layers at 1× | 2.0 | **No** | **No** |
 
-### 5.2 Budget: bytes per pixel
+Windows help: a status bar below a game area, not on top of it, adds nothing on the lines where the game area is shown.
 
-Because data is fetched while it is shown, the budget is a **rate**: how many bytes can be fetched for each pixel the beam passes.
+Each layer has one group of time in hand (its data registers), so the order in 5.1 matters only near the budget: put the deepest layer at L0.
 
-| Fetch | Bytes per pixel |
-|-------|-----------------|
-| Normal | 0.2 × N |
-| Wide | 0.3 × N |
+### 5.3 When a layer runs short
 
-A layer needs `bits per pixel ÷ 8 × HSTEP ÷ 256` bytes per screen pixel. At every point across the screen, **the layers whose windows cover that point must add up to no more than the budget.** The 48-byte buffers smooth out small differences, but not a whole line's worth.
+If a layer's next group is not complete when its shifters need it, the layer shows transparent pixels (in direct colour: 0) for that group, and tries again at the next one. Its OVERRUN flag is set, and VIDERR can raise an interrupt. Nothing else on the display goes wrong, and the CPU is never affected.
 
-| Mode | N | Normal | Wide |
-|------|---|--------|------|
-| 640×480 @ 60 or 50 | 8 | 1.6 | 2.4 |
-| 720×576 @ 50, 720×480 @ 60 | 7 | 1.4 | 2.1 |
-| 800×600 @ 60 | 5 | 1.0 | 1.5 |
-| 800×600 @ 72 | 4 | 0.8 | 1.2 |
-| 1024×768 @ 60, 1280×720 @ 60 or 50 | 3 | 0.6 | 0.9 |
+### 5.4 When register writes take effect
 
-What one layer costs:
-
-| Layer | Bytes per pixel |
-|-------|-----------------|
-| 8bpp at 1:1 | 1.0 |
-| 4bpp at 1:1, or 8bpp at 2× wide | 0.5 |
-| 2bpp at 1:1, or 4bpp at 2× wide | 0.25 |
-| 1bpp at 1:1 | 0.125 |
-| Text | 0 (block RAM) |
-
-### 5.3 Example budgets
-
-| Screen setup | Bytes per pixel | Fits? |
-|--------------|-----------------|-------|
-| 640×480: one full layer at 8bpp | 1.0 | Normal (1.6) |
-| 640×480: 8bpp layer + 4bpp overlay | 1.5 | Normal |
-| 640×480: two 320×240 8bpp layers at 2× + text | 1.0 | Normal |
-| 640×480: 8bpp layer + full-screen 8bpp overlay | 2.0 | Wide (2.4) |
-| 720×576: two 360×288 8bpp layers at 2× | 1.0 | Normal (1.4) |
-| 800×600 @ 60: one full layer at 8bpp | 1.0 | Normal (1.0) |
-| 1024×768: one full layer at 4bpp | 0.5 | Normal (0.6) |
-| 1280×720: one full layer at 4bpp | 0.5 | Normal (0.6) |
-| 1280×720: 640×360 8bpp at 2× + 1280×720 2bpp overlay | 0.5 + 0.25 = 0.75 | Wide (0.9) |
-| 1280×720: one full layer at 8bpp | 1.0 | **No** (0.9) |
-
-Windows help: a status bar that sits below a game area, not on top of it, adds nothing to the budget on the lines where the game area is shown.
-
-### 5.4 Sprites: fetched just before they are drawn
-
-Sprite data is fetched on demand, just before the beam reaches each sprite, from the free pool and, only when needed, the CPU's cycle. Nothing is fetched a line ahead. [Spec 9](sprites.md), section 5 has the details:
-
-- Each sprite's fetch starts exactly 128 slots before its first pixel, on the line it is shown (or at the end of the line before, for sprites near the left edge).
-- It uses free-pool cycles and display cycles no layer needs first, and takes the CPU's cycle only when the sprite would otherwise be late (2 CPU clocks each).
-- Sprites never take cycles a layer needs, so they don't count towards the layer budget in section 5.2.
-
-### 5.5 When a layer runs short
-
-If a layer's buffer runs empty (the setup is over budget at that point on the screen), that layer shows transparent pixels until DMA catches up. The OVERRUN flag for that layer is set, and an interrupt can be raised. The display never glitches in any other way, and the CPU is never affected.
-
-Software can check a setup in advance with the rule in 5.2. A helper in the boot ROM will do this.
-
-### 5.6 When register writes take effect
-
-| Register group | Takes effect |
-|----------------|--------------|
-| Layer registers: CTRL, PTR, STRIDE, SCROLLX/Y, HSTEP/VSTEP, window | Latched at the start of horizontal blanking before each line, when that line's prefetch begins. **To change line L, write during the visible part of line L−1 (or earlier).** |
+| Registers | Take effect |
+|-----------|-------------|
+| CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line. **To change line L, write during the visible part of line L − 1 or earlier** |
+| BPLxPT, BPLMOD | At once: they are live. The next word fetched uses the new value. A CPU or copper write wins over the DMA's own change in the same clock |
+| BPLxDAT | At once; a write of BPL0DAT completes the group |
 | PRIO, BGCOLOR | At the start of each line |
-| Palette | Immediately (next pixel) |
-| Timing and pixel clock registers | Only while video is off |
-
-- **Writing PTR mid-frame** restarts that layer's source at the new address from the next line. This gives Amiga-style split screens (e.g. a different picture below line 200) with one copper write.
-- Otherwise each layer's current source line just moves on by VSTEP each line.
+| VIDCON.DIRECT, palette | At once (next pixel) |
 
 ## 6. Registers
 
-Addresses are offsets in the custom register block at `0xE00000`. Spec 3 sets the final addresses.
+The offsets are within the custom register block at `0xE00000`. Spec 3 has the full map.
 
 ### 6.1 Global
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
-| `0x000` | VIDCON | EN (0), WIDE (1), BLANKALL (2) | Video on, wide fetch, force background only |
-| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L3 (4–7), INVBLANK (8, read-only), PCLKLOCK (9, read-only), BADTIMING (10), SPRMISS (11), SPROVF (12), COPIRQ (13: copper IRQ instruction or error, spec 10) | Sticky flags, write 1 to clear |
-| `0x008` | VIDINTEN | Same bit layout as VIDSTAT | Interrupt enables |
+| `0x000` | VIDCON | EN (0), BLANKALL (2), DIRECT (4) | Video on; show the background colour only; direct colour |
+| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L2 (6–4), INVBLANK (8, read-only) | Sticky flags, write 1 to clear |
+| `0x008` | VIDINTEN | Same layout as VIDSTAT | Interrupt enables |
 | `0x00C` | BEAMPOS | `vline` 26–16, `hpixel` 10–0 | Read-only |
 | `0x010` | FRAMECOUNT | 15–0 | Read-only |
-| `0x048` | SLOTPOS | `vline` 26–16, `hslot` 8–0 | Read-only |
-| `0x014` | LINECMP | `vline` 26–16, `hpixel` 10–0 | LINE interrupt position |
+| `0x014` | LINECMP | `vline` 26–16 | LINE interrupt line |
 | `0x018` | BGCOLOR | 23–0 RGB | Background colour |
 | `0x01C` | PRIO | See 4.8 | Layer order |
-| `0x020` | HVISIBLE | 10–0 | Timing (video off only) |
-| `0x024` | HSYNCSTART | 10–0 | |
-| `0x028` | HSYNCEND | 10–0 | |
-| `0x02C` | HTOTAL | 10–0 | |
-| `0x030` | VVISIBLE | 10–0 | |
-| `0x034` | VSYNCSTART | 10–0 | |
-| `0x038` | VSYNCEND | 10–0 | |
-| `0x03C` | VTOTAL | 10–0 | |
-| `0x040` | SYNCPOL | HPOL (0), VPOL (1) | 1 = active-high sync |
-| `0x044` | PCLKDIV | 3–0 | N: pixel clock = 200 MHz ÷ N, N = 3–8 (video off only) |
+| `0x020` | VIDSIZE | VVISIBLE 26–16, HVISIBLE 10–0 | Read-only: the screen size of the built mode |
 
-DMACON (spec 5, section 8) must also have VIDEN set for bitmap layers to fetch.
+For the layers to fetch, DMACON (spec 5, section 8) must also have DMAEN and VIDEN set.
 
 ### 6.2 Per layer
 
-Layer *n* is at `0x100 + n × 0x40`.
+Layer n (0–2) is at `0x100 + n × 0x80`.
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
-| `+0x00` | CTRL | EN (0), TYPE (1: 0 = bitmap, 1 = text), BPP (3–2: 1/2/4/8), TRANSP (4), PALOFS (15–6, in units of 16 entries) | |
-| `+0x04` | PTR | 22–0 | Source byte address in Chip RAM (text layer: cell offset) |
-| `+0x08` | STRIDE | 15–0 signed | Bytes per source line |
-| `+0x0C` | WINX | XSTART 26–16, XEND 10–0 | Window, pixels |
-| `+0x10` | WINY | YSTART 26–16, YEND 10–0 | Window, lines |
-| `+0x14` | SCROLLX | 15–0 | Source pixels |
-| `+0x18` | SCROLLY | 15–0 | Source lines |
-| `+0x1C` | HSTEP | 15–0, 8.8 | Horizontal step |
-| `+0x20` | VSTEP | 15–0, 8.8 | Vertical step |
+| `+0x00` | CTRL | EN (0), PLANAR (1), BPP (3–2: chunky 1/2/4/8), TRANSP (4), HSCALE (7–6), VSCALE (9–8), PALOFS (15–12), PLANES (18–16: planes − 1) | |
+| `+0x04` | WINX | XSTART 26–16, XEND 10–0 | Window, pixels |
+| `+0x08` | WINY | YSTART 26–16, YEND 10–0 | Window, lines |
+| `+0x0C` | SCROLLX | 3–0 | Fine scroll, pixels |
+| `+0x10` | BPLMOD | 15–0, signed, even | Added to the pointers at the end of each line |
+| `+0x20`–`+0x3C` | BPL0PT–BPL7PT | 22–0, even | Plane pointers (chunky: BPL0PT only) |
+| `+0x40`–`+0x5C` | BPL0DAT–BPL7DAT | 15–0 | Plane data registers (chunky: BPL0DAT only) |
 
-### 6.3 Memory-mapped areas
+### 6.3 Memory-mapped area
 
 | Area | Location | Contents |
 |------|----------|----------|
-| Palette | `0xE04000`–`0xE04FFF` | 1024 × 32-bit, `0x00RRGGBB` |
-| Text buffer | `0xE10000`–`0xE11FFF` | 128 × 32 cells × 16-bit |
-| Font | `0xE12000`–`0xE12FFF` | 256 characters × 16 bytes |
+| Palette | `0xE04000`–`0xE043FF` | 256 × 32-bit, `0x00RRGGBB` |
 
-## 7. Block RAM use
+## 7. FPGA resources
 
-| Item | 18 Kb blocks |
-|------|--------------|
-| Palette: 1024 × 24-bit | 2 |
-| Text buffer 8 KB + font 4 KB | 6 |
-| **Total for video** | **8** |
-
-The layer buffers (4 × 48 bytes) and sprite data registers (spec 9) are small enough to build from FPGA logic. The sprite table takes 1 more block RAM (spec 9).
-
-Clocks use two of the XC7A35T's five MMCMs: one for the fixed master clocks, one as the HDMI multiplier.
+| Item | Resource |
+|------|----------|
+| Palette, 256 × 24 bits | 1 block RAM per copy (CPU read port and pixel read port) |
+| 24 pointers, 24 data registers, 24 shift registers | Logic |
+| Clocks | One MMCM, shared with the rest of the design |
 
 ## 8. Open points
 
 | # | Item |
 |---|------|
-| V2 | Test 50 Hz modes (640×480 @ 50 and the standard 576p/720p50) on real HDMI monitors and TVs |
-| V3 | Whether 4 layers is the right number; each extra layer costs one block RAM and a little logic |
-| V4 | 16-bit direct-colour and tile-map layer types (version 2) |
-| V5 | Horizontal wrap for bitmap layers (scroll around a fixed-width ring), so endless side-scrollers need less copying |
-| V6 | HDMI audio (sending sound over HDMI as well as the jack): possible later, needs the HDMI data-island encoder |
-| V8 | Check the pixel pipeline (layers, priority, palette) meets timing at 66.7 MHz in Vivado |
-| V10 | Check in Vivado that the multiplier MMCM can take the divided pixel clock from a global clock buffer, and that its jitter is low enough for HDMI |
-| V11 | The Next sends audio over HDMI; doing the same (V6) would make the KS3 work with TVs' built-in speakers |
-| V9 | Some TVs expect HDMI info packets for 576p/720p and may not accept plain DVI; test, and add the packets if needed (same work as V6) |
+| V1 | Check the pixel pipeline meets timing at 40 MHz in Vivado |
+| V2 | Some TVs may not accept plain DVI; test, and add HDMI info packets if needed |
 
 ## 9. Tests
 
-- **Timing:** check sync positions and frame rate for every preset in simulation; check real monitors lock on to each, on HDMI and VGA.
-- **Clock change:** switch between presets at run time; the multiplier MMCM relocks and PCLKLOCK sets, with no effect on the CPU or memory side.
-- **Beam lock:** for every preset, assert that each fixed DMA cycle falls at the same `hslot` on every line.
-- **Fetch budget:** for every example in 5.3, assert no layer buffer runs empty; for over-budget setups, assert OVERRUN is set on the right layer only.
-- **Fetch pattern:** assert the DMA pattern is identical on every line for a fixed screen setup.
-- **Sprites:** see spec 9, section 11.
-- **Golden images:** render test screens in simulation (windows, scroll, scale, priority, transparency, palette) and compare frame dumps with images made by a Python reference model.
-- **Register timing:** a write during line L−1's visible part changes line L exactly; a write during its blanking changes line L+1.
-- **CPU slowdown:** with all layers on and wide fetch, layers never take the CPU's cycle 0 (spec 5 CPU zero-wait test).
+- **Timing:** sync positions, totals and frame rate for both modes in simulation; real monitors lock on to both, on HDMI and VGA.
+- **Golden images** (`make vtest` in `sim/`): random pictures in every layer format (chunky and planar, scaling, fine scroll, modulo, a flipped layer, transparency, priority, and direct colour), compared pixel by pixel with a Python model of this spec (`sim/vtest/vmodel.py`). No OVERRUN.
+- **Boot ROM:** the console and a 4-plane interleaved picture, checked pixel by pixel.
+- **Fetch budget:** for every example in 5.2 that fits, no OVERRUN. For one that does not fit, OVERRUN is set on the right layer only.
+- **Register timing:** a CTRL write during line L − 1's visible part changes line L.
+- **CPU:** with all layers fetching, the CPU never waits (spec 5 zero-wait test).
+
+## 10. Later versions
+
+- More layers, fractional scaling and shrinking
+- Programmable timing, more modes (720p, 1024×768, 50 Hz)
+- Wide fetch (memory cycle 3 for the display)
+- Sprites (spec 9, on hold)
+- EHB and HAM modes, a 1024-entry palette, tile-map layers
+- HDMI audio

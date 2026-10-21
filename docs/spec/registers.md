@@ -13,9 +13,7 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 | `0x000000`–`0x007FFF` | 32 KB | Boot ROM overlay for CPU reads after reset (writes go to Chip RAM) | 7, section 3.2 |
 | `0x000000`–`0x3FFFFF` | 4 MB | **Chip RAM** (the KS3's SRAM), shared by the CPU and all DMA. On 2 MB boards: `0x000000`–`0x1FFFFF`, and the rest is a bus error | 5 |
 | `0x400000`–`0xDFFFFF` | 10 MB | Reserved (bus error) | |
-| `0xE00000`–`0xE0FFFF` | 64 KB | **Custom block**: video, sprites, copper, DMA engine, audio registers; palette, sprite table, descriptor RAM | Section 3 |
-| `0xE10000`–`0xE11FFF` | 8 KB | Text screen | 4, section 4.7 |
-| `0xE12000`–`0xE12FFF` | 4 KB | Font | 4, section 4.7 |
+| `0xE00000`–`0xE0FFFF` | 64 KB | **Custom block**: video, copper, DMA engine and audio registers; palette | Section 3 |
 | `0xF00000`–`0xF0FFFF` | 64 KB | **System block**: interrupts, timers, serial, SD card, keyboard, system control, I2C | Section 4 |
 | `0xF80000`–`0xF87FFF` | 32 KB | **Boot ROM** | 7, section 3 |
 | Everything else | | Unmapped (bus error) | 1, section 6 |
@@ -26,7 +24,6 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 |------|------------------|-----------------|--------|------------|
 | Chip RAM | Yes | Yes | Read (its list) | Yes |
 | Custom block | Yes | Yes, or bus error with SYSCON.PROTECT | Write | Read and write |
-| Text screen, font | Yes | As above | No | Read and write |
 | System block | Yes | As above | No | No |
 | Boot ROM | Read (write with ROMWE) | As above | No | Read |
 
@@ -51,8 +48,8 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 6. **Set/clear registers** (DMACON): bit 15 = 1 sets the other bits written as 1; bit 15 = 0 clears them.
 7. **Unused bits** read as 0; write them as 0.
 8. **Unused addresses** inside the custom and system blocks read as 0 and ignore writes. Only the unmapped regions in section 1 give bus errors.
-9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layers before each line, sprites at their selection and fetch points), some only while the device is off (video timing).
-10. **The text screen and font are plain memory.** At `0xE10000`–`0xE13FFF`, byte, word and long accesses take effect at once, with no held halves, so a `MOVE.W` writes one character cell. The halves rules above apply to registers and to the 32-bit tables in the custom block (palette, sprite table, descriptor RAM).
+9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layer settings before each line).
+10. **16-bit registers** (BPLxDAT, BPLMOD and others) sit in the low half: write them with `MOVE.W` to the register's address + 2, or with `MOVE.L`.
 
 **Access column key:** R = read only, W = write only, RW = read and write, W1C = sticky flags cleared by writing 1.
 
@@ -63,13 +60,13 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 | Offset | Size | Contents | Spec |
 |--------|------|----------|------|
 | `0x0000`–`0x00FF` | 256 B | Video global registers and DMACON | 4, 5 |
-| `0x0100`–`0x01FF` | 256 B | Layers 0–3 | 4 |
-| `0x0200`–`0x02FF` | 256 B | Sprite control | 9 |
+| `0x0100`–`0x027F` | 384 B | Layers 0–2 | 4 |
+| `0x0280`–`0x02FF` | | Free | |
 | `0x0300`–`0x03FF` | 256 B | DMA engine | 11 |
 | `0x0400`–`0x06FF` | 768 B | Audio | 6 |
 | `0x0700`–`0x07FF` | 256 B | Copper | 10 |
 | `0x0800`–`0x3FFF` | | Free | |
-| `0x4000`–`0x4FFF` | 4 KB | Palette: 1024 × 32-bit `0x00RRGGBB` | 4, section 6.3 |
+| `0x4000`–`0x43FF` | 1 KB | Palette: 256 × 32-bit `0x00RRGGBB` | 4, section 6.3 |
 | `0x5000`–`0x57FF` | 2 KB | Sprite table: 64 × 32 bytes | 9, section 3 |
 | `0x6000`–`0x67FF` | 2 KB | DMA descriptor RAM: 64 × 32 bytes | 11, section 8 |
 | `0x6800`–`0xFFFF` | | Free | |
@@ -79,52 +76,43 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
 | `0x000` | VIDCON | RW | 4, 6.1 |
-| `0x004` | VIDSTAT | W1C (some bits R) | 4, 6.1 |
+| `0x004` | VIDSTAT | W1C (INVBLANK R) | 4, 6.1 |
 | `0x008` | VIDINTEN | RW | 4, 6.1 |
-| `0x00C` | BEAMPOS | R | 4, 3.6 |
-| `0x010` | FRAMECOUNT | R | 4, 3.6 |
-| `0x014` | LINECMP | RW | 4, 3.7 |
+| `0x00C` | BEAMPOS | R | 4, 3.3 |
+| `0x010` | FRAMECOUNT | R | 4, 3.3 |
+| `0x014` | LINECMP | RW | 4, 3.4 |
 | `0x018` | BGCOLOR | RW | 4, 6.1 |
 | `0x01C` | PRIO | RW | 4, 4.8 |
-| `0x020` | HVISIBLE | RW (video off) | 4, 3.4 |
-| `0x024` | HSYNCSTART | RW (video off) | 4, 3.4 |
-| `0x028` | HSYNCEND | RW (video off) | 4, 3.4 |
-| `0x02C` | HTOTAL | RW (video off) | 4, 3.4 |
-| `0x030` | VVISIBLE | RW (video off) | 4, 3.4 |
-| `0x034` | VSYNCSTART | RW (video off) | 4, 3.4 |
-| `0x038` | VSYNCEND | RW (video off) | 4, 3.4 |
-| `0x03C` | VTOTAL | RW (video off) | 4, 3.4 |
-| `0x040` | SYNCPOL | RW (video off) | 4, 3.4 |
-| `0x044` | PCLKDIV | RW (video off) | 4, 3.4 |
-| `0x048` | SLOTPOS | R | 4, 3.6 |
+| `0x020` | VIDSIZE | R | 4, 6.1 |
 | `0x094` | DMACON | Set/clear | 5, 8. Its 16-bit value is in the low half at `0x096`, the same address as the Amiga's DMACON |
 
 ### 3.3 Layers (`0xE00100`)
 
-Layer n (0–3) at `0x100 + n × 0x40`:
+Layer n (0–2) at `0x100 + n × 0x80`:
 
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
 | `+0x00` | CTRL | RW | 4, 6.2 |
-| `+0x04` | PTR | RW | 4, 4.4 |
-| `+0x08` | STRIDE | RW | 4, 4.4 |
-| `+0x0C` | WINX | RW | 4, 4.3 |
-| `+0x10` | WINY | RW | 4, 4.3 |
-| `+0x14` | SCROLLX | RW | 4, 4.4 |
-| `+0x18` | SCROLLY | RW | 4, 4.4 |
-| `+0x1C` | HSTEP | RW | 4, 4.5 |
-| `+0x20` | VSTEP | RW | 4, 4.5 |
-
-### 3.4 Sprite control (`0xE00200`)
-
-| Offset | Name | Access | Spec |
-|--------|------|--------|------|
-| `0x200` | SPRCON | RW | 9, 8 |
-| `0x204` | SPRHIT0 | R | 9, 7 |
-| `0x208` | SPRHIT1 | R | 9, 7 |
-| `0x20C` | CLXGRP | R | 9, 7 |
-
-Sprite table entry n (0–63) at `0x5000 + n × 0x20`: POS `+0x00`, PTR `+0x04`, SIZE `+0x08`, CTRL `+0x0C`, SCALE `+0x10`, COLL `+0x14` (spec 9, section 3).
+| `+0x04` | WINX | RW | 4, 4.3 |
+| `+0x08` | WINY | RW | 4, 4.3 |
+| `+0x0C` | SCROLLX | RW | 4, 4.4 |
+| `+0x10` | BPLMOD | RW | 4, 4.4 |
+| `+0x20` | BPL0PT | RW | 4, 4.4 |
+| `+0x24` | BPL1PT | RW | 4, 4.4 |
+| `+0x28` | BPL2PT | RW | 4, 4.4 |
+| `+0x2C` | BPL3PT | RW | 4, 4.4 |
+| `+0x30` | BPL4PT | RW | 4, 4.4 |
+| `+0x34` | BPL5PT | RW | 4, 4.4 |
+| `+0x38` | BPL6PT | RW | 4, 4.4 |
+| `+0x3C` | BPL7PT | RW | 4, 4.4 |
+| `+0x40` | BPL0DAT | RW | 4, 5.1 |
+| `+0x44` | BPL1DAT | RW | 4, 5.1 |
+| `+0x48` | BPL2DAT | RW | 4, 5.1 |
+| `+0x4C` | BPL3DAT | RW | 4, 5.1 |
+| `+0x50` | BPL4DAT | RW | 4, 5.1 |
+| `+0x54` | BPL5DAT | RW | 4, 5.1 |
+| `+0x58` | BPL6DAT | RW | 4, 5.1 |
+| `+0x5C` | BPL7DAT | RW | 4, 5.1 |
 
 ### 3.5 DMA engine (`0xE00300`)
 

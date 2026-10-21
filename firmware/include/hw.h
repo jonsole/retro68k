@@ -15,19 +15,11 @@
 #define CHIPRAM_BASE                       0x0u
 #define CHIPRAM_SIZE                       0x400000u
 
-/* ---- TEXT: Text screen, 128 x 32 cells of 16 bits */
-#define TEXT_BASE                          0xE10000u
-#define TEXT_SIZE                          0x2000u
-
-/* ---- FONT: Font, 256 characters x 16 bytes */
-#define FONT_BASE                          0xE12000u
-#define FONT_SIZE                          0x1000u
-
 /* ---- ROM: Boot ROM */
 #define ROM_BASE                           0xF80000u
 #define ROM_SIZE                           0x8000u
 
-/* ---- CUSTOM: Custom registers: video, sprites, DMA engine, audio, copper */
+/* ---- CUSTOM: Custom registers: video, DMA engine, audio, copper */
 #define CUSTOM_BASE                        0xE00000u
 #define CUSTOM_SIZE                        0x10000u
 /* VIDCON: RW, spec 4/6.1 */
@@ -35,10 +27,10 @@
 #define VIDCON                             HW_REG32(CUSTOM_BASE + VIDCON_OFS)
 #define VIDCON_EN_SHIFT                    0
 #define VIDCON_EN_MASK                     0x1u
-#define VIDCON_WIDE_SHIFT                  1
-#define VIDCON_WIDE_MASK                   0x2u
 #define VIDCON_BLANKALL_SHIFT              2
 #define VIDCON_BLANKALL_MASK               0x4u
+#define VIDCON_DIRECT_SHIFT                4
+#define VIDCON_DIRECT_MASK                 0x10u
 /* VIDSTAT: RW1C, spec 4/6.1 */
 #define VIDSTAT_OFS                        0x4u
 #define VIDSTAT                            HW_REG32(CUSTOM_BASE + VIDSTAT_OFS)
@@ -47,19 +39,9 @@
 #define VIDSTAT_LINE_SHIFT                 1
 #define VIDSTAT_LINE_MASK                  0x2u
 #define VIDSTAT_OVERRUN_SHIFT              4
-#define VIDSTAT_OVERRUN_MASK               0xF0u
+#define VIDSTAT_OVERRUN_MASK               0x70u
 #define VIDSTAT_INVBLANK_SHIFT             8
 #define VIDSTAT_INVBLANK_MASK              0x100u
-#define VIDSTAT_PCLKLOCK_SHIFT             9
-#define VIDSTAT_PCLKLOCK_MASK              0x200u
-#define VIDSTAT_BADTIMING_SHIFT            10
-#define VIDSTAT_BADTIMING_MASK             0x400u
-#define VIDSTAT_SPRMISS_SHIFT              11
-#define VIDSTAT_SPRMISS_MASK               0x800u
-#define VIDSTAT_SPROVF_SHIFT               12
-#define VIDSTAT_SPROVF_MASK                0x1000u
-#define VIDSTAT_COPIRQ_SHIFT               13
-#define VIDSTAT_COPIRQ_MASK                0x2000u
 /* VIDINTEN: RW, spec 4/6.1 */
 #define VIDINTEN_OFS                       0x8u
 #define VIDINTEN                           HW_REG32(CUSTOM_BASE + VIDINTEN_OFS)
@@ -68,38 +50,24 @@
 #define VIDINTEN_LINE_SHIFT                1
 #define VIDINTEN_LINE_MASK                 0x2u
 #define VIDINTEN_OVERRUN_SHIFT             4
-#define VIDINTEN_OVERRUN_MASK              0xF0u
-#define VIDINTEN_INVBLANK_SHIFT            8
-#define VIDINTEN_INVBLANK_MASK             0x100u
-#define VIDINTEN_PCLKLOCK_SHIFT            9
-#define VIDINTEN_PCLKLOCK_MASK             0x200u
-#define VIDINTEN_BADTIMING_SHIFT           10
-#define VIDINTEN_BADTIMING_MASK            0x400u
-#define VIDINTEN_SPRMISS_SHIFT             11
-#define VIDINTEN_SPRMISS_MASK              0x800u
-#define VIDINTEN_SPROVF_SHIFT              12
-#define VIDINTEN_SPROVF_MASK               0x1000u
-#define VIDINTEN_COPIRQ_SHIFT              13
-#define VIDINTEN_COPIRQ_MASK               0x2000u
-/* BEAMPOS: R, spec 4/3.6 */
+#define VIDINTEN_OVERRUN_MASK              0x70u
+/* BEAMPOS: R, spec 4/3.3 */
 #define BEAMPOS_OFS                        0xCu
 #define BEAMPOS                            HW_REG32(CUSTOM_BASE + BEAMPOS_OFS)
 #define BEAMPOS_VLINE_SHIFT                16
 #define BEAMPOS_VLINE_MASK                 0x7FF0000u
 #define BEAMPOS_HPIXEL_SHIFT               0
 #define BEAMPOS_HPIXEL_MASK                0x7FFu
-/* FRAMECOUNT: R, spec 4/3.6 */
+/* FRAMECOUNT: R, spec 4/3.3 */
 #define FRAMECOUNT_OFS                     0x10u
 #define FRAMECOUNT                         HW_REG32(CUSTOM_BASE + FRAMECOUNT_OFS)
 #define FRAMECOUNT_COUNT_SHIFT             0
 #define FRAMECOUNT_COUNT_MASK              0xFFFFu
-/* LINECMP: RW, spec 4/3.7 */
+/* LINECMP: RW, spec 4/3.4 */
 #define LINECMP_OFS                        0x14u
 #define LINECMP                            HW_REG32(CUSTOM_BASE + LINECMP_OFS)
 #define LINECMP_VLINE_SHIFT                16
 #define LINECMP_VLINE_MASK                 0x7FF0000u
-#define LINECMP_HPIXEL_SHIFT               0
-#define LINECMP_HPIXEL_MASK                0x7FFu
 /* BGCOLOR: RW, spec 4/6.1 */
 #define BGCOLOR_OFS                        0x18u
 #define BGCOLOR                            HW_REG32(CUSTOM_BASE + BGCOLOR_OFS)
@@ -110,71 +78,17 @@
 #define PRIO                               HW_REG32(CUSTOM_BASE + PRIO_OFS)
 #define PRIO_FRONT_SHIFT                   0
 #define PRIO_FRONT_MASK                    0x3u
-#define PRIO_SECOND_SHIFT                  2
-#define PRIO_SECOND_MASK                   0xCu
-#define PRIO_THIRD_SHIFT                   4
-#define PRIO_THIRD_MASK                    0x30u
-#define PRIO_BACK_SHIFT                    6
-#define PRIO_BACK_MASK                     0xC0u
-/* HVISIBLE: RW, spec 4/3.4 */
-#define HVISIBLE_OFS                       0x20u
-#define HVISIBLE                           HW_REG32(CUSTOM_BASE + HVISIBLE_OFS)
-#define HVISIBLE_VALUE_SHIFT               0
-#define HVISIBLE_VALUE_MASK                0x7FFu
-/* HSYNCSTART: RW, spec 4/3.4 */
-#define HSYNCSTART_OFS                     0x24u
-#define HSYNCSTART                         HW_REG32(CUSTOM_BASE + HSYNCSTART_OFS)
-#define HSYNCSTART_VALUE_SHIFT             0
-#define HSYNCSTART_VALUE_MASK              0x7FFu
-/* HSYNCEND: RW, spec 4/3.4 */
-#define HSYNCEND_OFS                       0x28u
-#define HSYNCEND                           HW_REG32(CUSTOM_BASE + HSYNCEND_OFS)
-#define HSYNCEND_VALUE_SHIFT               0
-#define HSYNCEND_VALUE_MASK                0x7FFu
-/* HTOTAL: RW, spec 4/3.4 */
-#define HTOTAL_OFS                         0x2Cu
-#define HTOTAL                             HW_REG32(CUSTOM_BASE + HTOTAL_OFS)
-#define HTOTAL_VALUE_SHIFT                 0
-#define HTOTAL_VALUE_MASK                  0x7FFu
-/* VVISIBLE: RW, spec 4/3.4 */
-#define VVISIBLE_OFS                       0x30u
-#define VVISIBLE                           HW_REG32(CUSTOM_BASE + VVISIBLE_OFS)
-#define VVISIBLE_VALUE_SHIFT               0
-#define VVISIBLE_VALUE_MASK                0x7FFu
-/* VSYNCSTART: RW, spec 4/3.4 */
-#define VSYNCSTART_OFS                     0x34u
-#define VSYNCSTART                         HW_REG32(CUSTOM_BASE + VSYNCSTART_OFS)
-#define VSYNCSTART_VALUE_SHIFT             0
-#define VSYNCSTART_VALUE_MASK              0x7FFu
-/* VSYNCEND: RW, spec 4/3.4 */
-#define VSYNCEND_OFS                       0x38u
-#define VSYNCEND                           HW_REG32(CUSTOM_BASE + VSYNCEND_OFS)
-#define VSYNCEND_VALUE_SHIFT               0
-#define VSYNCEND_VALUE_MASK                0x7FFu
-/* VTOTAL: RW, spec 4/3.4 */
-#define VTOTAL_OFS                         0x3Cu
-#define VTOTAL                             HW_REG32(CUSTOM_BASE + VTOTAL_OFS)
-#define VTOTAL_VALUE_SHIFT                 0
-#define VTOTAL_VALUE_MASK                  0x7FFu
-/* SYNCPOL: RW, spec 4/3.4 */
-#define SYNCPOL_OFS                        0x40u
-#define SYNCPOL                            HW_REG32(CUSTOM_BASE + SYNCPOL_OFS)
-#define SYNCPOL_HPOL_SHIFT                 0
-#define SYNCPOL_HPOL_MASK                  0x1u
-#define SYNCPOL_VPOL_SHIFT                 1
-#define SYNCPOL_VPOL_MASK                  0x2u
-/* PCLKDIV: RW, spec 4/3.4 */
-#define PCLKDIV_OFS                        0x44u
-#define PCLKDIV                            HW_REG32(CUSTOM_BASE + PCLKDIV_OFS)
-#define PCLKDIV_N_SHIFT                    0
-#define PCLKDIV_N_MASK                     0xFu
-/* SLOTPOS: R, spec 4/3.6 */
-#define SLOTPOS_OFS                        0x48u
-#define SLOTPOS                            HW_REG32(CUSTOM_BASE + SLOTPOS_OFS)
-#define SLOTPOS_VLINE_SHIFT                16
-#define SLOTPOS_VLINE_MASK                 0x7FF0000u
-#define SLOTPOS_HSLOT_SHIFT                0
-#define SLOTPOS_HSLOT_MASK                 0x1FFu
+#define PRIO_MIDDLE_SHIFT                  2
+#define PRIO_MIDDLE_MASK                   0xCu
+#define PRIO_BACK_SHIFT                    4
+#define PRIO_BACK_MASK                     0x30u
+/* VIDSIZE: R, spec 4/6.1 */
+#define VIDSIZE_OFS                        0x20u
+#define VIDSIZE                            HW_REG32(CUSTOM_BASE + VIDSIZE_OFS)
+#define VIDSIZE_VVISIBLE_SHIFT             16
+#define VIDSIZE_VVISIBLE_MASK              0x7FF0000u
+#define VIDSIZE_HVISIBLE_SHIFT             0
+#define VIDSIZE_HVISIBLE_MASK              0x7FFu
 /* DMACON: SC, spec 5/8 */
 #define DMACON_OFS                         0x94u
 #define DMACON                             HW_REG32(CUSTOM_BASE + DMACON_OFS)
@@ -182,8 +96,6 @@
 #define DMACON_AUDEN_MASK                  0x8u
 #define DMACON_STREN_SHIFT                 4
 #define DMACON_STREN_MASK                  0x10u
-#define DMACON_SPREN_SHIFT                 5
-#define DMACON_SPREN_MASK                  0x20u
 #define DMACON_DMXEN_SHIFT                 6
 #define DMACON_DMXEN_MASK                  0x40u
 #define DMACON_COPEN_SHIFT                 7
@@ -194,26 +106,6 @@
 #define DMACON_DMAEN_MASK                  0x200u
 #define DMACON_SETCLR_SHIFT                15
 #define DMACON_SETCLR_MASK                 0x8000u
-/* SPRCON: RW, spec 9/8 */
-#define SPRCON_OFS                         0x200u
-#define SPRCON                             HW_REG32(CUSTOM_BASE + SPRCON_OFS)
-#define SPRCON_EN_SHIFT                    0
-#define SPRCON_EN_MASK                     0x1u
-/* SPRHIT0: R, spec 9/7 */
-#define SPRHIT0_OFS                        0x204u
-#define SPRHIT0                            HW_REG32(CUSTOM_BASE + SPRHIT0_OFS)
-#define SPRHIT0_HIT_SHIFT                  0
-#define SPRHIT0_HIT_MASK                   0xFFFFFFFFu
-/* SPRHIT1: R, spec 9/7 */
-#define SPRHIT1_OFS                        0x208u
-#define SPRHIT1                            HW_REG32(CUSTOM_BASE + SPRHIT1_OFS)
-#define SPRHIT1_HIT_SHIFT                  0
-#define SPRHIT1_HIT_MASK                   0xFFFFFFFFu
-/* CLXGRP: R, spec 9/7 */
-#define CLXGRP_OFS                         0x20Cu
-#define CLXGRP                             HW_REG32(CUSTOM_BASE + CLXGRP_OFS)
-#define CLXGRP_PAIRS_SHIFT                 0
-#define CLXGRP_PAIRS_MASK                  0xFFFFu
 /* DMXINT: W1C, spec 11/8 */
 #define DMXINT_OFS                         0x340u
 #define DMXINT                             HW_REG32(CUSTOM_BASE + DMXINT_OFS)
@@ -321,58 +213,112 @@
 #define COPERR                             HW_REG32(CUSTOM_BASE + COPERR_OFS)
 #define COPERR_ADDR_SHIFT                  0
 #define COPERR_ADDR_MASK                   0x7FFFFFu
-/* L(n): 4 x 64 bytes, spec 4/6.2 */
-#define L_NUM                              4
-#define L_SPAN                             0x40u
+/* L(n): 3 x 128 bytes, spec 4/6.2 */
+#define L_NUM                              3
+#define L_SPAN                             0x80u
 #define L_AT(n)                            (0x100u + (n) * L_SPAN)
 #define L_CTRL_OFS                         0x0u
 #define L_CTRL(n)                          HW_REG32(CUSTOM_BASE + L_AT(n) + L_CTRL_OFS)
 #define L_CTRL_EN_SHIFT                    0
 #define L_CTRL_EN_MASK                     0x1u
-#define L_CTRL_TYPE_SHIFT                  1
-#define L_CTRL_TYPE_MASK                   0x2u
+#define L_CTRL_PLANAR_SHIFT                1
+#define L_CTRL_PLANAR_MASK                 0x2u
 #define L_CTRL_BPP_SHIFT                   2
 #define L_CTRL_BPP_MASK                    0xCu
 #define L_CTRL_TRANSP_SHIFT                4
 #define L_CTRL_TRANSP_MASK                 0x10u
-#define L_CTRL_PALOFS_SHIFT                6
-#define L_CTRL_PALOFS_MASK                 0xFFC0u
-#define L_PTR_OFS                          0x4u
-#define L_PTR(n)                           HW_REG32(CUSTOM_BASE + L_AT(n) + L_PTR_OFS)
-#define L_PTR_ADDR_SHIFT                   0
-#define L_PTR_ADDR_MASK                    0x7FFFFFu
-#define L_STRIDE_OFS                       0x8u
-#define L_STRIDE(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_STRIDE_OFS)
-#define L_STRIDE_BYTES_SHIFT               0
-#define L_STRIDE_BYTES_MASK                0xFFFFu
-#define L_WINX_OFS                         0xCu
+#define L_CTRL_HSCALE_SHIFT                6
+#define L_CTRL_HSCALE_MASK                 0xC0u
+#define L_CTRL_VSCALE_SHIFT                8
+#define L_CTRL_VSCALE_MASK                 0x300u
+#define L_CTRL_PALOFS_SHIFT                12
+#define L_CTRL_PALOFS_MASK                 0xF000u
+#define L_CTRL_PLANES_SHIFT                16
+#define L_CTRL_PLANES_MASK                 0x70000u
+#define L_WINX_OFS                         0x4u
 #define L_WINX(n)                          HW_REG32(CUSTOM_BASE + L_AT(n) + L_WINX_OFS)
 #define L_WINX_XSTART_SHIFT                16
 #define L_WINX_XSTART_MASK                 0x7FF0000u
 #define L_WINX_XEND_SHIFT                  0
 #define L_WINX_XEND_MASK                   0x7FFu
-#define L_WINY_OFS                         0x10u
+#define L_WINY_OFS                         0x8u
 #define L_WINY(n)                          HW_REG32(CUSTOM_BASE + L_AT(n) + L_WINY_OFS)
 #define L_WINY_YSTART_SHIFT                16
 #define L_WINY_YSTART_MASK                 0x7FF0000u
 #define L_WINY_YEND_SHIFT                  0
 #define L_WINY_YEND_MASK                   0x7FFu
-#define L_SCROLLX_OFS                      0x14u
+#define L_SCROLLX_OFS                      0xCu
 #define L_SCROLLX(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_SCROLLX_OFS)
-#define L_SCROLLX_PIXELS_SHIFT             0
-#define L_SCROLLX_PIXELS_MASK              0xFFFFu
-#define L_SCROLLY_OFS                      0x18u
-#define L_SCROLLY(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_SCROLLY_OFS)
-#define L_SCROLLY_LINES_SHIFT              0
-#define L_SCROLLY_LINES_MASK               0xFFFFu
-#define L_HSTEP_OFS                        0x1Cu
-#define L_HSTEP(n)                         HW_REG32(CUSTOM_BASE + L_AT(n) + L_HSTEP_OFS)
-#define L_HSTEP_STEP_SHIFT                 0
-#define L_HSTEP_STEP_MASK                  0xFFFFu
-#define L_VSTEP_OFS                        0x20u
-#define L_VSTEP(n)                         HW_REG32(CUSTOM_BASE + L_AT(n) + L_VSTEP_OFS)
-#define L_VSTEP_STEP_SHIFT                 0
-#define L_VSTEP_STEP_MASK                  0xFFFFu
+#define L_SCROLLX_FINE_SHIFT               0
+#define L_SCROLLX_FINE_MASK                0xFu
+#define L_BPLMOD_OFS                       0x10u
+#define L_BPLMOD(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPLMOD_OFS)
+#define L_BPLMOD_BYTES_SHIFT               0
+#define L_BPLMOD_BYTES_MASK                0xFFFFu
+#define L_BPL0PT_OFS                       0x20u
+#define L_BPL0PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL0PT_OFS)
+#define L_BPL0PT_ADDR_SHIFT                0
+#define L_BPL0PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL1PT_OFS                       0x24u
+#define L_BPL1PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL1PT_OFS)
+#define L_BPL1PT_ADDR_SHIFT                0
+#define L_BPL1PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL2PT_OFS                       0x28u
+#define L_BPL2PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL2PT_OFS)
+#define L_BPL2PT_ADDR_SHIFT                0
+#define L_BPL2PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL3PT_OFS                       0x2Cu
+#define L_BPL3PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL3PT_OFS)
+#define L_BPL3PT_ADDR_SHIFT                0
+#define L_BPL3PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL4PT_OFS                       0x30u
+#define L_BPL4PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL4PT_OFS)
+#define L_BPL4PT_ADDR_SHIFT                0
+#define L_BPL4PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL5PT_OFS                       0x34u
+#define L_BPL5PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL5PT_OFS)
+#define L_BPL5PT_ADDR_SHIFT                0
+#define L_BPL5PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL6PT_OFS                       0x38u
+#define L_BPL6PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL6PT_OFS)
+#define L_BPL6PT_ADDR_SHIFT                0
+#define L_BPL6PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL7PT_OFS                       0x3Cu
+#define L_BPL7PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL7PT_OFS)
+#define L_BPL7PT_ADDR_SHIFT                0
+#define L_BPL7PT_ADDR_MASK                 0x7FFFFFu
+#define L_BPL0DAT_OFS                      0x40u
+#define L_BPL0DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL0DAT_OFS)
+#define L_BPL0DAT_DATA_SHIFT               0
+#define L_BPL0DAT_DATA_MASK                0xFFFFu
+#define L_BPL1DAT_OFS                      0x44u
+#define L_BPL1DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL1DAT_OFS)
+#define L_BPL1DAT_DATA_SHIFT               0
+#define L_BPL1DAT_DATA_MASK                0xFFFFu
+#define L_BPL2DAT_OFS                      0x48u
+#define L_BPL2DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL2DAT_OFS)
+#define L_BPL2DAT_DATA_SHIFT               0
+#define L_BPL2DAT_DATA_MASK                0xFFFFu
+#define L_BPL3DAT_OFS                      0x4Cu
+#define L_BPL3DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL3DAT_OFS)
+#define L_BPL3DAT_DATA_SHIFT               0
+#define L_BPL3DAT_DATA_MASK                0xFFFFu
+#define L_BPL4DAT_OFS                      0x50u
+#define L_BPL4DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL4DAT_OFS)
+#define L_BPL4DAT_DATA_SHIFT               0
+#define L_BPL4DAT_DATA_MASK                0xFFFFu
+#define L_BPL5DAT_OFS                      0x54u
+#define L_BPL5DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL5DAT_OFS)
+#define L_BPL5DAT_DATA_SHIFT               0
+#define L_BPL5DAT_DATA_MASK                0xFFFFu
+#define L_BPL6DAT_OFS                      0x58u
+#define L_BPL6DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL6DAT_OFS)
+#define L_BPL6DAT_DATA_SHIFT               0
+#define L_BPL6DAT_DATA_MASK                0xFFFFu
+#define L_BPL7DAT_OFS                      0x5Cu
+#define L_BPL7DAT(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL7DAT_OFS)
+#define L_BPL7DAT_DATA_SHIFT               0
+#define L_BPL7DAT_DATA_MASK                0xFFFFu
 /* DMX(n): 4 x 16 bytes, spec 11/8 */
 #define DMX_NUM                            4
 #define DMX_SPAN                           0x10u
@@ -450,11 +396,8 @@
 #define AUD_POS_SAMPLES_SHIFT              0
 #define AUD_POS_SAMPLES_MASK               0x7FFFFFu
 #define PALETTE_OFS                        0x4000u
-#define PALETTE_SIZE                       0x1000u
+#define PALETTE_SIZE                       0x400u
 #define PALETTE                            ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + PALETTE_OFS))
-#define SPRTAB_OFS                         0x5000u
-#define SPRTAB_SIZE                        0x800u
-#define SPRTAB                             ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + SPRTAB_OFS))
 #define DESCRAM_OFS                        0x6000u
 #define DESCRAM_SIZE                       0x800u
 #define DESCRAM                            ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + DESCRAM_OFS))
@@ -931,60 +874,6 @@
 #define TMR_STAT(n)                        HW_REG32(SYSTEM_BASE + TMR_AT(n) + TMR_STAT_OFS)
 #define TMR_STAT_UNDER_SHIFT               0
 #define TMR_STAT_UNDER_MASK                0x1u
-
-/* ---- SPR: 32-byte layout in memory, spec 9/3 */
-typedef struct {
-    uint32_t pos;
-    uint32_t ptr;
-    uint32_t size;
-    uint32_t ctrl;
-    uint32_t scale;
-    uint32_t coll;
-    uint32_t reserved0;
-    uint32_t reserved1;
-} spr_t;
-_Static_assert(sizeof(spr_t) == 32, "SPR layout");
-#define SPR_SIZEOF                         32
-#define SPR_POS_OFS                        0x0u
-#define SPR_POS_X_SHIFT                    0
-#define SPR_POS_X_MASK                     0xFFFu
-#define SPR_POS_Y_SHIFT                    16
-#define SPR_POS_Y_MASK                     0xFFF0000u
-#define SPR_PTR_OFS                        0x4u
-#define SPR_PTR_ADDR_SHIFT                 0
-#define SPR_PTR_ADDR_MASK                  0x7FFFFFu
-#define SPR_SIZE_OFS                       0x8u
-#define SPR_SIZE_HEIGHTM1_SHIFT            0
-#define SPR_SIZE_HEIGHTM1_MASK             0x3FFu
-#define SPR_SIZE_STRIDE_SHIFT              16
-#define SPR_SIZE_STRIDE_MASK               0xFFFF0000u
-#define SPR_CTRL_OFS                       0xCu
-#define SPR_CTRL_EN_SHIFT                  0
-#define SPR_CTRL_EN_MASK                   0x1u
-#define SPR_CTRL_WIDTH_SHIFT               1
-#define SPR_CTRL_WIDTH_MASK                0x6u
-#define SPR_CTRL_BPP_SHIFT                 3
-#define SPR_CTRL_BPP_MASK                  0x18u
-#define SPR_CTRL_HFLIP_SHIFT               5
-#define SPR_CTRL_HFLIP_MASK                0x20u
-#define SPR_CTRL_VFLIP_SHIFT               6
-#define SPR_CTRL_VFLIP_MASK                0x40u
-#define SPR_CTRL_DEPTH_SHIFT               8
-#define SPR_CTRL_DEPTH_MASK                0x700u
-#define SPR_CTRL_PALOFS_SHIFT              16
-#define SPR_CTRL_PALOFS_MASK               0x3F0000u
-#define SPR_SCALE_OFS                      0x10u
-#define SPR_SCALE_HSTEP_SHIFT              0
-#define SPR_SCALE_HSTEP_MASK               0xFFFFu
-#define SPR_SCALE_VSTEP_SHIFT              16
-#define SPR_SCALE_VSTEP_MASK               0xFFFF0000u
-#define SPR_COLL_OFS                       0x14u
-#define SPR_COLL_GROUP_SHIFT               0
-#define SPR_COLL_GROUP_MASK                0x3u
-#define SPR_COLL_HITGROUPS_SHIFT           4
-#define SPR_COLL_HITGROUPS_MASK            0xF0u
-#define SPR_COLL_HITLAYERS_SHIFT           8
-#define SPR_COLL_HITLAYERS_MASK            0xF00u
 
 /* ---- DMXDESC: 32-byte layout in memory, spec 11/3 */
 typedef struct {

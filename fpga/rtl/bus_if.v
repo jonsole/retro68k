@@ -124,11 +124,9 @@ module bus_if #(
     wire        in_rom    = (a24[23:15] == 9'b1111_1000_0);              // F80000-F87FFF
     wire        in_ovl    = overlay && q_rw && (a24[23:15] == 9'd0);     // 000000-007FFF reads
     wire        in_chip   = (a24 < CHIP_TOP);
-    wire        in_custom = (a24[23:16] == 8'hE0) ||
-                            (a24[23:14] == 10'b1110_0001_00);            // E00000-E13FFF
+    wire        in_custom = (a24[23:16] == 8'hE0);                       // E00000-E0FFFF
     wire        in_system = (a24[23:16] == 8'hF0);
-    // The text screen and font are plain memory: no halves rule (spec 3, section 2)
-    wire        in_plain  = (a24[23:14] == 10'b1110_0001_00);
+    wire        in_plain  = 1'b0;      // no plain-memory areas in the custom block for now (spec 3, section 2)
     wire        hw_area   = (a24[23:21] == 3'b111);                      // E00000-FFFFFF
 
     reg [2:0] target;

@@ -13,86 +13,53 @@
 CHIPRAM                      equ $0
 CHIPRAM_SIZE                 equ $400000
 
-; ---- TEXT: Text screen, 128 x 32 cells of 16 bits
-TEXT                         equ $E10000
-TEXT_SIZE                    equ $2000
-
-; ---- FONT: Font, 256 characters x 16 bytes
-FONT                         equ $E12000
-FONT_SIZE                    equ $1000
-
 ; ---- ROM: Boot ROM
 ROM                          equ $F80000
 ROM_SIZE                     equ $8000
 
-; ---- CUSTOM: Custom registers: video, sprites, DMA engine, audio, copper
+; ---- CUSTOM: Custom registers: video, DMA engine, audio, copper
 CUSTOM                       equ $E00000
 CUSTOM_SIZE                  equ $10000
 VIDCON                       equ $0          ; RW, spec 4/6.1
 VIDCON_EN_B                  equ $0
 VIDCON_EN_M                  equ $1
-VIDCON_WIDE_B                equ $1
-VIDCON_WIDE_M                equ $2
 VIDCON_BLANKALL_B            equ $2
 VIDCON_BLANKALL_M            equ $4
+VIDCON_DIRECT_B              equ $4
+VIDCON_DIRECT_M              equ $10
 VIDSTAT                      equ $4          ; RW1C, spec 4/6.1
 VIDSTAT_VBLANK_B             equ $0
 VIDSTAT_VBLANK_M             equ $1
 VIDSTAT_LINE_B               equ $1
 VIDSTAT_LINE_M               equ $2
 VIDSTAT_OVERRUN_B            equ $4
-VIDSTAT_OVERRUN_W            equ $4
-VIDSTAT_OVERRUN_M            equ $F0
+VIDSTAT_OVERRUN_W            equ $3
+VIDSTAT_OVERRUN_M            equ $70
 VIDSTAT_INVBLANK_B           equ $8
 VIDSTAT_INVBLANK_M           equ $100
-VIDSTAT_PCLKLOCK_B           equ $9
-VIDSTAT_PCLKLOCK_M           equ $200
-VIDSTAT_BADTIMING_B          equ $A
-VIDSTAT_BADTIMING_M          equ $400
-VIDSTAT_SPRMISS_B            equ $B
-VIDSTAT_SPRMISS_M            equ $800
-VIDSTAT_SPROVF_B             equ $C
-VIDSTAT_SPROVF_M             equ $1000
-VIDSTAT_COPIRQ_B             equ $D
-VIDSTAT_COPIRQ_M             equ $2000
 VIDINTEN                     equ $8          ; RW, spec 4/6.1
 VIDINTEN_VBLANK_B            equ $0
 VIDINTEN_VBLANK_M            equ $1
 VIDINTEN_LINE_B              equ $1
 VIDINTEN_LINE_M              equ $2
 VIDINTEN_OVERRUN_B           equ $4
-VIDINTEN_OVERRUN_W           equ $4
-VIDINTEN_OVERRUN_M           equ $F0
-VIDINTEN_INVBLANK_B          equ $8
-VIDINTEN_INVBLANK_M          equ $100
-VIDINTEN_PCLKLOCK_B          equ $9
-VIDINTEN_PCLKLOCK_M          equ $200
-VIDINTEN_BADTIMING_B         equ $A
-VIDINTEN_BADTIMING_M         equ $400
-VIDINTEN_SPRMISS_B           equ $B
-VIDINTEN_SPRMISS_M           equ $800
-VIDINTEN_SPROVF_B            equ $C
-VIDINTEN_SPROVF_M            equ $1000
-VIDINTEN_COPIRQ_B            equ $D
-VIDINTEN_COPIRQ_M            equ $2000
-BEAMPOS                      equ $C          ; R, spec 4/3.6
+VIDINTEN_OVERRUN_W           equ $3
+VIDINTEN_OVERRUN_M           equ $70
+BEAMPOS                      equ $C          ; R, spec 4/3.3
 BEAMPOS_VLINE_B              equ $10
 BEAMPOS_VLINE_W              equ $B
 BEAMPOS_VLINE_M              equ $7FF0000
 BEAMPOS_HPIXEL_B             equ $0
 BEAMPOS_HPIXEL_W             equ $B
 BEAMPOS_HPIXEL_M             equ $7FF
-FRAMECOUNT                   equ $10         ; R, spec 4/3.6
+FRAMECOUNT                   equ $10         ; R, spec 4/3.3
 FRAMECOUNT_COUNT_B           equ $0
 FRAMECOUNT_COUNT_W           equ $10
 FRAMECOUNT_COUNT_M           equ $FFFF
-LINECMP                      equ $14         ; RW, spec 4/3.7
+LINECMP                      equ $14         ; RW, spec 4/3.4
 LINECMP_VLINE_B              equ $10
 LINECMP_VLINE_W              equ $B
 LINECMP_VLINE_M              equ $7FF0000
-LINECMP_HPIXEL_B             equ $0
-LINECMP_HPIXEL_W             equ $B
-LINECMP_HPIXEL_M             equ $7FF
 BGCOLOR                      equ $18         ; RW, spec 4/6.1
 BGCOLOR_RGB_B                equ $0
 BGCOLOR_RGB_W                equ $18
@@ -101,70 +68,24 @@ PRIO                         equ $1C         ; RW, spec 4/4.8
 PRIO_FRONT_B                 equ $0
 PRIO_FRONT_W                 equ $2
 PRIO_FRONT_M                 equ $3
-PRIO_SECOND_B                equ $2
-PRIO_SECOND_W                equ $2
-PRIO_SECOND_M                equ $C
-PRIO_THIRD_B                 equ $4
-PRIO_THIRD_W                 equ $2
-PRIO_THIRD_M                 equ $30
-PRIO_BACK_B                  equ $6
+PRIO_MIDDLE_B                equ $2
+PRIO_MIDDLE_W                equ $2
+PRIO_MIDDLE_M                equ $C
+PRIO_BACK_B                  equ $4
 PRIO_BACK_W                  equ $2
-PRIO_BACK_M                  equ $C0
-HVISIBLE                     equ $20         ; RW, spec 4/3.4
-HVISIBLE_VALUE_B             equ $0
-HVISIBLE_VALUE_W             equ $B
-HVISIBLE_VALUE_M             equ $7FF
-HSYNCSTART                   equ $24         ; RW, spec 4/3.4
-HSYNCSTART_VALUE_B           equ $0
-HSYNCSTART_VALUE_W           equ $B
-HSYNCSTART_VALUE_M           equ $7FF
-HSYNCEND                     equ $28         ; RW, spec 4/3.4
-HSYNCEND_VALUE_B             equ $0
-HSYNCEND_VALUE_W             equ $B
-HSYNCEND_VALUE_M             equ $7FF
-HTOTAL                       equ $2C         ; RW, spec 4/3.4
-HTOTAL_VALUE_B               equ $0
-HTOTAL_VALUE_W               equ $B
-HTOTAL_VALUE_M               equ $7FF
-VVISIBLE                     equ $30         ; RW, spec 4/3.4
-VVISIBLE_VALUE_B             equ $0
-VVISIBLE_VALUE_W             equ $B
-VVISIBLE_VALUE_M             equ $7FF
-VSYNCSTART                   equ $34         ; RW, spec 4/3.4
-VSYNCSTART_VALUE_B           equ $0
-VSYNCSTART_VALUE_W           equ $B
-VSYNCSTART_VALUE_M           equ $7FF
-VSYNCEND                     equ $38         ; RW, spec 4/3.4
-VSYNCEND_VALUE_B             equ $0
-VSYNCEND_VALUE_W             equ $B
-VSYNCEND_VALUE_M             equ $7FF
-VTOTAL                       equ $3C         ; RW, spec 4/3.4
-VTOTAL_VALUE_B               equ $0
-VTOTAL_VALUE_W               equ $B
-VTOTAL_VALUE_M               equ $7FF
-SYNCPOL                      equ $40         ; RW, spec 4/3.4
-SYNCPOL_HPOL_B               equ $0
-SYNCPOL_HPOL_M               equ $1
-SYNCPOL_VPOL_B               equ $1
-SYNCPOL_VPOL_M               equ $2
-PCLKDIV                      equ $44         ; RW, spec 4/3.4
-PCLKDIV_N_B                  equ $0
-PCLKDIV_N_W                  equ $4
-PCLKDIV_N_M                  equ $F
-SLOTPOS                      equ $48         ; R, spec 4/3.6
-SLOTPOS_VLINE_B              equ $10
-SLOTPOS_VLINE_W              equ $B
-SLOTPOS_VLINE_M              equ $7FF0000
-SLOTPOS_HSLOT_B              equ $0
-SLOTPOS_HSLOT_W              equ $9
-SLOTPOS_HSLOT_M              equ $1FF
+PRIO_BACK_M                  equ $30
+VIDSIZE                      equ $20         ; R, spec 4/6.1
+VIDSIZE_VVISIBLE_B           equ $10
+VIDSIZE_VVISIBLE_W           equ $B
+VIDSIZE_VVISIBLE_M           equ $7FF0000
+VIDSIZE_HVISIBLE_B           equ $0
+VIDSIZE_HVISIBLE_W           equ $B
+VIDSIZE_HVISIBLE_M           equ $7FF
 DMACON                       equ $94         ; SC, spec 5/8
 DMACON_AUDEN_B               equ $3
 DMACON_AUDEN_M               equ $8
 DMACON_STREN_B               equ $4
 DMACON_STREN_M               equ $10
-DMACON_SPREN_B               equ $5
-DMACON_SPREN_M               equ $20
 DMACON_DMXEN_B               equ $6
 DMACON_DMXEN_M               equ $40
 DMACON_COPEN_B               equ $7
@@ -175,21 +96,6 @@ DMACON_DMAEN_B               equ $9
 DMACON_DMAEN_M               equ $200
 DMACON_SETCLR_B              equ $F
 DMACON_SETCLR_M              equ $8000
-SPRCON                       equ $200        ; RW, spec 9/8
-SPRCON_EN_B                  equ $0
-SPRCON_EN_M                  equ $1
-SPRHIT0                      equ $204        ; R, spec 9/7
-SPRHIT0_HIT_B                equ $0
-SPRHIT0_HIT_W                equ $20
-SPRHIT0_HIT_M                equ $FFFFFFFF
-SPRHIT1                      equ $208        ; R, spec 9/7
-SPRHIT1_HIT_B                equ $0
-SPRHIT1_HIT_W                equ $20
-SPRHIT1_HIT_M                equ $FFFFFFFF
-CLXGRP                       equ $20C        ; R, spec 9/7
-CLXGRP_PAIRS_B               equ $0
-CLXGRP_PAIRS_W               equ $10
-CLXGRP_PAIRS_M               equ $FFFF
 DMXINT                       equ $340        ; W1C, spec 11/8
 DMXINT_CH_B                  equ $0
 DMXINT_CH_W                  equ $4
@@ -272,100 +178,183 @@ COPERR                       equ $714        ; R, spec 10/7
 COPERR_ADDR_B                equ $0
 COPERR_ADDR_W                equ $17
 COPERR_ADDR_M                equ $7FFFFF
-; L0..L3: 4 x 64 bytes, spec 4/6.2
-L_NUM                        equ $4
-L_SPAN                       equ $40
+; L0..L2: 3 x 128 bytes, spec 4/6.2
+L_NUM                        equ $3
+L_SPAN                       equ $80
 L0                           equ $100
-L1                           equ $140
-L2                           equ $180
-L3                           equ $1C0
+L1                           equ $180
+L2                           equ $200
 L_CTRL                       equ $0          ; RW, spec 4/6.2 (add to Ln)
 L_CTRL_EN_B                  equ $0
 L_CTRL_EN_M                  equ $1
-L_CTRL_TYPE_B                equ $1
-L_CTRL_TYPE_M                equ $2
+L_CTRL_PLANAR_B              equ $1
+L_CTRL_PLANAR_M              equ $2
 L_CTRL_BPP_B                 equ $2
 L_CTRL_BPP_W                 equ $2
 L_CTRL_BPP_M                 equ $C
 L_CTRL_TRANSP_B              equ $4
 L_CTRL_TRANSP_M              equ $10
-L_CTRL_PALOFS_B              equ $6
-L_CTRL_PALOFS_W              equ $A
-L_CTRL_PALOFS_M              equ $FFC0
-L_PTR                        equ $4          ; RW, spec 4/4.4 (add to Ln)
-L_PTR_ADDR_B                 equ $0
-L_PTR_ADDR_W                 equ $17
-L_PTR_ADDR_M                 equ $7FFFFF
-L_STRIDE                     equ $8          ; RW, spec 4/4.4 (add to Ln)
-L_STRIDE_BYTES_B             equ $0
-L_STRIDE_BYTES_W             equ $10
-L_STRIDE_BYTES_M             equ $FFFF
-L_WINX                       equ $C          ; RW, spec 4/4.3 (add to Ln)
+L_CTRL_HSCALE_B              equ $6
+L_CTRL_HSCALE_W              equ $2
+L_CTRL_HSCALE_M              equ $C0
+L_CTRL_VSCALE_B              equ $8
+L_CTRL_VSCALE_W              equ $2
+L_CTRL_VSCALE_M              equ $300
+L_CTRL_PALOFS_B              equ $C
+L_CTRL_PALOFS_W              equ $4
+L_CTRL_PALOFS_M              equ $F000
+L_CTRL_PLANES_B              equ $10
+L_CTRL_PLANES_W              equ $3
+L_CTRL_PLANES_M              equ $70000
+L_WINX                       equ $4          ; RW, spec 4/4.3 (add to Ln)
 L_WINX_XSTART_B              equ $10
 L_WINX_XSTART_W              equ $B
 L_WINX_XSTART_M              equ $7FF0000
 L_WINX_XEND_B                equ $0
 L_WINX_XEND_W                equ $B
 L_WINX_XEND_M                equ $7FF
-L_WINY                       equ $10         ; RW, spec 4/4.3 (add to Ln)
+L_WINY                       equ $8          ; RW, spec 4/4.3 (add to Ln)
 L_WINY_YSTART_B              equ $10
 L_WINY_YSTART_W              equ $B
 L_WINY_YSTART_M              equ $7FF0000
 L_WINY_YEND_B                equ $0
 L_WINY_YEND_W                equ $B
 L_WINY_YEND_M                equ $7FF
-L_SCROLLX                    equ $14         ; RW, spec 4/4.4 (add to Ln)
-L_SCROLLX_PIXELS_B           equ $0
-L_SCROLLX_PIXELS_W           equ $10
-L_SCROLLX_PIXELS_M           equ $FFFF
-L_SCROLLY                    equ $18         ; RW, spec 4/4.4 (add to Ln)
-L_SCROLLY_LINES_B            equ $0
-L_SCROLLY_LINES_W            equ $10
-L_SCROLLY_LINES_M            equ $FFFF
-L_HSTEP                      equ $1C         ; RW, spec 4/4.5 (add to Ln)
-L_HSTEP_STEP_B               equ $0
-L_HSTEP_STEP_W               equ $10
-L_HSTEP_STEP_M               equ $FFFF
-L_VSTEP                      equ $20         ; RW, spec 4/4.5 (add to Ln)
-L_VSTEP_STEP_B               equ $0
-L_VSTEP_STEP_W               equ $10
-L_VSTEP_STEP_M               equ $FFFF
+L_SCROLLX                    equ $C          ; RW, spec 4/4.4 (add to Ln)
+L_SCROLLX_FINE_B             equ $0
+L_SCROLLX_FINE_W             equ $4
+L_SCROLLX_FINE_M             equ $F
+L_BPLMOD                     equ $10         ; RW, spec 4/4.4 (add to Ln)
+L_BPLMOD_BYTES_B             equ $0
+L_BPLMOD_BYTES_W             equ $10
+L_BPLMOD_BYTES_M             equ $FFFF
+L_BPL0PT                     equ $20         ; RW, spec 4/4.4 (add to Ln)
+L_BPL0PT_ADDR_B              equ $0
+L_BPL0PT_ADDR_W              equ $17
+L_BPL0PT_ADDR_M              equ $7FFFFF
+L_BPL1PT                     equ $24         ; RW, spec 4/4.4 (add to Ln)
+L_BPL1PT_ADDR_B              equ $0
+L_BPL1PT_ADDR_W              equ $17
+L_BPL1PT_ADDR_M              equ $7FFFFF
+L_BPL2PT                     equ $28         ; RW, spec 4/4.4 (add to Ln)
+L_BPL2PT_ADDR_B              equ $0
+L_BPL2PT_ADDR_W              equ $17
+L_BPL2PT_ADDR_M              equ $7FFFFF
+L_BPL3PT                     equ $2C         ; RW, spec 4/4.4 (add to Ln)
+L_BPL3PT_ADDR_B              equ $0
+L_BPL3PT_ADDR_W              equ $17
+L_BPL3PT_ADDR_M              equ $7FFFFF
+L_BPL4PT                     equ $30         ; RW, spec 4/4.4 (add to Ln)
+L_BPL4PT_ADDR_B              equ $0
+L_BPL4PT_ADDR_W              equ $17
+L_BPL4PT_ADDR_M              equ $7FFFFF
+L_BPL5PT                     equ $34         ; RW, spec 4/4.4 (add to Ln)
+L_BPL5PT_ADDR_B              equ $0
+L_BPL5PT_ADDR_W              equ $17
+L_BPL5PT_ADDR_M              equ $7FFFFF
+L_BPL6PT                     equ $38         ; RW, spec 4/4.4 (add to Ln)
+L_BPL6PT_ADDR_B              equ $0
+L_BPL6PT_ADDR_W              equ $17
+L_BPL6PT_ADDR_M              equ $7FFFFF
+L_BPL7PT                     equ $3C         ; RW, spec 4/4.4 (add to Ln)
+L_BPL7PT_ADDR_B              equ $0
+L_BPL7PT_ADDR_W              equ $17
+L_BPL7PT_ADDR_M              equ $7FFFFF
+L_BPL0DAT                    equ $40         ; RW, spec 4/5.1 (add to Ln)
+L_BPL0DAT_DATA_B             equ $0
+L_BPL0DAT_DATA_W             equ $10
+L_BPL0DAT_DATA_M             equ $FFFF
+L_BPL1DAT                    equ $44         ; RW, spec 4/5.1 (add to Ln)
+L_BPL1DAT_DATA_B             equ $0
+L_BPL1DAT_DATA_W             equ $10
+L_BPL1DAT_DATA_M             equ $FFFF
+L_BPL2DAT                    equ $48         ; RW, spec 4/5.1 (add to Ln)
+L_BPL2DAT_DATA_B             equ $0
+L_BPL2DAT_DATA_W             equ $10
+L_BPL2DAT_DATA_M             equ $FFFF
+L_BPL3DAT                    equ $4C         ; RW, spec 4/5.1 (add to Ln)
+L_BPL3DAT_DATA_B             equ $0
+L_BPL3DAT_DATA_W             equ $10
+L_BPL3DAT_DATA_M             equ $FFFF
+L_BPL4DAT                    equ $50         ; RW, spec 4/5.1 (add to Ln)
+L_BPL4DAT_DATA_B             equ $0
+L_BPL4DAT_DATA_W             equ $10
+L_BPL4DAT_DATA_M             equ $FFFF
+L_BPL5DAT                    equ $54         ; RW, spec 4/5.1 (add to Ln)
+L_BPL5DAT_DATA_B             equ $0
+L_BPL5DAT_DATA_W             equ $10
+L_BPL5DAT_DATA_M             equ $FFFF
+L_BPL6DAT                    equ $58         ; RW, spec 4/5.1 (add to Ln)
+L_BPL6DAT_DATA_B             equ $0
+L_BPL6DAT_DATA_W             equ $10
+L_BPL6DAT_DATA_M             equ $FFFF
+L_BPL7DAT                    equ $5C         ; RW, spec 4/5.1 (add to Ln)
+L_BPL7DAT_DATA_B             equ $0
+L_BPL7DAT_DATA_W             equ $10
+L_BPL7DAT_DATA_M             equ $FFFF
 L0_CTRL                      equ $100
-L0_PTR                       equ $104
-L0_STRIDE                    equ $108
-L0_WINX                      equ $10C
-L0_WINY                      equ $110
-L0_SCROLLX                   equ $114
-L0_SCROLLY                   equ $118
-L0_HSTEP                     equ $11C
-L0_VSTEP                     equ $120
-L1_CTRL                      equ $140
-L1_PTR                       equ $144
-L1_STRIDE                    equ $148
-L1_WINX                      equ $14C
-L1_WINY                      equ $150
-L1_SCROLLX                   equ $154
-L1_SCROLLY                   equ $158
-L1_HSTEP                     equ $15C
-L1_VSTEP                     equ $160
-L2_CTRL                      equ $180
-L2_PTR                       equ $184
-L2_STRIDE                    equ $188
-L2_WINX                      equ $18C
-L2_WINY                      equ $190
-L2_SCROLLX                   equ $194
-L2_SCROLLY                   equ $198
-L2_HSTEP                     equ $19C
-L2_VSTEP                     equ $1A0
-L3_CTRL                      equ $1C0
-L3_PTR                       equ $1C4
-L3_STRIDE                    equ $1C8
-L3_WINX                      equ $1CC
-L3_WINY                      equ $1D0
-L3_SCROLLX                   equ $1D4
-L3_SCROLLY                   equ $1D8
-L3_HSTEP                     equ $1DC
-L3_VSTEP                     equ $1E0
+L0_WINX                      equ $104
+L0_WINY                      equ $108
+L0_SCROLLX                   equ $10C
+L0_BPLMOD                    equ $110
+L0_BPL0PT                    equ $120
+L0_BPL1PT                    equ $124
+L0_BPL2PT                    equ $128
+L0_BPL3PT                    equ $12C
+L0_BPL4PT                    equ $130
+L0_BPL5PT                    equ $134
+L0_BPL6PT                    equ $138
+L0_BPL7PT                    equ $13C
+L0_BPL0DAT                   equ $140
+L0_BPL1DAT                   equ $144
+L0_BPL2DAT                   equ $148
+L0_BPL3DAT                   equ $14C
+L0_BPL4DAT                   equ $150
+L0_BPL5DAT                   equ $154
+L0_BPL6DAT                   equ $158
+L0_BPL7DAT                   equ $15C
+L1_CTRL                      equ $180
+L1_WINX                      equ $184
+L1_WINY                      equ $188
+L1_SCROLLX                   equ $18C
+L1_BPLMOD                    equ $190
+L1_BPL0PT                    equ $1A0
+L1_BPL1PT                    equ $1A4
+L1_BPL2PT                    equ $1A8
+L1_BPL3PT                    equ $1AC
+L1_BPL4PT                    equ $1B0
+L1_BPL5PT                    equ $1B4
+L1_BPL6PT                    equ $1B8
+L1_BPL7PT                    equ $1BC
+L1_BPL0DAT                   equ $1C0
+L1_BPL1DAT                   equ $1C4
+L1_BPL2DAT                   equ $1C8
+L1_BPL3DAT                   equ $1CC
+L1_BPL4DAT                   equ $1D0
+L1_BPL5DAT                   equ $1D4
+L1_BPL6DAT                   equ $1D8
+L1_BPL7DAT                   equ $1DC
+L2_CTRL                      equ $200
+L2_WINX                      equ $204
+L2_WINY                      equ $208
+L2_SCROLLX                   equ $20C
+L2_BPLMOD                    equ $210
+L2_BPL0PT                    equ $220
+L2_BPL1PT                    equ $224
+L2_BPL2PT                    equ $228
+L2_BPL3PT                    equ $22C
+L2_BPL4PT                    equ $230
+L2_BPL5PT                    equ $234
+L2_BPL6PT                    equ $238
+L2_BPL7PT                    equ $23C
+L2_BPL0DAT                   equ $240
+L2_BPL1DAT                   equ $244
+L2_BPL2DAT                   equ $248
+L2_BPL3DAT                   equ $24C
+L2_BPL4DAT                   equ $250
+L2_BPL5DAT                   equ $254
+L2_BPL6DAT                   equ $258
+L2_BPL7DAT                   equ $25C
 ; DMX0..DMX3: 4 x 16 bytes, spec 11/8
 DMX_NUM                      equ $4
 DMX_SPAN                     equ $10
@@ -605,9 +594,7 @@ AUD15_STEP                   equ $634
 AUD15_VOL                    equ $638
 AUD15_POS                    equ $63C
 PALETTE                      equ $4000       ; RW, spec 4/6.3
-PALETTE_SIZE                 equ $1000
-SPRTAB                       equ $5000       ; RW, spec 9/3
-SPRTAB_SIZE                  equ $800
+PALETTE_SIZE                 equ $400
 DESCRAM                      equ $6000       ; RW, spec 11/8
 DESCRAM_SIZE                 equ $800
 
@@ -1044,63 +1031,6 @@ TMR3_PRESCALE                equ $1A4
 TMR3_RELOAD                  equ $1A8
 TMR3_COUNT                   equ $1AC
 TMR3_STAT                    equ $1B0
-
-; ---- SPR: 32-byte layout in memory, spec 9/3
-SPR_SIZEOF                   equ $20
-SPR_POS                      equ $0
-SPR_POS_X_B                  equ $0
-SPR_POS_X_W                  equ $C
-SPR_POS_X_M                  equ $FFF
-SPR_POS_Y_B                  equ $10
-SPR_POS_Y_W                  equ $C
-SPR_POS_Y_M                  equ $FFF0000
-SPR_PTR                      equ $4
-SPR_PTR_ADDR_B               equ $0
-SPR_PTR_ADDR_W               equ $17
-SPR_PTR_ADDR_M               equ $7FFFFF
-SPR_SIZE                     equ $8
-SPR_SIZE_HEIGHTM1_B          equ $0
-SPR_SIZE_HEIGHTM1_W          equ $A
-SPR_SIZE_HEIGHTM1_M          equ $3FF
-SPR_SIZE_STRIDE_B            equ $10
-SPR_SIZE_STRIDE_W            equ $10
-SPR_SIZE_STRIDE_M            equ $FFFF0000
-SPR_CTRL                     equ $C
-SPR_CTRL_EN_B                equ $0
-SPR_CTRL_EN_M                equ $1
-SPR_CTRL_WIDTH_B             equ $1
-SPR_CTRL_WIDTH_W             equ $2
-SPR_CTRL_WIDTH_M             equ $6
-SPR_CTRL_BPP_B               equ $3
-SPR_CTRL_BPP_W               equ $2
-SPR_CTRL_BPP_M               equ $18
-SPR_CTRL_HFLIP_B             equ $5
-SPR_CTRL_HFLIP_M             equ $20
-SPR_CTRL_VFLIP_B             equ $6
-SPR_CTRL_VFLIP_M             equ $40
-SPR_CTRL_DEPTH_B             equ $8
-SPR_CTRL_DEPTH_W             equ $3
-SPR_CTRL_DEPTH_M             equ $700
-SPR_CTRL_PALOFS_B            equ $10
-SPR_CTRL_PALOFS_W            equ $6
-SPR_CTRL_PALOFS_M            equ $3F0000
-SPR_SCALE                    equ $10
-SPR_SCALE_HSTEP_B            equ $0
-SPR_SCALE_HSTEP_W            equ $10
-SPR_SCALE_HSTEP_M            equ $FFFF
-SPR_SCALE_VSTEP_B            equ $10
-SPR_SCALE_VSTEP_W            equ $10
-SPR_SCALE_VSTEP_M            equ $FFFF0000
-SPR_COLL                     equ $14
-SPR_COLL_GROUP_B             equ $0
-SPR_COLL_GROUP_W             equ $2
-SPR_COLL_GROUP_M             equ $3
-SPR_COLL_HITGROUPS_B         equ $4
-SPR_COLL_HITGROUPS_W         equ $4
-SPR_COLL_HITGROUPS_M         equ $F0
-SPR_COLL_HITLAYERS_B         equ $8
-SPR_COLL_HITLAYERS_W         equ $4
-SPR_COLL_HITLAYERS_M         equ $F00
 
 ; ---- DMXDESC: 32-byte layout in memory, spec 11/3
 DMXDESC_SIZEOF               equ $20

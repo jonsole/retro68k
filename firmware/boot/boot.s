@@ -7,11 +7,13 @@
 ;   5. the software interrupt, through its own vector
 ;   5b. timer 0 interrupts, against the time counter
 ;   6. the vertical blank interrupt from the video
-;   7. a bitmap layer (layer 1, 8 bpp, 2x) fetched from Chip RAM: no overruns
-;   8. four sprites (spec 9): collisions, no missed fetches
-;   9. "PASS" or "FAIL", then echo whatever arrives over USB
+;   7. a bitmap layer (layer 1, 4 planes, 2x) fetched from Chip RAM: no overruns
+;   8. "PASS" or "FAIL", then echo whatever arrives over USB
 ;
-; Everything printed also appears on the screen (text layer 0, 80 x 30).
+; Everything printed also appears on the screen: an 80 x 30 console drawn
+; with the ROM font into a 1-plane 640 x 480 bitmap (layer 0).
+; From step 6 on, the vertical blank interrupt stays on: it resets the
+; layers' plane pointers for each frame (spec 4, 4.4; the copper's job later).
 ;
 ; Assemble: vasmm68k_mot -Fbin -I ../include [-DSIM] -o boot.bin boot.s
 ; With SIM defined, the RAM test covers only 8 KB, to keep simulation short.
@@ -23,7 +25,7 @@
 VECTORS     equ $000000             ; 256 vectors, 1 KB
 VARS        equ $008000             ; boot ROM variables
 STACK_TOP   equ $010000             ; stack grows down from here
-RAMTEST     equ $010000             ; RAM test starts here
+RAMTEST     equ $040000             ; RAM test starts here (above the console and picture)
 
 ; variables
 v_fail      equ VARS+0              ; long: number of failed checks
@@ -35,13 +37,17 @@ v_col       equ VARS+20             ; word: text cursor column
 v_row       equ VARS+22             ; word: text cursor row
 v_tmr       equ VARS+24             ; long: timer 0 interrupts seen
 
-ATTR        equ $1F                 ; text colours: white (15) on blue (1)
+CON         equ $030000             ; the console: 640 x 480, 1 bit per pixel
+CON_LINE    equ 640/8               ; bytes per line
+CON_COLS    equ 80
+CON_ROWS    equ 30                  ; of 16 lines
 BITMAP      equ $020000             ; the test picture for layer 1
-BM_W        equ 64                  ; 64 x 32 pixels at 8 bits per pixel
-BM_H        equ 32
+BM_W        equ 64                  ; 64 x 32 pixels, 4 interleaved planes:
+BM_H        equ 32                  ; each line is plane 0 (8 bytes), plane 1, plane 2, plane 3
+BM_PL       equ 4
+BM_LINE     equ BM_W/8              ; bytes per plane line
 BM_X        equ 400                 ; shown 2x at (400, 300)
 BM_Y        equ 300
-SPRDATA     equ $030000             ; sprite images
 
             org ROM                 ; $F80000; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP          ; initial supervisor stack pointer
@@ -54,7 +60,6 @@ start:      move.w  #$2700,sr                   ; supervisor mode, interrupts of
             clr.l   v_fail                      ; (overlay on: writes still reach Chip RAM)
             bsr     screen_init
             bsr     bitmap_init
-            bsr     sprite_init
 
             lea     s_banner(pc),a0
             bsr     puts
@@ -250,9 +255,6 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             move.w  #$2000,sr
 .wait_vbl:  tst.l   v_vbl
             beq.s   .wait_vbl
-            move.w  #$2700,sr
-            move.l  #0,INTCON(a5)
-            move.l  #0,VIDINTEN(a4)
             move.l  FRAMECOUNT(a4),d0           ; frames have been counted
             tst.l   d0
             seq     d1
@@ -266,28 +268,7 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             and.l   #VIDSTAT_OVERRUN_M,d0
             bsr     okfail
 
-; ---- 8. sprites: collisions from the last complete frame (spec 9, section 7)
-            lea     s_spr(pc),a0
-            bsr     puts
-            move.l  SPRHIT0(a4),d0
-            bsr     puthex8
-            moveq   #' ',d0
-            bsr     putc
-            move.l  CLXGRP(a4),d0
-            bsr     puthex8
-            move.l  SPRHIT0(a4),d0
-            cmp.l   #%1101,d0                   ; 0 hit 2, 2 hit 0, 3 hit the text layer
-            bne.s   .spr_bad
-            move.l  SPRHIT1(a4),d0
-            bne.s   .spr_bad
-            move.l  CLXGRP(a4),d0
-            cmp.l   #(1<<(4*0+1))|(1<<(4*1+0)),d0   ; groups 0 and 1 touched
-            bne.s   .spr_bad
-            move.l  VIDSTAT(a4),d0
-            and.l   #VIDSTAT_SPRMISS_M|VIDSTAT_SPROVF_M,d0
-.spr_bad:   bsr     okfail
-
-; ---- 9. result
+; ---- 8. result
             tst.l   v_fail
             bne.s   .fail
             lea     s_pass(pc),a0
@@ -348,43 +329,74 @@ putc:       move.w  SERSTAT+2(a5),d1            ; low half: TXSPACE
             ; fall through
 
 ; put d0.b on the screen at the cursor: CR, LF, or a character
-scrputc:    movem.l d1/a0,-(sp)
+scrputc:    movem.l d0-d1/a0-a1,-(sp)
             cmp.b   #13,d0
             bne.s   .lf
             clr.w   v_col
             bra.s   .done
 .lf:        cmp.b   #10,d0
             bne.s   .chr
-            addq.w  #1,v_row
-            and.w   #31,v_row                   ; wraps round the 32-row buffer
+            move.w  v_row,d1
+            addq.w  #1,d1
+            cmp.w   #CON_ROWS,d1
+            blo.s   .row
+            moveq   #0,d1                       ; back to the top
+.row:       move.w  d1,v_row
+            bsr     rowaddr
+            move.w  #16*CON_LINE/4-1,d1         ; clear the new row
+.clr:       move.l  #0,(a0)+
+            dbra    d1,.clr
             bra.s   .done
-.chr:       move.w  v_row,d1
-            lsl.w   #7,d1                       ; 128 cells per row
-            add.w   v_col,d1
-            add.w   d1,d1                       ; 2 bytes per cell
-            lea     TEXT,a0
-            move.b  #ATTR,0(a0,d1.w)
-            move.b  d0,1(a0,d1.w)
+.chr:       move.w  v_col,d1
+            cmp.w   #CON_COLS,d1
+            bhs.s   .done                       ; past the right edge: dropped
+            move.w  v_row,d1
+            bsr     rowaddr
+            add.w   v_col,a0
+            lea     font(pc),a1
+            and.w   #$FF,d0
+            lsl.w   #4,d0                       ; 16 bytes per character
+            add.w   d0,a1
+            moveq   #16-1,d1
+.glyph:     move.b  (a1)+,(a0)
+            add.w   #CON_LINE,a0
+            dbra    d1,.glyph
             addq.w  #1,v_col
-.done:      movem.l (sp)+,d1/a0
+.done:      movem.l (sp)+,d0-d1/a0-a1
             rts
 
-; palette, clear text, layer 0 = text over the whole screen, video on
+; a0 = the console address of text row d1.w
+rowaddr:    lea     CON,a0
+            mulu    #16*CON_LINE,d1
+            add.l   d1,a0
+            rts
+
+; palette, clear the console, layer 0 = the console over the whole screen, video on
 screen_init:
             lea     CUSTOM,a4
-            lea     PALETTE(a4),a0
-            lea     palette(pc),a1
-            moveq   #16-1,d0
-.pal:       move.l  (a1)+,(a0)+
-            dbra    d0,.pal
-            lea     TEXT,a0
-            move.l  #(ATTR<<24)|($20<<16)|(ATTR<<8)|$20,d1
-            move.w  #128*32/2-1,d0
-.clr:       move.l  d1,(a0)+
+            move.l  #$0000AA,PALETTE+0*4(a4)    ; console: blue
+            move.l  #$FFFFFF,PALETTE+1*4(a4)    ; and white
+            lea     CON+CON_ROWS*16*CON_LINE,a0
+            moveq   #0,d1
+            moveq   #0,d2
+            moveq   #0,d3
+            moveq   #0,d4
+            moveq   #0,d5
+            moveq   #0,d6
+            moveq   #0,d7
+            move.l  d1,a1
+            move.w  #CON_ROWS*16*CON_LINE/32-1,d0
+.clr:       movem.l d1-d7/a1,-(a0)              ; 32 bytes at a time
             dbra    d0,.clr
             clr.l   v_col                       ; column and row
             move.l  #$202020,BGCOLOR(a4)
-            move.l  #L_CTRL_EN_M|L_CTRL_TYPE_M,L0+L_CTRL(a4)
+            lea     L0(a4),a0
+            move.l  #CON,L_BPL0PT(a0)
+            move.l  #0,L_BPLMOD(a0)
+            move.l  #(0<<16)|640,L_WINX(a0)
+            move.l  #(0<<16)|480,L_WINY(a0)
+            move.l  #L_CTRL_EN_M,L_CTRL(a0)     ; chunky, 1 bit per pixel, colours 0-1
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
             rts
 
@@ -431,154 +443,79 @@ softirq:    move.l  #SOFTINT_CLR_M,SOFTINT(a5)
             addq.l  #1,v_irq
             rte
 
-; layer 1: a 64 x 32 8 bpp picture at BITMAP, pixel (x, y) = (4x) xor (8y),
-; shown 2x in front of the text; palette 256-511: colour i = (i, 255 - i, $80)
+; layer 1: a 64 x 32 picture at BITMAP in 4 interleaved planes, pixel
+; (x, y) = (x xor y) and 15, shown 2x in front of the text; colours 16-31
+; (PALOFS 1): colour 16 + i = (16i, 255 - 16i, $80)
 bitmap_init:
             lea     CUSTOM,a4
-            lea     PALETTE+256*4(a4),a0
+            lea     PALETTE+16*4(a4),a0
             moveq   #0,d0
-.pal:       move.l  d0,d1
-            swap    d1                          ; red = i
-            move.w  #255,d2
-            sub.w   d0,d2
-            lsl.w   #8,d2                       ; green = 255 - i
-            or.w    #$80,d2                     ; blue = $80
+.pal:       move.w  d0,d2
+            lsl.w   #4,d2                       ; 16i
+            moveq   #0,d1
             move.w  d2,d1
-            move.l  d1,(a0)+
-            addq.w  #1,d0
-            cmp.w   #256,d0
-            bne.s   .pal
-            lea     BITMAP,a0
-            moveq   #0,d3                       ; y
-.row:       moveq   #0,d4                       ; x
-.pix:       move.b  d4,d0
-            lsl.b   #2,d0
-            move.b  d3,d1
-            lsl.b   #3,d1
-            eor.b   d1,d0
-            move.b  d0,(a0)+
-            addq.b  #1,d4
-            cmp.b   #BM_W,d4
-            bne.s   .pix
-            addq.b  #1,d3
-            cmp.b   #BM_H,d3
-            bne.s   .row
-            lea     L0+L_SPAN(a4),a0            ; layer 1
-            move.l  #BITMAP,L_PTR(a0)
-            move.l  #BM_W,L_STRIDE(a0)
-            move.l  #(BM_X<<16)|(BM_X+2*BM_W),L_WINX(a0)
-            move.l  #(BM_Y<<16)|(BM_Y+2*BM_H),L_WINY(a0)
-            move.l  #$0080,L_HSTEP(a0)          ; 2x
-            move.l  #$0080,L_VSTEP(a0)
-            move.l  #L_CTRL_EN_M|(3<<L_CTRL_BPP_B)|(16<<L_CTRL_PALOFS_B),L_CTRL(a0)
-            move.l  #(3<<6)|(2<<4)|(0<<2)|1,PRIO(a4)    ; layer 1 in front, then 0, 2, 3
-            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
-            rts
-
-; Four sprites (spec 9), with their images at SPRDATA:
-;   0: 16x16 4 bpp at (480, 48), pixel (x, y) = x xor y; group 0, reacts to group 1
-;   1: 32x16 2 bpp, 2x, flipped, at (-24, 100): bands of 8 pixels, x / 8
-;   2: 16x16 8 bpp at (488, 56), under sprite 0: 16x + y; group 1, reacts to group 0
-;   3: 16x16 4 bpp at (300, 300), behind all layers: hidden, but reacts to layer 0
-; Palette 512-527: colour i = (16i, $40, 255 - 16i); 529-531 red, green, yellow
-sprite_init:
-            lea     CUSTOM,a4
-            lea     PALETTE+512*4(a4),a0
-            moveq   #0,d0
-.pal:       move.l  d0,d1
-            lsl.l   #4,d1
             swap    d1                          ; red = 16i
-            move.w  #255,d2
-            move.l  d0,d3
-            lsl.w   #4,d3
-            sub.w   d3,d2                       ; blue = 255 - 16i
-            or.w    #$4000,d2                   ; green = $40
+            neg.w   d2
+            add.w   #255,d2
+            lsl.w   #8,d2                       ; green = 255 - 16i
+            or.w    #$80,d2                     ; blue = $80
             move.w  d2,d1
             move.l  d1,(a0)+
             addq.w  #1,d0
             cmp.w   #16,d0
             bne.s   .pal
-            move.l  #$FF0000,(a0)+              ; 528 (unused: 0 is transparent)
-            move.l  #$FF0000,(a0)+              ; 529 red
-            move.l  #$00FF00,(a0)+              ; 530 green
-            move.l  #$FFFF00,(a0)+              ; 531 yellow
-            ; sprite 0: 8 bytes per line, nibble pixels, x xor y
-            lea     SPRDATA,a0
+            ; bit p of pixel x in a 16-pixel word: $5555, $3333, $0F0F, $00FF;
+            ; inverted on lines where bit p of y is set
+            lea     BITMAP,a0
             moveq   #0,d3                       ; y
-.s0y:       moveq   #0,d4                       ; x (two pixels a byte)
-.s0x:       move.b  d4,d0
-            eor.b   d3,d0
-            and.b   #15,d0
-            lsl.b   #4,d0
-            move.b  d4,d1
-            addq.b  #1,d1
-            eor.b   d3,d1
-            and.b   #15,d1
-            or.b    d1,d0
-            move.b  d0,(a0)+
-            addq.b  #2,d4
-            cmp.b   #16,d4
-            bne.s   .s0x
-            addq.b  #1,d3
-            cmp.b   #16,d3
-            bne.s   .s0y
-            ; sprite 1 at SPRDATA+$100: 32 pixels at 2 bpp = 8 bytes: bands 0,1,2,3 of 8 pixels
-            lea     SPRDATA+$100,a0
-            moveq   #16-1,d3
-.s1y:       move.l  #$00005555,(a0)+
-            move.l  #$AAAAFFFF,(a0)+
-            dbra    d3,.s1y
-            ; sprite 2 at SPRDATA+$200: 16 bytes a line, 16x + y
-            lea     SPRDATA+$200,a0
-            moveq   #0,d3
-.s2y:       moveq   #0,d4
-.s2x:       move.b  d4,d0
-            lsl.b   #4,d0
-            add.b   d3,d0
-            move.b  d0,(a0)+
-            addq.b  #1,d4
-            cmp.b   #16,d4
-            bne.s   .s2x
-            addq.b  #1,d3
-            cmp.b   #16,d3
-            bne.s   .s2y
-            ; sprite 3 at SPRDATA+$400: all colour 5
-            lea     SPRDATA+$400,a0
-            move.w  #128/4-1,d3
-.s3:        move.l  #$55555555,(a0)+
-            dbra    d3,.s3
-            ; the table
-            lea     SPRTAB(a4),a1
-            lea     spr_table(pc),a0
-            moveq   #4-1,d3
-.ent:       moveq   #6-1,d2
-.wd:        move.l  (a0)+,(a1)+
-            dbra    d2,.wd
-            lea     SPR_SIZEOF-6*4(a1),a1
-            dbra    d3,.ent
-            move.l  #SPRCON_EN_M,SPRCON(a4)
-            move.w  #DMACON_SETCLR_M|DMACON_SPREN_M,DMACON+2(a4)
+.row:       lea     planebits(pc),a1
+            moveq   #0,d4                       ; plane
+.plane:     move.w  (a1)+,d0
+            btst    d4,d3
+            beq.s   .noinv
+            not.w   d0
+.noinv:     moveq   #BM_W/16-1,d1
+.word:      move.w  d0,(a0)+
+            dbra    d1,.word
+            addq.w  #1,d4
+            cmp.w   #BM_PL,d4
+            bne.s   .plane
+            addq.w  #1,d3
+            cmp.w   #BM_H,d3
+            bne.s   .row
+            lea     L1(a4),a0
+            bsr     bm_ptrs
+            move.l  #(BM_PL-1)*BM_LINE,L_BPLMOD(a0)
+            move.l  #(BM_X<<16)|(BM_X+2*BM_W),L_WINX(a0)
+            move.l  #(BM_Y<<16)|(BM_Y+2*BM_H),L_WINY(a0)
+            move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|((BM_PL-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(1<<L_CTRL_PALOFS_B),L_CTRL(a0)
+            move.l  #(2<<4)|(0<<2)|1,PRIO(a4)   ; layer 1 in front, then 0, then 2
             rts
 
-; POS, PTR, SIZE, CTRL, SCALE, COLL
-spr_table:  dc.l    (48<<16)|480,     SPRDATA,      (8<<16)|15,  $00200009, $01000100, $00000020
-            dc.l    (100<<16)|$FE8,   SPRDATA+$100, (8<<16)|15,  $00210023, $00800080, $00000003
-            dc.l    (56<<16)|488,     SPRDATA+$200, (16<<16)|15, $00100011, $01000100, $00000011
-            dc.l    (300<<16)|300,    SPRDATA+$400, (8<<16)|15,  $00200409, $01000100, $00000102
+; layer 1's plane pointers for the top of the picture (a0 = layer 1)
+bm_ptrs:    move.l  #BITMAP+0*BM_LINE,L_BPL0PT(a0)
+            move.l  #BITMAP+1*BM_LINE,L_BPL1PT(a0)
+            move.l  #BITMAP+2*BM_LINE,L_BPL2PT(a0)
+            move.l  #BITMAP+3*BM_LINE,L_BPL3PT(a0)
+            rts
 
-; vertical blank: count it and clear the flag
-vblank:     move.l  a4,-(sp)
-            lea     CUSTOM,a4
-            move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)
+planebits:  dc.w    $5555,$3333,$0F0F,$00FF
+
+; vertical blank: count it, clear the flag, reset layer 1's plane pointers
+vblank:     move.l  a0,-(sp)
+            lea     CUSTOM,a0
+            move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a0)
+            move.l  #CON,L0+L_BPL0PT(a0)
+            lea     L1(a0),a0
+            bsr     bm_ptrs
             addq.l  #1,v_vbl
-            move.l  (sp)+,a4
+            move.l  (sp)+,a0
             rte
 
 unhandled:  bra.s   unhandled
 
-; the 16 PC text colours, 0x00RRGGBB
-palette:    dc.l    $000000,$0000AA,$00AA00,$00AAAA,$AA0000,$AA00AA,$AA5500,$AAAAAA
-            dc.l    $555555,$5555FF,$55FF55,$55FFFF,$FF5555,$FF55FF,$FFFF55,$FFFFFF
+; the console font: Spleen 8x16, code page 437 (third_party/spleen, BSD licence)
+font:       incbin  "font8x16.bin"
 
 s_banner:   dc.b    13,10,"retro68k boot ROM",13,10,0
 s_sysid:    dc.b    "SYSID ",0
@@ -589,7 +526,6 @@ s_irq:      dc.b    "interrupt",0
 s_vbl:      dc.b    "vertical blank",0
 s_tmr:      dc.b    "timer",0
 s_layer:    dc.b    "bitmap layer",0
-s_spr:      dc.b    "sprites ",0
 s_nmi:      dc.b    "NMI",13,10,0
 s_ok:       dc.b    " ok",13,10,0
 s_bad:      dc.b    " FAIL",13,10,0

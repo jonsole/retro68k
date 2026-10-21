@@ -59,13 +59,11 @@ module top_ks3 #(
     wire [15:0] dq_o, dq_i;
     wire [7:0]  ft_d_i, ft_d_o;
     wire        ft_d_oe, ft_rd_n, ft_wr_n, ft_siwu_n;
-    wire [3:0]  pclkdiv;
     wire [23:0] rgb;
     wire        hs, vs, de;
 
-    retro68k #(.ROM_INIT("boot.hex"), .FONT_INIT("font8x16.hex")) sys (
+    retro68k #(.ROM_INIT("boot.hex"), .PIX_N(PIX_N)) sys (
         .clk100(clk100), .clk40(clk40), .clk_pix(clk_pix),
-        .pclkdiv(pclkdiv), .pclk_locked(locked && pclkdiv == PIX_N),
         .por100(por), .por40(por),
         .btn_reset_n(!btn_q[0]), .buttons(btn_q[2:1]),
         .sram_a(a), .sram_ce_n(ce_n), .sram_ub_n(ub_n), .sram_lb_n(lb_n),

@@ -3,6 +3,8 @@
 //   +dma        keep the DMA port busy with random reads and writes
 //   +trace      print the first bus cycles with their position in the slot
 //   +frame      after PASS, wait for one more frame and write it to frame.ppm
+//               and the video state to vstate/ (for vmodel.py)
+//   +rom=FILE   load FILE into the boot ROM instead of boot.hex
 //   +serial     after PASS: echo test (with a near-miss of the control
 //               sequence), then the RESET control command; expects a second PASS
 `timescale 1ns/1ps
@@ -32,15 +34,15 @@ module tb;
     wire [15:0] dma_rdata;
     wire [3:0]  sc;
     wire        halted;
-    wire [3:0]  pclkdiv;
+    wire [3:0]  pclkdiv = 4'd8;     // 640x480 (spec 4, 3.2)
     wire        clk_pix;
     wire [23:0] rgb;
     wire        hs, vs, de;
     pixclk pc (.clk200(clk200), .n(pclkdiv), .clk_pix(clk_pix));
 
-    retro68k #(.ROM_INIT("boot.hex"), .FONT_INIT("font8x16.hex")) dut (
+    retro68k #(.ROM_INIT("boot.hex")) dut (
         .clk100(clk100), .clk40(clk40), .por100(por), .por40(por),
-        .clk_pix(clk_pix), .pclkdiv(pclkdiv), .pclk_locked(1'b1),
+        .clk_pix(clk_pix),
         .vid_rgb(rgb), .vid_hsync(hs), .vid_vsync(vs), .vid_de(de),
         .btn_reset_n(1'b1), .buttons(2'b00),
         .sram_a(a), .sram_ce_n(ce_n), .sram_ub_n(ub_n), .sram_lb_n(lb_n),
@@ -279,6 +281,30 @@ module tb;
         end
         de_d = de;
     end
+    // Video state for the reference model (vmodel.py)
+    reg [22:0] frame_bpt [0:23];
+    integer bi;
+    always @(posedge clk100) if (dut.vid.line_go && dut.vid.vc == dut.vid.VTOT - 1)
+        for (bi = 0; bi < 24; bi = bi + 1) frame_bpt[bi] = dut.vid.dma.pt[bi];
+    task write_state;
+        integer f, i, n;
+        begin
+            f = $fopen("vstate_regs.txt", "w");
+            $fwrite(f, "hvis %0d\nvvis %0d\nprio %0d\nbg %0d\nvidcon %0d\nvidstat %0d\n",
+                    dut.vid.HVIS, dut.vid.VVIS, dut.vid.prio, dut.vid.bgcolor, dut.vid.vidcon, dut.vid.vidstat);
+            // Layer registers, and the plane pointers as taken for line 0
+            for (n = 0; n < 3; n = n + 1)
+                $fwrite(f, "layer %0d ctrl %0d xs %0d xe %0d ys %0d ye %0d sx %0d mod %0d\n", n,
+                        dut.vid.l_ctrl[n], dut.vid.l_xs[n], dut.vid.l_xe[n], dut.vid.l_ys[n], dut.vid.l_ye[n],
+                        dut.vid.l_sx[n], dut.vid.dma.mod[n]);
+            for (n = 0; n < 24; n = n + 1) $fwrite(f, "bpt %0d %0d\n", n, frame_bpt[n]);
+            $fclose(f);
+            f = $fopen("vstate_pal.hex", "w");
+            for (i = 0; i < 256; i = i + 1) $fwrite(f, "%h\n", dut.vid.pal[i]);
+            $fclose(f);
+        end
+    endtask
+
     task write_frame;
         integer f, x, y;
         begin
@@ -294,8 +320,9 @@ module tb;
         end
     endtask
 
-    // The boot ROM's bitmap (layer 1): 64 x 32, pixel (x, y) = (4x) xor (8y),
-    // shown 2x at (400, 300); colour i = (i, 255 - i, 0x80)
+    // The boot ROM's bitmap (layer 1): 64 x 32 in 4 interleaved planes,
+    // pixel (x, y) = (x xor y) and 15, shown 2x at (400, 300);
+    // colour 16 + i = (16i, 255 - 16i, 0x80)
     integer bm_errors = 0;
     task check_bitmap;
         integer x, y;
@@ -303,7 +330,7 @@ module tb;
         begin
             for (y = 300; y < 364; y = y + 1)
                 for (x = 400; x < 528; x = x + 1) begin
-                    v = ((((x - 400) >> 1) << 2) ^ (((y - 300) >> 1) << 3)) & 8'hFF;
+                    v = ((((x - 400) >> 1) ^ ((y - 300) >> 1)) & 15) << 4;
                     if (fb[y*1280+x] !== {v, 8'd255 - v, 8'h80}) begin
                         if (bm_errors < 8)
                             $display("BITMAP ERROR at (%0d, %0d): %h, expected %h", x, y, fb[y*1280+x], {v, 8'd255 - v, 8'h80});
@@ -311,50 +338,6 @@ module tb;
                     end
                 end
             $display("---- bitmap layer: %0d wrong pixels", bm_errors);
-        end
-    endtask
-
-    // The boot ROM's sprites (see sprite_init in boot.s): every opaque sprite
-    // pixel must show its colour; sprite 0 covers sprite 2; sprite 3 is hidden.
-    integer spr_errors = 0, spr_px = 0;
-    function [23:0] pal512(input [3:0] i);
-        pal512 = {i, 4'd0, 8'h40, 8'd255 - {i, 4'd0}};
-    endfunction
-    task spr_expect(input integer x, input integer y, input [23:0] c);
-        begin
-            spr_px = spr_px + 1;
-            if (fb[y*1280+x] !== c) begin
-                if (spr_errors < 8)
-                    $display("SPRITE ERROR at (%0d, %0d): %h, expected %h", x, y, fb[y*1280+x], c);
-                spr_errors = spr_errors + 1;
-            end
-        end
-    endtask
-    task check_sprites;
-        integer x, y, v, s0;
-        reg [23:0] c;
-        begin
-            // sprites 2 then 0 (0 in front)
-            for (y = 48; y < 72; y = y + 1)
-                for (x = 480; x < 504; x = x + 1) begin
-                    s0 = (x < 496 && y < 64) ? (((x - 480) ^ (y - 48)) & 15) : 0;
-                    v  = (x >= 488 && y >= 56) ? ((((x - 488) * 16) + (y - 56)) & 255) : 0;
-                    if (s0 != 0)     spr_expect(x, y, pal512(s0));
-                    else if (v != 0) spr_expect(x, y, {v[7:0], 8'd255 - v[7:0], 8'h80});
-                    else             spr_expect(x, y, 24'h0000AA);
-                end
-            // sprite 1: 2x, flipped, clipped: screen x 0..39, y 100..131
-            for (y = 100; y < 132; y = y + 1)
-                for (x = 0; x < 40; x = x + 1) begin
-                    v = ((31 - ((x + 24) >> 1)) >> 3) & 3;
-                    c = (v == 1) ? 24'hFF0000 : (v == 2) ? 24'h00FF00 : 24'hFFFF00;
-                    if (v != 0) spr_expect(x, y, c);
-                end
-            // sprite 3: behind the text layer, so text background
-            for (y = 300; y < 316; y = y + 1)
-                for (x = 300; x < 316; x = x + 1)
-                    spr_expect(x, y, 24'h0000AA);
-            $display("---- sprites: %0d pixels checked, %0d wrong", spr_px, spr_errors);
         end
     endtask
 
@@ -404,20 +387,31 @@ module tb;
                 k = frames_seen;
                 wait (frames_seen == k + 2);   // a complete frame after PASS
                 write_frame;
-                check_bitmap;
-                check_sprites;
+                write_state;
+                if (!$test$plusargs("rom=")) check_bitmap;
             end
             report;
             if (serial_test)
                 $display("---- serial: %0d errors; RESETWHY after the command: %h", serial_errors, dut.resetwhy);
             if (serial_test && dut.resetwhy !== 8'h10) serial_errors = serial_errors + 1;
-            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0 && bm_errors == 0 && spr_errors == 0) $display("TEST PASSED");
+            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0 && bm_errors == 0) $display("TEST PASSED");
             else $display("TEST FAILED");
             $finish;
         end
     end
 
     integer tmo;
+    reg [1023:0] romfile;
+    initial if ($value$plusargs("rom=%s", romfile)) begin
+        #1 $readmemh(romfile, dut.rom.mem);
+        $display("boot ROM: %0s", romfile);
+    end
+    // +ram=FILE: Chip RAM contents at the start ($readmemh of 16-bit words, with @addresses)
+    reg [1023:0] ramfile;
+    initial if ($value$plusargs("ram=%s", ramfile)) begin
+        #1 $readmemh(ramfile, sram.mem);
+        $display("Chip RAM loaded: %0s", ramfile);
+    end
     initial begin
         if ($test$plusargs("vcd")) begin
             $dumpfile("tb.vcd");
