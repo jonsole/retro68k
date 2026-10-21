@@ -6,7 +6,8 @@
 ;   4. a deliberate bus error, checked against BUSERRADDR and BUSERRWHY
 ;   5. the software interrupt, through its own vector
 ;   6. the vertical blank interrupt from the video
-;   7. "PASS" or "FAIL", then echo whatever arrives over USB
+;   7. a bitmap layer (layer 1, 8 bpp, 2x) fetched from Chip RAM: no overruns
+;   8. "PASS" or "FAIL", then echo whatever arrives over USB
 ;
 ; Everything printed also appears on the screen (text layer 0, 80 x 30).
 ;
@@ -32,6 +33,11 @@ v_col       equ VARS+20             ; word: text cursor column
 v_row       equ VARS+22             ; word: text cursor row
 
 ATTR        equ $1F                 ; text colours: white (15) on blue (1)
+BITMAP      equ $020000             ; the test picture for layer 1
+BM_W        equ 64                  ; 64 x 32 pixels at 8 bits per pixel
+BM_H        equ 32
+BM_X        equ 400                 ; shown 2x at (400, 300)
+BM_Y        equ 300
 
             org ROM                 ; $F80000; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP          ; initial supervisor stack pointer
@@ -43,6 +49,7 @@ start:      move.w  #$2700,sr                   ; supervisor mode, interrupts of
             move.l  #SERCON_EN_M|SERCON_CTLEN_M,SERCON(a5)  ; USB serial on, PC control commands on
             clr.l   v_fail                      ; (overlay on: writes still reach Chip RAM)
             bsr     screen_init
+            bsr     bitmap_init
 
             lea     s_banner(pc),a0
             bsr     puts
@@ -212,7 +219,14 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             tst.b   d1                          ; Z set if FRAMECOUNT != 0
             bsr     okfail
 
-; ---- 7. result
+; ---- 7. the bitmap layer has been on screen for a frame or more: no overruns
+            lea     s_layer(pc),a0
+            bsr     puts
+            move.l  VIDSTAT(a4),d0
+            and.l   #VIDSTAT_OVERRUN_M,d0
+            bsr     okfail
+
+; ---- 8. result
             tst.l   v_fail
             bne.s   .fail
             lea     s_pass(pc),a0
@@ -351,6 +365,50 @@ softirq:    move.l  #SOFTINT_CLR_M,SOFTINT(a5)
             addq.l  #1,v_irq
             rte
 
+; layer 1: a 64 x 32 8 bpp picture at BITMAP, pixel (x, y) = (4x) xor (8y),
+; shown 2x in front of the text; palette 256-511: colour i = (i, 255 - i, $80)
+bitmap_init:
+            lea     CUSTOM,a4
+            lea     PALETTE+256*4(a4),a0
+            moveq   #0,d0
+.pal:       move.l  d0,d1
+            swap    d1                          ; red = i
+            move.w  #255,d2
+            sub.w   d0,d2
+            lsl.w   #8,d2                       ; green = 255 - i
+            or.w    #$80,d2                     ; blue = $80
+            move.w  d2,d1
+            move.l  d1,(a0)+
+            addq.w  #1,d0
+            cmp.w   #256,d0
+            bne.s   .pal
+            lea     BITMAP,a0
+            moveq   #0,d3                       ; y
+.row:       moveq   #0,d4                       ; x
+.pix:       move.b  d4,d0
+            lsl.b   #2,d0
+            move.b  d3,d1
+            lsl.b   #3,d1
+            eor.b   d1,d0
+            move.b  d0,(a0)+
+            addq.b  #1,d4
+            cmp.b   #BM_W,d4
+            bne.s   .pix
+            addq.b  #1,d3
+            cmp.b   #BM_H,d3
+            bne.s   .row
+            lea     L0+L_SPAN(a4),a0            ; layer 1
+            move.l  #BITMAP,L_PTR(a0)
+            move.l  #BM_W,L_STRIDE(a0)
+            move.l  #(BM_X<<16)|(BM_X+2*BM_W),L_WINX(a0)
+            move.l  #(BM_Y<<16)|(BM_Y+2*BM_H),L_WINY(a0)
+            move.l  #$0080,L_HSTEP(a0)          ; 2x
+            move.l  #$0080,L_VSTEP(a0)
+            move.l  #L_CTRL_EN_M|(3<<L_CTRL_BPP_B)|(16<<L_CTRL_PALOFS_B),L_CTRL(a0)
+            move.l  #(3<<6)|(2<<4)|(0<<2)|1,PRIO(a4)    ; layer 1 in front, then 0, 2, 3
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+            rts
+
 ; vertical blank: count it and clear the flag
 vblank:     move.l  a4,-(sp)
             lea     CUSTOM,a4
@@ -372,6 +430,7 @@ s_ram:      dc.b    "RAM ",0
 s_berr:     dc.b    "bus error",0
 s_irq:      dc.b    "interrupt",0
 s_vbl:      dc.b    "vertical blank",0
+s_layer:    dc.b    "bitmap layer",0
 s_nmi:      dc.b    "NMI",13,10,0
 s_ok:       dc.b    " ok",13,10,0
 s_bad:      dc.b    " FAIL",13,10,0

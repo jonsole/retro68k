@@ -247,6 +247,16 @@ There are no line buffers. Video data is fetched by DMA during the line it is sh
 
 The buffers sit between the 100 MHz DMA side and the pixel clock. Both come from the same master clock, so the hand-over is fully predictable.
 
+### 5.1.1 Version 1 (fpga/rtl/vfetch.v, layer_pix.v)
+
+What the first implementation does, where it is simpler than the text above:
+
+- **Which layer gets a cycle:** the one with the emptiest buffer (fewest words in it or on the way), lowest layer number on a tie. For layers that use data at the same rate this is the same as earliest deadline first; a true deadline order comes with sprites.
+- **Wide fetch** gives cycle 3 to the display on the whole line, not just its visible part.
+- **Buffer:** 24 words in use, in a 32-word store (LUT RAM).
+- **Per line:** at the start of horizontal blanking the next line's start address and word count are worked out (over three pixel clocks), and the fetcher fills each buffer from then on. A layer moves on by at most one word per pixel, so HSTEP may not take more than 16 bits of source per screen pixel (e.g. 2.0 at 8 bpp); that is past the budget in any case.
+- **PTR written mid-frame:** the next line starts at the new PTR (source line 0); SCROLLY applies again from the next frame.
+
 ### 5.2 Budget: bytes per pixel
 
 Because data is fetched while it is shown, the budget is a **rate**: how many bytes can be fetched for each pixel the beam passes.

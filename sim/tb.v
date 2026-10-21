@@ -294,6 +294,26 @@ module tb;
         end
     endtask
 
+    // The boot ROM's bitmap (layer 1): 64 x 32, pixel (x, y) = (4x) xor (8y),
+    // shown 2x at (400, 300); colour i = (i, 255 - i, 0x80)
+    integer bm_errors = 0;
+    task check_bitmap;
+        integer x, y;
+        reg [7:0] v;
+        begin
+            for (y = 300; y < 364; y = y + 1)
+                for (x = 400; x < 528; x = x + 1) begin
+                    v = ((((x - 400) >> 1) << 2) ^ (((y - 300) >> 1) << 3)) & 8'hFF;
+                    if (fb[y*1280+x] !== {v, 8'd255 - v, 8'h80}) begin
+                        if (bm_errors < 8)
+                            $display("BITMAP ERROR at (%0d, %0d): %h, expected %h", x, y, fb[y*1280+x], {v, 8'd255 - v, 8'h80});
+                        bm_errors = bm_errors + 1;
+                    end
+                end
+            $display("---- bitmap layer: %0d wrong pixels", bm_errors);
+        end
+    endtask
+
     // ---------------------------------------------------------------- finish
     integer k, done = 0, ok = 0;
     task report;
@@ -340,12 +360,13 @@ module tb;
                 k = frames_seen;
                 wait (frames_seen == k + 2);   // a complete frame after PASS
                 write_frame;
+                check_bitmap;
             end
             report;
             if (serial_test)
                 $display("---- serial: %0d errors; RESETWHY after the command: %h", serial_errors, dut.resetwhy);
             if (serial_test && dut.resetwhy !== 8'h10) serial_errors = serial_errors + 1;
-            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0) $display("TEST PASSED");
+            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0 && bm_errors == 0) $display("TEST PASSED");
             else $display("TEST FAILED");
             $finish;
         end

@@ -81,7 +81,7 @@ Each 100 ns slot holds 5 memory cycles:
 | **0** | **CPU** | The Amiga's "even" cycle. If the CPU doesn't need it in this slot, it goes to the free pool |
 | 1 | Display fetch | Layers (spec 4, section 5) |
 | 2 | Display fetch | Layers |
-| 3 | Display fetch if wide fetch is on (visible part of the line), otherwise the free pool | |
+| 3 | Display fetch if wide fetch is on (visible part of the line), otherwise the free pool | Version 1: the whole line while wide fetch is on |
 | 4 | Fixed users in the first 38 slots of each line (from the start of horizontal blanking), otherwise the free pool | Section 7 |
 
 ### 4.4 Bandwidth

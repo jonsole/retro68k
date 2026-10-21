@@ -33,7 +33,7 @@ A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA ha
 
 ## Status
 
-The computer runs in simulation (`make -C sim`): fx68k boots the ROM, checks memory, interrupts and video, and prints to the USB serial link and the screen:
+The computer runs in simulation (`make -C sim`): fx68k boots the ROM, checks memory, interrupts and video, and prints to the USB serial link and the screen. The picture at the bottom right is a bitmap layer, 64 × 32 at 8 bits per pixel, fetched from Chip RAM as the beam scans and shown 2× in front of the text layer:
 
 ![Simulated screen after the boot ROM's checks](docs/images/phase2-boot.png)
 

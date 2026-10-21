@@ -1,7 +1,7 @@
-// Video, version 1 (spec 4): programmable timing, palette, background
-// colour, the text layer, beam position, VBLANK and LINE interrupts.
-// Bitmap layers (and their Chip RAM fetch) come next; until then a bitmap
-// layer shows nothing.
+// Video (spec 4): programmable timing, palette, background colour, four
+// layers (bitmap at 1/2/4/8 bpp fetched from Chip RAM as the beam scans, or
+// the text layer), priority, beam position, VBLANK, LINE and OVERRUN.
+// Also DMACON (spec 5, section 8), which sits in this register block.
 //
 // Two clock domains:
 //   clk     100 MHz: registers, palette / text / font writes, interrupts
@@ -31,6 +31,15 @@ module video #(
 
     output wire [3:0]  pclkdiv,        // N, for the pixel clock generator
     input  wire        pclk_locked,    // HDMI multiplier locked (PCLKLOCK)
+
+    // DMACON, and the display fetch port of the SRAM controller
+    output reg  [15:0] dmacon,
+    output wire        wide,
+    output wire        disp_req,
+    output wire [21:1] disp_addr,
+    input  wire        disp_ack,
+    input  wire        disp_rvalid,
+    input  wire [15:0] disp_rdata,
 
     input  wire        clk_pix,
     output reg  [23:0] rgb,
@@ -81,6 +90,8 @@ module video #(
                               (hvis != 0) && (hvis < htot) && (vvis != 0) && (vvis < vtot);
 
     reg  [1:0] vb_s, ln_s;
+    reg  [1:0] ov_s [0:3];
+    wire [3:0] ov_t;
     integer    i;
     reg [31:0] reg_q;
 
@@ -104,7 +115,13 @@ module video #(
                 l_hstep[i] <= 16'h0100; l_vstep[i] <= 16'h0100;
             end
             vb_s <= 2'b00; ln_s <= 2'b00;
+            dmacon <= 16'd0;
+            for (i = 0; i < 4; i = i + 1) ov_s[i] <= 2'b00;
         end else begin
+            for (i = 0; i < 4; i = i + 1) begin
+                ov_s[i] <= {ov_s[i][0], ov_t[i]};
+                if (ov_s[i][1] != ov_s[i][0]) vidstat[4 + i] <= 1'b1;
+            end
             // Events from the pixel domain
             vb_s <= {vb_s[0], p_vb_t};
             ln_s <= {ln_s[0], p_line_t};
@@ -147,6 +164,10 @@ module video #(
                                              lc_v <= v[26:16]; lc_h <= v[10:0]; end
                         `RM_BGCOLOR:   begin v = merge({8'd0, bgcolor}, rb_wdata, rb_be); bgcolor <= v[23:0]; end
                         `RM_PRIO:      begin v = merge({24'd0, prio}, rb_wdata, rb_be); prio <= v[7:0]; end
+                        `RM_DMACON:    if (rb_be[1:0] == 2'b11) begin              // set/clear (spec 3, rule 6)
+                            if (rb_wdata[15]) dmacon <= dmacon | (rb_wdata[14:0] & 15'h03F8);
+                            else              dmacon <= dmacon & ~(rb_wdata[14:0] & 15'h03F8);
+                        end
                         default: if (!vidcon[0]) case (off)          // timing: video off only
                             `RM_HVISIBLE:   begin v = merge({21'd0, hvis}, rb_wdata, rb_be); hvis <= v[10:0]; end
                             `RM_HSYNCSTART: begin v = merge({21'd0, hss},  rb_wdata, rb_be); hss  <= v[10:0]; end
@@ -191,6 +212,7 @@ module video #(
                 `RM_LINECMP:    reg_q <= {5'd0, lc_v, 5'd0, lc_h};
                 `RM_BGCOLOR:    reg_q <= {8'd0, bgcolor};
                 `RM_PRIO:       reg_q <= {24'd0, prio};
+                `RM_DMACON:     reg_q <= {16'd0, dmacon};
                 `RM_HVISIBLE:   reg_q <= {21'd0, hvis};
                 `RM_HSYNCSTART: reg_q <= {21'd0, hss};
                 `RM_HSYNCEND:   reg_q <= {21'd0, hse};
@@ -313,12 +335,14 @@ module video #(
 
     // Copied at the start of each horizontal blank (section 5.6)
     reg        t_on, t_transp;
+    reg [1:0]  t_layer;
     reg [9:0]  t_palofs;
     reg [11:0] t_ptr;
     reg [10:0] t_xs, t_xe, t_ys, t_ye;
     reg [15:0] t_sx, t_sy, t_hstep, t_vstep;
     always @(posedge clk_pix) if (!en_p || hc == hvis) begin
         t_on     <= tfound;
+        t_layer  <= tsel;
         t_transp <= l_ctrl[tsel][4];
         t_palofs <= l_ctrl[tsel][15:6];
         t_ptr    <= l_ptr[tsel][11:0];
@@ -341,6 +365,124 @@ module video #(
         end
     end
 
+    // ---- bitmap layers: settings for the next line, worked out in the
+    // horizontal blank (clocks hvis to hvis + 2), then handed to the fetcher
+    wire [10:0] next_line = (vc == vtot - 1'b1) ? 11'd0 : vc + 1'b1;
+    reg  [23:0] b_vacc   [0:3];        // source line, 16.8
+    reg  [22:0] b_ptr_was[0:3];
+    reg  [3:0]  b_act;                 // active on the next line
+    reg  [22:0] b_line   [0:3];        // byte address of the next line
+    reg  [91:0] f_addr;                // for the fetcher
+    reg  [47:0] f_words;
+    reg  [3:0]  f_act;
+    reg         line_t;
+    // This line's settings, for the layer units
+    reg  [3:0]  c_act;
+    reg  [10:0] c_xs [0:3], c_xe [0:3];
+    reg  [15:0] c_sx [0:3], c_hstep [0:3];
+    reg  [1:0]  c_lb [0:3];
+    reg  [3:0]  c_pos0 [0:3];
+    reg  [3:0]  c_transp;
+    reg  [9:0]  c_palofs [0:3];
+    reg  [3:0]  n_pos0 [0:3];
+
+    always @(posedge clk_pix) begin : bmline
+        integer n;
+        reg [23:0] v;
+        reg [31:0] off_l;
+        reg [26:0] span;
+        reg [19:0] bitoff, bits;
+        reg [22:0] st;
+        reg [10:0] w;
+        if (prst) begin
+            line_t <= 1'b0;
+            c_act  <= 4'd0;
+            f_act  <= 4'd0;
+        end else if (hc == hvis || !en_p) begin
+            // 1: which layers show on the next line, and their source line
+            for (n = 0; n < 4; n = n + 1) begin
+                b_act[n] <= en_p && l_ctrl[n][0] && !l_ctrl[n][1] && next_line < vvis &&
+                            next_line >= l_ys[n] && next_line < l_ye[n];
+                if (next_line == l_ys[n])           v = {l_sy[n], 8'd0};
+                else if (l_ptr[n] != b_ptr_was[n])  v = 24'd0;           // PTR written: restart there
+                else                                v = b_vacc[n] + l_vstep[n];
+                if (next_line >= l_ys[n] && next_line < l_ye[n]) begin
+                    b_vacc[n]    <= v;
+                    b_ptr_was[n] <= l_ptr[n];
+                end
+                off_l = $signed({1'b0, v[23:8]}) * $signed(l_stride[n]);
+                b_line[n] <= l_ptr[n] + off_l[22:0];
+            end
+        end else if (hc == hvis + 1'b1) begin
+            // 2: first word, bit of the first pixel, words to fetch
+            for (n = 0; n < 4; n = n + 1) begin
+                w      = l_xe[n] - l_xs[n];
+                span   = ((w - 1'b1) * l_hstep[n]) >> 8;                  // source pixels - 1
+                bitoff = {b_line[n][0], 3'd0} + ({4'd0, l_sx[n]} << l_ctrl[n][3:2]);
+                st     = {b_line[n][22:1], 1'b0} + {bitoff[19:4], 1'b0};
+                bits   = bitoff[3:0] + ((span[19:0] + 1'b1) << l_ctrl[n][3:2]);
+                f_addr[23*n +: 23]  <= st;
+                f_words[12*n +: 12] <= (bits + 5'd31) >> 4;               // one word spare
+                n_pos0[n]           <= bitoff[3:0];
+            end
+        end else if (hc == hvis + 2'd2) begin
+            // 3: hand over to the fetcher and the layer units
+            f_act  <= b_act;
+            line_t <= ~line_t;
+            c_act  <= b_act;
+            for (n = 0; n < 4; n = n + 1) begin
+                c_xs[n]     <= l_xs[n];
+                c_xe[n]     <= l_xe[n];
+                c_sx[n]     <= l_sx[n];
+                c_hstep[n]  <= l_hstep[n];
+                c_lb[n]     <= l_ctrl[n][3:2];
+                c_pos0[n]   <= n_pos0[n];
+                c_transp[n] <= l_ctrl[n][4];
+                c_palofs[n] <= l_ctrl[n][15:6];
+            end
+        end
+    end
+
+    // ---- layer buffers: written by the fetcher (100 MHz), read by the layer units
+    reg  [15:0] lbuf0 [0:31], lbuf1 [0:31], lbuf2 [0:31], lbuf3 [0:31];
+    wire        f_we;
+    wire [1:0]  f_layer;
+    wire [4:0]  f_index;
+    wire [15:0] f_data;
+    always @(posedge clk) if (f_we) case (f_layer)
+        2'd0: lbuf0[f_index] <= f_data;
+        2'd1: lbuf1[f_index] <= f_data;
+        2'd2: lbuf2[f_index] <= f_data;
+        2'd3: lbuf3[f_index] <= f_data;
+    endcase
+    wire [23:0] f_wp, f_rp;
+    wire [15:0] head [0:3];
+    assign head[0] = lbuf0[f_rp[4:0]];
+    assign head[1] = lbuf1[f_rp[10:6]];
+    assign head[2] = lbuf2[f_rp[16:12]];
+    assign head[3] = lbuf3[f_rp[22:18]];
+
+    assign wide = vidcon[1];
+    vfetch fetch (
+        .clk(clk), .rst(rst), .enable(vidcon[0] && dmacon[9] && dmacon[8]),
+        .line_t(line_t), .active(f_act), .start_addr(f_addr), .nwords(f_words), .rp(f_rp),
+        .wp(f_wp), .fifo_we(f_we), .fifo_layer(f_layer), .fifo_index(f_index), .fifo_data(f_data),
+        .req(disp_req), .addr(disp_addr), .ack(disp_ack), .rvalid(disp_rvalid), .rdata(disp_rdata)
+    );
+
+    wire [3:0] bl_op;
+    wire [9:0] bl_idx [0:3];
+    genvar g;
+    generate for (g = 0; g < 4; g = g + 1) begin : lay
+        layer_pix u (
+            .clk_pix(clk_pix), .en(en_p), .hc(hc), .hn(hn), .new_line(hc == hvis),
+            .active(c_act[g]), .xs(c_xs[g]), .xe(c_xe[g]), .sx(c_sx[g]), .hstep(c_hstep[g]),
+            .lb(c_lb[g]), .pos0(c_pos0[g]), .transp(c_transp[g]), .palofs(c_palofs[g]),
+            .head(head[g]), .wp(f_wp[6*g +: 6]), .rp(f_rp[6*g +: 6]),
+            .opaque(bl_op[g]), .idx(bl_idx[g]), .overrun_t(ov_t[g])
+        );
+    end endgenerate
+
     // ---- stage 0: where the beam is
     wire [15:0] sx = hacc[23:8];
     wire [15:0] sy = vacc[23:8];
@@ -356,6 +498,8 @@ module video #(
     reg [4:0]  vis_d, win_d, hs_d, vs_d;
     reg [7:0]  attr3;     reg [1:0] rsel3;
     reg [9:0]  pidx4;     reg opaque4, opaque5;
+    reg [3:0]  bl_op2, bl_op3;
+    reg [9:0]  bl_idx2 [0:3], bl_idx3 [0:3];
 
     reg         half2;
     wire [15:0] cell2 = half2 ? text_q2[15:0] : text_q2[31:16];
@@ -380,16 +524,41 @@ module video #(
         attr3   <= cell2[15:8];
         rsel3   <= row2[1:0];
         px3     <= px2;
-        // 4
+        // bitmap layers: their units give stage 1; delay to stage 3
+        bl_op2 <= bl_op;
+        bl_op3 <= bl_op2;
+        for (i = 0; i < 4; i = i + 1) begin
+            bl_idx2[i] <= bl_idx[i];
+            bl_idx3[i] <= bl_idx2[i];
+        end
+        // 4: text pixel, then the front-most opaque layer (section 4.8)
         begin : pix
             reg [7:0] fbyte;
             reg       bit_on;
             reg [3:0] colour;
+            reg       op [0:3];
+            reg [9:0] ix [0:3];
+            integer   p;
+            reg [1:0] ln;
             fbyte   = font_q3 >> (8 * (3 - rsel3));
             bit_on  = fbyte[7 - px3];
             colour  = bit_on ? attr3[3:0] : attr3[7:4];
-            pidx4   <= {t_palofs, 4'd0} + colour;
-            opaque4 <= win_d[2] && (bit_on || !(t_transp && attr3[7:4] == 4'd0));
+            for (p = 0; p < 4; p = p + 1) begin
+                op[p] = bl_op3[p];
+                ix[p] = bl_idx3[p];
+            end
+            if (t_on) begin
+                op[t_layer] = win_d[2] && (bit_on || !(t_transp && attr3[7:4] == 4'd0));
+                ix[t_layer] = {t_palofs, 4'd0} + colour;
+            end
+            opaque4 <= 1'b0;
+            for (p = 3; p >= 0; p = p - 1) begin       // BACK first, so FRONT wins
+                ln = prio[2*p +: 2];
+                if (op[ln]) begin
+                    opaque4 <= 1'b1;
+                    pidx4   <= ix[ln];
+                end
+            end
         end
         // 5
         pal_q5  <= pal[pidx4];

@@ -161,12 +161,16 @@ module retro68k #(
     );
 
     // ---------------------------------------------------------------- memory
+    wire        wide, disp_req, disp_ack, disp_rvalid;
+    wire [21:1] disp_addr;
     sram_ctl mem (
         .clk(clk100), .rst(sys_rst), .sc(sc),
         .cpu_req(m_req), .cpu_we(m_we), .cpu_addr(m_addr), .cpu_wdata(m_wdata), .cpu_be(m_be),
         .cpu_ack(m_ack), .cpu_rvalid(m_rvalid),
         .dma_req(dma_req), .dma_we(dma_we), .dma_addr(dma_addr), .dma_wdata(dma_wdata),
         .dma_be(dma_be), .dma_ack(dma_ack), .dma_rvalid(dma_rvalid),
+        .wide(wide), .disp_req(disp_req), .disp_addr(disp_addr), .disp_ack(disp_ack),
+        .disp_rvalid(disp_rvalid),
         .rdata(mem_rdata),
         .sram_a(sram_a), .sram_ce_n(sram_ce_n), .sram_ub_n(sram_ub_n), .sram_lb_n(sram_lb_n),
         .sram_oe_n_r(sram_oe_n_r), .sram_oe_n_f(sram_oe_n_f),
@@ -205,12 +209,15 @@ module retro68k #(
 
     // ---------------------------------------------------------------- video (spec 4)
     wire irq_vblank, irq_line, irq_viderr;
+    wire [15:0] dmacon;
     video #(.FONT_INIT(FONT_INIT)) vid (
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_vid),
         .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
         .pclkdiv(pclkdiv), .pclk_locked(pclk_locked),
+        .dmacon(dmacon), .wide(wide), .disp_req(disp_req), .disp_addr(disp_addr),
+        .disp_ack(disp_ack), .disp_rvalid(disp_rvalid), .disp_rdata(mem_rdata),
         .clk_pix(clk_pix), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
     );
 
