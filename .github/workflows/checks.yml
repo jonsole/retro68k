@@ -24,7 +24,10 @@ jobs:
         with:
           submodules: true
       - name: Install Icarus Verilog
-        run: sudo apt-get update && sudo apt-get install -y iverilog
+        # A broken third-party repository on the runner image must not stop the install
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y iverilog
       - name: Install sv2v
         run: |
           curl -sSL -o sv2v.zip https://github.com/zachjs/sv2v/releases/download/v0.0.13/sv2v-Linux.zip
