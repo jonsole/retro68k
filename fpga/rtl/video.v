@@ -1,7 +1,8 @@
 // Video (spec 4): programmable timing, palette, background colour, four
 // layers (bitmap at 1/2/4/8 bpp fetched from Chip RAM as the beam scans, or
 // the text layer), priority, beam position, VBLANK, LINE and OVERRUN.
-// Also DMACON (spec 5, section 8), which sits in this register block.
+// Also DMACON (spec 5, section 8), which sits in this register block, and
+// the sprites (sprites.v, spec 9).
 //
 // Two clock domains:
 //   clk     100 MHz: registers, palette / text / font writes, interrupts
@@ -42,6 +43,13 @@ module video #(
     input  wire        disp_ack,
     input  wire        disp_rvalid,
     input  wire [15:0] disp_rdata,
+
+    // ... and its sprite port (spec 9)
+    output wire        spr_req,
+    output wire        spr_urgent,
+    output wire [21:1] spr_addr,
+    input  wire        spr_ack,
+    input  wire        spr_rvalid,
 
     input  wire        clk_pix,
     output reg  [23:0] rgb,
@@ -91,7 +99,8 @@ module video #(
     wire        timing_ok   = (pdiv >= 4'd3) && (pdiv <= 4'd8) && (line_master % 20 == 0) &&
                               (hvis != 0) && (hvis < htot) && (vvis != 0) && (vvis < vtot);
 
-    reg  [1:0] vb_s, ln_s;
+    reg  [1:0] vb_s, ln_s, sm_s;
+    wire       spr_miss_t, spr_ovf;
     reg  [1:0] ov_s [0:3];
     wire [3:0] ov_t;
     integer    i;
@@ -125,6 +134,9 @@ module video #(
                 if (ov_s[i][1] != ov_s[i][0]) vidstat[4 + i] <= 1'b1;
             end
             // Events from the pixel domain
+            sm_s <= {sm_s[0], spr_miss_t};
+            if (sm_s[1] != sm_s[0]) vidstat[11] <= 1'b1;      // SPRMISS
+            if (spr_ovf)            vidstat[12] <= 1'b1;      // SPROVF
             vb_s <= {vb_s[0], p_vb_t};
             ln_s <= {ln_s[0], p_line_t};
             if (vb_s[1] != vb_s[0]) vidstat[0] <= 1'b1;
@@ -308,7 +320,8 @@ module video #(
         rd_hit  <= rb_rd && (sel_pal || sel_text || sel_font);
         rd_area <= sel_pal ? A_PAL : sel_text ? A_TEXT : sel_font ? A_FONT : A_REG;
     end
-    assign rb_rdata = reg_q | (!rd_hit ? 32'd0 :
+    wire [31:0] spr_rdata;
+    assign rb_rdata = reg_q | spr_rdata | (!rd_hit ? 32'd0 :
                                rd_area == A_PAL  ? {8'd0, pal_qa[23:0]} :
                                rd_area == A_TEXT ? text_qa :
                                rd_area == A_FONT ? font_qa : 32'd0);
@@ -329,6 +342,7 @@ module video #(
     wire [10:0] vn = hlast ? (vlast ? 11'd0 : vc + 1'b1) : vc;
     assign p_invblank = (p_vc >= vvis);
 
+    reg ls_t = 1'b0;                   // toggles when a line starts (hc becomes 0)
     always @(posedge clk_pix) begin
         if (!en_p) begin
             hc <= 11'd0;
@@ -336,6 +350,7 @@ module video #(
         end else begin
             hc <= hn;
             vc <= vn;
+            if (hn == 11'd0) ls_t <= ~ls_t;
         end
         p_hc <= hc;
         p_vc <= vc;
@@ -530,6 +545,44 @@ module video #(
     reg [3:0]  bl_op2, bl_op3;
     reg [9:0]  bl_idx2 [0:3], bl_idx3 [0:3];
 
+    // Stage 4 inputs: each layer's pixel (bitmap units, or the text layer)
+    reg  [3:0] lay_op;
+    reg  [9:0] lay_ix [0:3];
+    always @(*) begin : layers4
+        integer p;
+        reg [7:0] fbyte;
+        reg       bit_on;
+        reg [3:0] colour;
+        fbyte  = font_q3 >> (8 * (3 - rsel3));
+        bit_on = fbyte[7 - px3];
+        colour = bit_on ? attr3[3:0] : attr3[7:4];
+        for (p = 0; p < 4; p = p + 1) begin
+            lay_op[p] = bl_op3[p];
+            lay_ix[p] = bl_idx3[p];
+        end
+        if (t_on) begin
+            lay_op[t_layer] = win_d[2] && (bit_on || !(t_transp && attr3[7:4] == 4'd0));
+            lay_ix[t_layer] = {t_palofs, 4'd0} + colour;
+        end
+    end
+
+    // ---- sprites
+    wire       spr_op3;
+    wire [9:0] spr_idx3;
+    wire [2:0] spr_depth3;
+    sprites spr (
+        .clk(clk), .rst(rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(spr_rdata),
+        .dma_on(vidcon[0] && dmacon[9] && dmacon[5]),
+        .htot(htot), .hvis(hvis), .vvis(vvis), .vtot(vtot), .pdiv(pdiv), .ovf_ev(spr_ovf),
+        .spr_req(spr_req), .spr_urgent(spr_urgent), .spr_addr(spr_addr),
+        .spr_ack(spr_ack), .spr_rvalid(spr_rvalid), .rdata(disp_rdata),
+        .clk_pix(clk_pix), .en_p(en_p), .vc(vc), .hn(hn), .ls_t(ls_t),
+        .vb_start(en_p && hc == 11'd0 && vc == vvis), .vis3(vis_d[2]), .lay_op(lay_op),
+        .spr_op(spr_op3), .spr_idx(spr_idx3), .spr_depth(spr_depth3), .miss_t(spr_miss_t)
+    );
+
     reg         half2;
     wire [15:0] cell2 = half2 ? text_q2[15:0] : text_q2[31:16];
 
@@ -560,33 +613,21 @@ module video #(
             bl_idx2[i] <= bl_idx[i];
             bl_idx3[i] <= bl_idx2[i];
         end
-        // 4: text pixel, then the front-most opaque layer (section 4.8)
+        // 4: the front-most of the layers (section 4.8) and the sprite (spec 9, section 6)
         begin : pix
-            reg [7:0] fbyte;
-            reg       bit_on;
-            reg [3:0] colour;
-            reg       op [0:3];
-            reg [9:0] ix [0:3];
-            integer   p;
-            reg [1:0] ln;
-            fbyte   = font_q3 >> (8 * (3 - rsel3));
-            bit_on  = fbyte[7 - px3];
-            colour  = bit_on ? attr3[3:0] : attr3[7:4];
-            for (p = 0; p < 4; p = p + 1) begin
-                op[p] = bl_op3[p];
-                ix[p] = bl_idx3[p];
-            end
-            if (t_on) begin
-                op[t_layer] = win_d[2] && (bit_on || !(t_transp && attr3[7:4] == 4'd0));
-                ix[t_layer] = {t_palofs, 4'd0} + colour;
-            end
-            opaque4 <= 1'b0;
-            for (p = 3; p >= 0; p = p - 1) begin       // BACK first, so FRONT wins
-                ln = prio[2*p +: 2];
-                if (op[ln]) begin
-                    opaque4 <= 1'b1;
-                    pidx4   <= ix[ln];
-                end
+            integer p;
+            reg [2:0] front;           // position in PRIO order of the front opaque layer, 4 = none
+            reg [9:0] fix;
+            front = 3'd4;
+            fix   = 10'd0;
+            for (p = 3; p >= 0; p = p - 1)
+                if (lay_op[prio[2*p +: 2]]) begin front = p; fix = lay_ix[prio[2*p +: 2]]; end
+            if (spr_op3 && spr_depth3 <= front) begin
+                opaque4 <= 1'b1;
+                pidx4   <= spr_idx3;
+            end else begin
+                opaque4 <= (front != 3'd4);
+                pidx4   <= fix;
             end
         end
         // 5

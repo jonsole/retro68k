@@ -18,6 +18,8 @@ Written (phase 2, version 1):
 | `timers.v` | 64-bit time counter, 4 chainable timers (clock, lines, frames), watchdog | 12 |
 | `video.v` | Video: programmable timing, palette, background, 4 layers (bitmap or text), priority, beam position, VBLANK, LINE and OVERRUN, DMACON | 4, 5 |
 | `vfetch.v` | Display fetch: fills the bitmap layers' buffers from Chip RAM in display cycles | 4, 5 |
+| `sprites.v` | Sprites: table, selection, fetch, 16 units (UNITS parameter), depth sort, collisions | 9 |
+| `sprite_pix.v` | One sprite unit, pixel side | 9 |
 | `layer_pix.v` | One bitmap layer, pixel side: 1/2/4/8 bpp, scroll, scaling, transparency | 4 |
 | `font8x16.hex` | Power-on font (Spleen 8×16, code page 437), made by `tools/bdf2font.py` | 4 |
 | `fifo8.v` | Byte FIFO in block RAM | |
@@ -29,6 +31,6 @@ Written (phase 2, version 1):
 | `platform/sim/oddr.v` | Behavioural DDR output register | |
 | `platform/sim/pixclk.v` | Pixel clock: the master gated to every Nth edge, as a BUFGCE | 4 |
 
-Still to come: sprites, copper, audio, DMA engine, SD card, keyboard, I2C.
+Still to come: copper, audio, DMA engine, SD card, keyboard, I2C.
 
 fx68k itself is a git submodule in `fpga/third_party/fx68k` (GPL-3.0).

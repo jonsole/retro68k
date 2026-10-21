@@ -8,7 +8,8 @@
 ;   5b. timer 0 interrupts, against the time counter
 ;   6. the vertical blank interrupt from the video
 ;   7. a bitmap layer (layer 1, 8 bpp, 2x) fetched from Chip RAM: no overruns
-;   8. "PASS" or "FAIL", then echo whatever arrives over USB
+;   8. four sprites (spec 9): collisions, no missed fetches
+;   9. "PASS" or "FAIL", then echo whatever arrives over USB
 ;
 ; Everything printed also appears on the screen (text layer 0, 80 x 30).
 ;
@@ -40,6 +41,7 @@ BM_W        equ 64                  ; 64 x 32 pixels at 8 bits per pixel
 BM_H        equ 32
 BM_X        equ 400                 ; shown 2x at (400, 300)
 BM_Y        equ 300
+SPRDATA     equ $030000             ; sprite images
 
             org ROM                 ; $F80000; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP          ; initial supervisor stack pointer
@@ -52,6 +54,7 @@ start:      move.w  #$2700,sr                   ; supervisor mode, interrupts of
             clr.l   v_fail                      ; (overlay on: writes still reach Chip RAM)
             bsr     screen_init
             bsr     bitmap_init
+            bsr     sprite_init
 
             lea     s_banner(pc),a0
             bsr     puts
@@ -263,7 +266,28 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             and.l   #VIDSTAT_OVERRUN_M,d0
             bsr     okfail
 
-; ---- 8. result
+; ---- 8. sprites: collisions from the last complete frame (spec 9, section 7)
+            lea     s_spr(pc),a0
+            bsr     puts
+            move.l  SPRHIT0(a4),d0
+            bsr     puthex8
+            moveq   #' ',d0
+            bsr     putc
+            move.l  CLXGRP(a4),d0
+            bsr     puthex8
+            move.l  SPRHIT0(a4),d0
+            cmp.l   #%1101,d0                   ; 0 hit 2, 2 hit 0, 3 hit the text layer
+            bne.s   .spr_bad
+            move.l  SPRHIT1(a4),d0
+            bne.s   .spr_bad
+            move.l  CLXGRP(a4),d0
+            cmp.l   #(1<<(4*0+1))|(1<<(4*1+0)),d0   ; groups 0 and 1 touched
+            bne.s   .spr_bad
+            move.l  VIDSTAT(a4),d0
+            and.l   #VIDSTAT_SPRMISS_M|VIDSTAT_SPROVF_M,d0
+.spr_bad:   bsr     okfail
+
+; ---- 9. result
             tst.l   v_fail
             bne.s   .fail
             lea     s_pass(pc),a0
@@ -451,6 +475,97 @@ bitmap_init:
             move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
             rts
 
+; Four sprites (spec 9), with their images at SPRDATA:
+;   0: 16x16 4 bpp at (480, 48), pixel (x, y) = x xor y; group 0, reacts to group 1
+;   1: 32x16 2 bpp, 2x, flipped, at (-24, 100): bands of 8 pixels, x / 8
+;   2: 16x16 8 bpp at (488, 56), under sprite 0: 16x + y; group 1, reacts to group 0
+;   3: 16x16 4 bpp at (300, 300), behind all layers: hidden, but reacts to layer 0
+; Palette 512-527: colour i = (16i, $40, 255 - 16i); 529-531 red, green, yellow
+sprite_init:
+            lea     CUSTOM,a4
+            lea     PALETTE+512*4(a4),a0
+            moveq   #0,d0
+.pal:       move.l  d0,d1
+            lsl.l   #4,d1
+            swap    d1                          ; red = 16i
+            move.w  #255,d2
+            move.l  d0,d3
+            lsl.w   #4,d3
+            sub.w   d3,d2                       ; blue = 255 - 16i
+            or.w    #$4000,d2                   ; green = $40
+            move.w  d2,d1
+            move.l  d1,(a0)+
+            addq.w  #1,d0
+            cmp.w   #16,d0
+            bne.s   .pal
+            move.l  #$FF0000,(a0)+              ; 528 (unused: 0 is transparent)
+            move.l  #$FF0000,(a0)+              ; 529 red
+            move.l  #$00FF00,(a0)+              ; 530 green
+            move.l  #$FFFF00,(a0)+              ; 531 yellow
+            ; sprite 0: 8 bytes per line, nibble pixels, x xor y
+            lea     SPRDATA,a0
+            moveq   #0,d3                       ; y
+.s0y:       moveq   #0,d4                       ; x (two pixels a byte)
+.s0x:       move.b  d4,d0
+            eor.b   d3,d0
+            and.b   #15,d0
+            lsl.b   #4,d0
+            move.b  d4,d1
+            addq.b  #1,d1
+            eor.b   d3,d1
+            and.b   #15,d1
+            or.b    d1,d0
+            move.b  d0,(a0)+
+            addq.b  #2,d4
+            cmp.b   #16,d4
+            bne.s   .s0x
+            addq.b  #1,d3
+            cmp.b   #16,d3
+            bne.s   .s0y
+            ; sprite 1 at SPRDATA+$100: 32 pixels at 2 bpp = 8 bytes: bands 0,1,2,3 of 8 pixels
+            lea     SPRDATA+$100,a0
+            moveq   #16-1,d3
+.s1y:       move.l  #$00005555,(a0)+
+            move.l  #$AAAAFFFF,(a0)+
+            dbra    d3,.s1y
+            ; sprite 2 at SPRDATA+$200: 16 bytes a line, 16x + y
+            lea     SPRDATA+$200,a0
+            moveq   #0,d3
+.s2y:       moveq   #0,d4
+.s2x:       move.b  d4,d0
+            lsl.b   #4,d0
+            add.b   d3,d0
+            move.b  d0,(a0)+
+            addq.b  #1,d4
+            cmp.b   #16,d4
+            bne.s   .s2x
+            addq.b  #1,d3
+            cmp.b   #16,d3
+            bne.s   .s2y
+            ; sprite 3 at SPRDATA+$400: all colour 5
+            lea     SPRDATA+$400,a0
+            move.w  #128/4-1,d3
+.s3:        move.l  #$55555555,(a0)+
+            dbra    d3,.s3
+            ; the table
+            lea     SPRTAB(a4),a1
+            lea     spr_table(pc),a0
+            moveq   #4-1,d3
+.ent:       moveq   #6-1,d2
+.wd:        move.l  (a0)+,(a1)+
+            dbra    d2,.wd
+            lea     SPR_SIZEOF-6*4(a1),a1
+            dbra    d3,.ent
+            move.l  #SPRCON_EN_M,SPRCON(a4)
+            move.w  #DMACON_SETCLR_M|DMACON_SPREN_M,DMACON+2(a4)
+            rts
+
+; POS, PTR, SIZE, CTRL, SCALE, COLL
+spr_table:  dc.l    (48<<16)|480,     SPRDATA,      (8<<16)|15,  $00200009, $01000100, $00000020
+            dc.l    (100<<16)|$FE8,   SPRDATA+$100, (8<<16)|15,  $00210023, $00800080, $00000003
+            dc.l    (56<<16)|488,     SPRDATA+$200, (16<<16)|15, $00100011, $01000100, $00000011
+            dc.l    (300<<16)|300,    SPRDATA+$400, (8<<16)|15,  $00200409, $01000100, $00000102
+
 ; vertical blank: count it and clear the flag
 vblank:     move.l  a4,-(sp)
             lea     CUSTOM,a4
@@ -474,6 +589,7 @@ s_irq:      dc.b    "interrupt",0
 s_vbl:      dc.b    "vertical blank",0
 s_tmr:      dc.b    "timer",0
 s_layer:    dc.b    "bitmap layer",0
+s_spr:      dc.b    "sprites ",0
 s_nmi:      dc.b    "NMI",13,10,0
 s_ok:       dc.b    " ok",13,10,0
 s_bad:      dc.b    " FAIL",13,10,0

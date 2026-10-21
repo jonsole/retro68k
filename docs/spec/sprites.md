@@ -104,6 +104,16 @@ This replaces the fetch window in spec 4, section 5.4.
   - Typical (sprites spread out, or wide fetch off): nothing.
   - Worst case (13 full-size sprites at the same X, wide fetch on, CPU running flat out from Chip RAM): 64 cycles, 128 CPU clocks, 20% of a 640×480 line, on that line only.
 
+### 5.0 Version 1 (fpga/rtl/sprites.v, sprite_pix.v)
+
+What the first implementation does, where it is simpler than the text above:
+
+- **Selection** reads EN, X, Y, HEIGHT and also **VSTEP** at the selection point (it needs VSTEP to know whether a scaled sprite covers the line), from a small copy of those fields kept beside the table. The other settings are read at the fetch point, as described.
+- **Fetch order:** due units are fetched one sprite at a time, those for the line on screen first, then in unit (table) order. Since a unit only becomes due at its fetch point, this is close to earliest-deadline-first.
+- **Urgent:** a sprite may take the CPU's cycle 0 in the last 16 slots before its first pixel.
+- **The beam in slots** is counted from the start of each line as the 100 MHz side sees it, so the selection and fetch points are fixed but may sit up to a slot later than the exact figures above.
+- A 64-pixel 8 bpp sprite (not allowed, section 3) is simply not drawn.
+
 ### 5.1 When writes take effect
 
 | Settings | Read at | To change a sprite on line L, write before |

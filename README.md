@@ -64,7 +64,7 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 1. [ ] FPGA bring-up: HDMI/VGA test pattern, USB serial echo
 2. [x] Whole computer in simulation: boot ROM checks on the serial link and the screen
 3. [ ] Computer on the board: "hello" on a monitor, RAM test, boot monitor (build script ready: `fpga/ks3/build.sh`)
-4. [ ] Video: bitmap layers, palette, scrolling, sprites, copper
+4. [ ] Video: bitmap layers, palette, scrolling, sprites (done in simulation), copper
 5. [ ] Audio: sample channels and stream
 6. [ ] DMA engine
 7. [ ] Home computer: SD card, keyboards, real-time clock, BASIC

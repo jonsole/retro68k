@@ -6,8 +6,11 @@
 //   cycles 1-2  display fetch; when the display doesn't need them, the DMA port
 //   cycle 3     display fetch with wide fetch on, otherwise the DMA port
 //   cycle 4     the DMA port
-// The DMA port stands in for the free-pool users still to come (sprites,
-// audio, copper, DMA engine) and is used by the tests.
+// Sprites (spec 9, section 5) come first in the free pool and in display
+// cycles the display doesn't need; an urgent sprite fetch may also take
+// the CPU's cycle 0 (the CPU then waits one slot, 2 of its clocks).
+// The DMA port stands in for the free-pool users still to come (audio,
+// copper, DMA engine) and is used by the tests.
 //
 // The pin outputs below are registered again in the I/O pads (output
 // flip-flops, or ODDR for the half-clock signals), so the pins show them one
@@ -45,6 +48,13 @@ module sram_ctl (
     output reg         dma_ack,
     output reg         dma_rvalid,
 
+    // Sprite fetch port (reads only): hold req until ack
+    input  wire        spr_req,
+    input  wire        spr_urgent,  // may take the CPU's cycle 0
+    input  wire [21:1] spr_addr,
+    output reg         spr_ack,
+    output reg         spr_rvalid,
+
     // Display fetch port (reads only): hold req until ack
     input  wire        wide,        // VIDCON.WIDE: cycle 3 is a display cycle too
     input  wire        disp_req,
@@ -65,7 +75,7 @@ module sram_ctl (
     output reg         sram_dq_t_r, sram_dq_t_f,   // 1 = not driving
     input  wire [15:0] sram_dq_i
 );
-    localparam OWN_NONE = 2'd0, OWN_CPU = 2'd1, OWN_DMA = 2'd2, OWN_DISP = 2'd3;
+    localparam OWN_NONE = 3'd0, OWN_CPU = 3'd1, OWN_DMA = 3'd2, OWN_DISP = 3'd3, OWN_SPR = 3'd4;
 
     // A new memory cycle starts at the next edge when the current clock is
     // the second of a cycle (odd sc). Its number is (sc + 1) / 2, mod 5.
@@ -74,13 +84,15 @@ module sram_ctl (
 
     // Who gets the cycle that starts at the next edge
     wire next_is_disp = (sc == 4'd1) || (sc == 4'd3) || (sc == 4'd5 && wide);   // cycles 1, 2 (3)
-    wire cpu_wins  = next_is_cycle0 && cpu_req;
+    wire spr_takes = next_is_cycle0 && spr_req && spr_urgent;
+    wire cpu_wins  = next_is_cycle0 && cpu_req && !spr_takes;
     wire disp_wins = next_is_disp && disp_req;
-    wire dma_wins  = !cpu_wins && !disp_wins && dma_req;
+    wire spr_wins  = !cpu_wins && !disp_wins && spr_req;
+    wire dma_wins  = !cpu_wins && !disp_wins && !spr_wins && dma_req;
 
-    reg  [1:0] owner;      // owner of the cycle in progress
+    reg  [2:0] owner;      // owner of the cycle in progress
     reg        cur_we;     // the cycle in progress is a write
-    reg  [1:0] prev_owner; // the previous cycle, whose read data is on the pins now
+    reg  [2:0] prev_owner; // the previous cycle, whose read data is on the pins now
     reg        prev_rd;
 
     always @(posedge clk) begin
@@ -90,6 +102,8 @@ module sram_ctl (
         dma_rvalid <= 1'b0;
         disp_ack   <= 1'b0;
         disp_rvalid <= 1'b0;
+        spr_ack    <= 1'b0;
+        spr_rvalid <= 1'b0;
 
         if (rst) begin
             owner       <= OWN_NONE;
@@ -110,15 +124,17 @@ module sram_ctl (
             prev_rd    <= (owner != OWN_NONE) && !cur_we;
 
             // Clock 0 of the next cycle
-            if (cpu_wins || disp_wins || dma_wins) begin
-                owner     <= cpu_wins ? OWN_CPU : disp_wins ? OWN_DISP : OWN_DMA;
-                cur_we    <= cpu_wins ? cpu_we : disp_wins ? 1'b0 : dma_we;
+            if (cpu_wins || disp_wins || spr_wins || dma_wins) begin
+                owner     <= cpu_wins ? OWN_CPU : disp_wins ? OWN_DISP : spr_wins ? OWN_SPR : OWN_DMA;
+                cur_we    <= cpu_wins ? cpu_we : (disp_wins || spr_wins) ? 1'b0 : dma_we;
                 cpu_ack   <= cpu_wins;
                 disp_ack  <= disp_wins;
+                spr_ack   <= spr_wins;
                 dma_ack   <= dma_wins;
-                sram_a    <= cpu_wins ? cpu_addr[21:1] : disp_wins ? disp_addr[21:1] : dma_addr[21:1];
+                sram_a    <= cpu_wins ? cpu_addr[21:1] : disp_wins ? disp_addr[21:1] :
+                             spr_wins ? spr_addr[21:1] : dma_addr[21:1];
                 sram_ce_n <= 1'b0;
-                if (cpu_wins ? cpu_we : disp_wins ? 1'b0 : dma_we) begin
+                if (cpu_wins ? cpu_we : (disp_wins || spr_wins) ? 1'b0 : dma_we) begin
                     sram_ub_n   <= ~(cpu_wins ? cpu_be[1] : dma_be[1]);
                     sram_lb_n   <= ~(cpu_wins ? cpu_be[0] : dma_be[0]);
                     sram_dq_o   <= cpu_wins ? cpu_wdata : dma_wdata;
@@ -149,6 +165,7 @@ module sram_ctl (
                 cpu_rvalid  <= (prev_owner == OWN_CPU);
                 dma_rvalid  <= (prev_owner == OWN_DMA);
                 disp_rvalid <= (prev_owner == OWN_DISP);
+                spr_rvalid  <= (prev_owner == OWN_SPR);
             end
             // Clock 1 of the cycle in progress
             if (owner != OWN_NONE && cur_we) begin

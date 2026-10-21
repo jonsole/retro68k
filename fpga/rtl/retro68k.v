@@ -164,6 +164,8 @@ module retro68k #(
     // ---------------------------------------------------------------- memory
     wire        wide, disp_req, disp_ack, disp_rvalid;
     wire [21:1] disp_addr;
+    wire        spr_req, spr_urgent, spr_ack, spr_rvalid;
+    wire [21:1] spr_addr;
     sram_ctl mem (
         .clk(clk100), .rst(sys_rst), .sc(sc),
         .cpu_req(m_req), .cpu_we(m_we), .cpu_addr(m_addr), .cpu_wdata(m_wdata), .cpu_be(m_be),
@@ -172,6 +174,8 @@ module retro68k #(
         .dma_be(dma_be), .dma_ack(dma_ack), .dma_rvalid(dma_rvalid),
         .wide(wide), .disp_req(disp_req), .disp_addr(disp_addr), .disp_ack(disp_ack),
         .disp_rvalid(disp_rvalid),
+        .spr_req(spr_req), .spr_urgent(spr_urgent), .spr_addr(spr_addr), .spr_ack(spr_ack),
+        .spr_rvalid(spr_rvalid),
         .rdata(mem_rdata),
         .sram_a(sram_a), .sram_ce_n(sram_ce_n), .sram_ub_n(sram_ub_n), .sram_lb_n(sram_lb_n),
         .sram_oe_n_r(sram_oe_n_r), .sram_oe_n_f(sram_oe_n_f),
@@ -220,6 +224,8 @@ module retro68k #(
         .pclkdiv(pclkdiv), .pclk_locked(pclk_locked),
         .dmacon(dmacon), .wide(wide), .disp_req(disp_req), .disp_addr(disp_addr),
         .disp_ack(disp_ack), .disp_rvalid(disp_rvalid), .disp_rdata(mem_rdata),
+        .spr_req(spr_req), .spr_urgent(spr_urgent), .spr_addr(spr_addr),
+        .spr_ack(spr_ack), .spr_rvalid(spr_rvalid),
         .clk_pix(clk_pix), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
     );
 

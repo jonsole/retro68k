@@ -314,6 +314,50 @@ module tb;
         end
     endtask
 
+    // The boot ROM's sprites (see sprite_init in boot.s): every opaque sprite
+    // pixel must show its colour; sprite 0 covers sprite 2; sprite 3 is hidden.
+    integer spr_errors = 0, spr_px = 0;
+    function [23:0] pal512(input [3:0] i);
+        pal512 = {i, 4'd0, 8'h40, 8'd255 - {i, 4'd0}};
+    endfunction
+    task spr_expect(input integer x, input integer y, input [23:0] c);
+        begin
+            spr_px = spr_px + 1;
+            if (fb[y*1280+x] !== c) begin
+                if (spr_errors < 8)
+                    $display("SPRITE ERROR at (%0d, %0d): %h, expected %h", x, y, fb[y*1280+x], c);
+                spr_errors = spr_errors + 1;
+            end
+        end
+    endtask
+    task check_sprites;
+        integer x, y, v, s0;
+        reg [23:0] c;
+        begin
+            // sprites 2 then 0 (0 in front)
+            for (y = 48; y < 72; y = y + 1)
+                for (x = 480; x < 504; x = x + 1) begin
+                    s0 = (x < 496 && y < 64) ? (((x - 480) ^ (y - 48)) & 15) : 0;
+                    v  = (x >= 488 && y >= 56) ? ((((x - 488) * 16) + (y - 56)) & 255) : 0;
+                    if (s0 != 0)     spr_expect(x, y, pal512(s0));
+                    else if (v != 0) spr_expect(x, y, {v[7:0], 8'd255 - v[7:0], 8'h80});
+                    else             spr_expect(x, y, 24'h0000AA);
+                end
+            // sprite 1: 2x, flipped, clipped: screen x 0..39, y 100..131
+            for (y = 100; y < 132; y = y + 1)
+                for (x = 0; x < 40; x = x + 1) begin
+                    v = ((31 - ((x + 24) >> 1)) >> 3) & 3;
+                    c = (v == 1) ? 24'hFF0000 : (v == 2) ? 24'h00FF00 : 24'hFFFF00;
+                    if (v != 0) spr_expect(x, y, c);
+                end
+            // sprite 3: behind the text layer, so text background
+            for (y = 300; y < 316; y = y + 1)
+                for (x = 300; x < 316; x = x + 1)
+                    spr_expect(x, y, 24'h0000AA);
+            $display("---- sprites: %0d pixels checked, %0d wrong", spr_px, spr_errors);
+        end
+    endtask
+
     // ---------------------------------------------------------------- finish
     integer k, done = 0, ok = 0;
     task report;
@@ -361,12 +405,13 @@ module tb;
                 wait (frames_seen == k + 2);   // a complete frame after PASS
                 write_frame;
                 check_bitmap;
+                check_sprites;
             end
             report;
             if (serial_test)
                 $display("---- serial: %0d errors; RESETWHY after the command: %h", serial_errors, dut.resetwhy);
             if (serial_test && dut.resetwhy !== 8'h10) serial_errors = serial_errors + 1;
-            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0 && bm_errors == 0) $display("TEST PASSED");
+            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0 && bm_errors == 0 && spr_errors == 0) $display("TEST PASSED");
             else $display("TEST FAILED");
             $finish;
         end
