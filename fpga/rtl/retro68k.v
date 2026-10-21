@@ -86,10 +86,14 @@ module retro68k #(
     end
 
     // fx68k's reset inputs cross like its other inputs (they change at 10 or 30 ns)
+    // and so does IPL, from the interrupt controller
     reg cpu_rst = 1'b1, cpu_cold = 1'b1;
+    reg [2:0] cpu_ipl_n = 3'b111;
+    wire [2:0] int_level;
     always @(posedge clk100) if (ph == 3'd0 || ph == 3'd2) begin
-        cpu_rst  <= sys_rst;
-        cpu_cold <= cold;
+        cpu_rst   <= sys_rst;
+        cpu_cold  <= cold;
+        cpu_ipl_n <= ~int_level;
     end
 
     // ---------------------------------------------------------------- CPU
@@ -105,7 +109,7 @@ module retro68k #(
         .as_n(c_as_n), .uds_n(c_uds_n), .lds_n(c_lds_n), .rw(c_rw),
         .fc(c_fc), .addr(c_addr), .dout(c_dout),
         .reset_out_n(c_reset_n), .halted_n(c_halted_n),
-        .dtack_n(dtack_n), .berr_n(berr_n), .ipl_n(3'b111), .din(din)
+        .dtack_n(dtack_n), .berr_n(berr_n), .ipl_n(cpu_ipl_n), .din(din)
     );
     assign dbg_halted = halted;
 
@@ -126,6 +130,8 @@ module retro68k #(
     wire [31:0] rd_sys, rd_ser;
     wire        iack;
     wire [2:0]  iack_level;
+    wire [7:0]  iack_vector;
+    wire [31:0] rd_int;
     wire        berr_ev;
     wire [23:0] berr_addr;
     wire [3:0]  berr_why;
@@ -141,8 +147,8 @@ module retro68k #(
         .rom_en(rom_en), .rom_we(rom_we), .rom_addr(rom_addr), .rom_wdata(rom_wdata),
         .rom_rdata(rom_rdata),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
-        .rb_rdata(rd_sys | rd_ser),
-        .iack(iack), .iack_level(iack_level), .iack_vector(8'd24),   // spurious until spec 13
+        .rb_rdata(rd_sys | rd_ser | rd_int),
+        .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector),
         .berr_ev(berr_ev), .berr_addr(berr_addr), .berr_why(berr_why)
     );
 
@@ -187,5 +193,18 @@ module retro68k #(
         .irq(ser_irq), .cmd_break(cmd_break), .cmd_reset(cmd_reset), .cmd_upload(cmd_upload),
         .ft_rxf_n(ft_rxf_n), .ft_txe_n(ft_txe_n), .ft_d_i(ft_d_i), .ft_d_o(ft_d_o),
         .ft_d_oe(ft_d_oe), .ft_rd_n(ft_rd_n), .ft_wr_n(ft_wr_n), .ft_siwu_n(ft_siwu_n)
+    );
+
+    // ---------------------------------------------------------------- interrupts (spec 13)
+    reg [1:0] nmi_s;
+    always @(posedge clk100) nmi_s <= {nmi_s[0], buttons[0]};
+
+    intc ic (
+        .clk(clk100), .rst(sys_rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_int),
+        .req({8'd0, ser_irq, 15'd0}),        // 15 SERIAL; more sources as units arrive
+        .nmi_button(nmi_s[1]), .nmi_usb(cmd_break),
+        .level(int_level), .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector)
     );
 endmodule

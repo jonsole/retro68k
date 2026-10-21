@@ -187,13 +187,27 @@ module tb;
                 serial_errors = serial_errors + 1;
             end
         if (serial_errors == 0) $display("%t PC: echo ok (%0d bytes)", $realtime, n_echo);
+        $display("%t PC: sending the BREAK control command", $realtime);
+        j = ft.nout;
+        send_ctl(8'h01);
+        #80000;
+        if (ft.nout < j + 5 || {ft.from_fpga[j], ft.from_fpga[j+1], ft.from_fpga[j+2]} != "NMI") begin
+            $display("SERIAL ERROR: no NMI after BREAK");
+            serial_errors = serial_errors + 1;
+        end else $display("%t PC: NMI ok", $realtime);
         $display("%t PC: sending the RESET control command", $realtime);
-        for (j = 0; j < 14; j = j + 1)
-            ft.send(j == 0 ? 8'h00 : j == 1 ? 8'hFF : j == 2 ? "R" : j == 3 ? "6" : j == 4 ? "8" : j == 5 ? "K" :
-                    j == 6 ? "-" : j == 7 ? "C" : j == 8 ? "T" : j == 9 ? "L" : j == 10 ? 8'hFF : j == 11 ? 8'h00 :
-                    j == 12 ? 8'hA5 : 8'h5A);
-        ft.send(8'h02); ft.send(8'hFD);
+        send_ctl(8'h02);
     end
+    task send_ctl(input [7:0] c);
+        integer m;
+        begin
+            for (m = 0; m < 14; m = m + 1)
+                ft.send(m == 0 ? 8'h00 : m == 1 ? 8'hFF : m == 2 ? "R" : m == 3 ? "6" : m == 4 ? "8" : m == 5 ? "K" :
+                        m == 6 ? "-" : m == 7 ? "C" : m == 8 ? "T" : m == 9 ? "L" : m == 10 ? 8'hFF : m == 11 ? 8'h00 :
+                        m == 12 ? 8'hA5 : 8'h5A);
+            ft.send(c); ft.send(~c);
+        end
+    endtask
 
     // ---------------------------------------------------------------- finish
     integer k, done = 0, ok = 0;

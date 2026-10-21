@@ -4,7 +4,8 @@
 ;   2. vector table built in Chip RAM, then the reset overlay turned off
 ;   3. Chip RAM test: address pattern, its inverse, and byte writes
 ;   4. a deliberate bus error, checked against BUSERRADDR and BUSERRWHY
-;   5. "PASS" or "FAIL", then echo whatever arrives over USB
+;   5. the software interrupt, through its own vector
+;   6. "PASS" or "FAIL", then echo whatever arrives over USB
 ;
 ; Assemble: vasmm68k_mot -Fbin -I ../include [-DSIM] -o boot.bin boot.s
 ; With SIM defined, the RAM test covers only 8 KB, to keep simulation short.
@@ -22,6 +23,7 @@ RAMTEST     equ $010000             ; RAM test starts here
 v_fail      equ VARS+0              ; long: number of failed checks
 v_savesp    equ VARS+4              ; long: stack pointer for the bus error test
 v_berr      equ VARS+8              ; long: bus errors seen
+v_irq       equ VARS+12             ; long: software interrupts seen
 
             org ROM                 ; $F80000; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP          ; initial supervisor stack pointer
@@ -52,6 +54,7 @@ start:      move.w  #$2700,sr                   ; supervisor mode, interrupts of
 .vec:       move.l  #unhandled,(a0)+
             dbra    d0,.vec
             move.l  #buserr,VECTORS+2*4
+            move.l  #nmi,VECTORS+31*4
 
             lea     s_overlay(pc),a0
             bsr     puts
@@ -158,7 +161,27 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             cmp.l   #BUSERRWHY_UNMAPPED_M,d0
 .berr_bad:  bsr     okfail
 
-; ---- 5. result
+; ---- 5. interrupts: the software interrupt (source 18, level 1, vector 82)
+            lea     s_irq(pc),a0
+            bsr     puts
+            clr.l   v_irq
+            move.l  #softirq,VECTORS+(VECBASE_DEFAULT+INT_SOFT)*4
+            move.l  #1<<INT_SOFT,INTENA(a5)
+            move.l  #INTCON_MASTER_M,INTCON(a5)
+            move.w  #$2000,sr                   ; CPU takes interrupts of level 1 and up
+            move.l  #SOFTINT_SET_M,SOFTINT(a5)
+            nop                                 ; the interrupt is taken around here
+            nop
+            move.w  #$2700,sr
+            clr.l   INTCON(a5)
+            move.l  v_irq,d0
+            cmp.l   #1,d0
+            bne.s   .irq_bad
+            move.l  LASTSRC(a5),d0
+            cmp.l   #INT_SOFT,d0
+.irq_bad:   bsr     okfail
+
+; ---- 6. result
             tst.l   v_fail
             bne.s   .fail
             lea     s_pass(pc),a0
@@ -242,6 +265,20 @@ buserr:     addq.l  #1,v_berr
             move.l  v_savesp,sp
             jmp     berr_back
 
+; NMI (button or USB BREAK): say so and carry on
+nmi:        movem.l d0-d1/a0/a5,-(sp)
+            lea     SYSTEM,a5
+            move.l  #NMISTAT_BUTTON_M|NMISTAT_USB_M,NMISTAT(a5)
+            lea     s_nmi(pc),a0
+            bsr     puts
+            movem.l (sp)+,d0-d1/a0/a5
+            rte
+
+; software interrupt handler: clear it and count it
+softirq:    move.l  #SOFTINT_CLR_M,SOFTINT(a5)
+            addq.l  #1,v_irq
+            rte
+
 unhandled:  bra.s   unhandled
 
 s_banner:   dc.b    13,10,"retro68k boot ROM",13,10,0
@@ -249,6 +286,8 @@ s_sysid:    dc.b    "SYSID ",0
 s_overlay:  dc.b    "overlay off",0
 s_ram:      dc.b    "RAM ",0
 s_berr:     dc.b    "bus error",0
+s_irq:      dc.b    "interrupt",0
+s_nmi:      dc.b    "NMI",13,10,0
 s_ok:       dc.b    " ok",13,10,0
 s_bad:      dc.b    " FAIL",13,10,0
 s_at:       dc.b    "  at ",0
