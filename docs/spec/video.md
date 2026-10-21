@@ -51,7 +51,7 @@ One MMCM (the Artix-7's clock generator), set once at power-on and never changed
 | 4 | 50.0 MHz | 5 |
 | 3 | 66.7 MHz | 6.67 |
 
-The pixel clock is the 200 MHz master passed through a clock buffer with an enable (BUFGCE) that lets every Nth edge through, so its edges always line up with the master's, and signals cross between it and the 100 MHz system clock as ordinary timed paths.
+**KS3 build, version 1:** all clocks, the pixel clock and the HDMI 5× clock included, come from the one MMCM (VCO 1000 MHz, every output a whole-number division), with N fixed when the FPGA is built; PCLKLOCK reads 1 only when PCLKDIV matches it. Changing N at run time (with the MMCM's reconfiguration port, or a second MMCM) comes later. In simulation, the pixel clock is modelled as the 200 MHz master passed through a clock buffer with an enable (BUFGCE) that lets every Nth edge through, so its edges always line up with the master's, and signals cross between it and the 100 MHz system clock as ordinary timed paths.
 
 N = 2 (100 MHz) would need 1 Gbit/s per HDMI lane; the Artix-7 -2 might manage it, but it is not assumed. N above 8 would go below DVI's 25 MHz minimum.
 

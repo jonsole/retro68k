@@ -126,7 +126,7 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 | U3 | The boot ROM's upload protocol (with the boot ROM spec) |
 | U4 | Should the link offer several logical channels (e.g. console and debugger at once)? For now software can share the one stream |
 | U5 | Synchronous 245 FIFO mode (up to about 40 MB/s): needs the FT232H's 60 MHz CLKOUT and OE# on two more accelerator-port pins |
-| U6 | Which `accel_io` pins carry the 13 signals, and which FT232H module to recommend (pin order, how it plugs onto the Pi header) |
+| U6 | Which `accel_io` pins carry the 13 signals, and which FT232H module to recommend (pin order, how it plugs onto the Pi header). Provisional in the KS3 build: `accel_io[7:0]` D7–D0, `[8]` RXF#, `[9]` TXE#, `[10]` RD#, `[11]` WR#, `[12]` SIWU# |
 
 ## 8. Tests
 

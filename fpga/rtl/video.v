@@ -241,45 +241,67 @@ module video #(
     assign irq_viderr = |irqflags[7:4] | irqflags[10] | irqflags[11] | irqflags[12];
 
     // ================================================================ block RAMs
-    // Port A: CPU side (100 MHz), 32-bit with byte enables. Port B: pixel side.
-    reg [31:0] pal  [0:1023];          // 0x00RRGGBB
-    reg [31:0] text [0:2047];          // two 16-bit cells per word, even cell in bits 31-16
-    reg [31:0] font [0:1023];          // 4 font rows per word, first row in bits 31-24
+    // Each memory is kept twice, written together from the CPU side
+    // (100 MHz, 32-bit with byte enables): one copy is read back by the CPU,
+    // the other by the pixel side. Simple one-write, one-read block RAMs map
+    // the same way in every tool.
+    reg [31:0] pal  [0:1023], pal_c  [0:1023];   // 0x00RRGGBB
+    reg [31:0] text [0:2047], text_c [0:2047];   // two 16-bit cells per word, even cell in bits 31-16
+    reg [31:0] font [0:1023], font_c [0:1023];   // 4 font rows per word, first row in bits 31-24
     initial $readmemh(FONT_INIT, font);
+    initial $readmemh(FONT_INIT, font_c);
     integer k;
-    initial for (k = 0; k < 2048; k = k + 1) text[k] = 32'd0;
-    initial for (k = 0; k < 1024; k = k + 1) pal[k]  = 32'd0;
+    initial for (k = 0; k < 2048; k = k + 1) begin text[k] = 32'd0; text_c[k] = 32'd0; end
+    initial for (k = 0; k < 1024; k = k + 1) begin pal[k] = 32'd0;  pal_c[k] = 32'd0;  end
 
     reg [31:0] pal_qa, text_qa, font_qa;
     reg [1:0]  rd_area;                // which memory the last read came from
     localparam A_REG = 2'd0, A_PAL = 2'd1, A_TEXT = 2'd2, A_FONT = 2'd3;
 
+    always @(posedge clk) if (rb_wr && sel_pal) begin
+        if (rb_be[3]) pal[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
+        if (rb_be[2]) pal[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
+        if (rb_be[1]) pal[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
+        if (rb_be[0]) pal[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
+    end
     always @(posedge clk) begin
         if (rb_wr && sel_pal) begin
-            if (rb_be[3]) pal[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
-            if (rb_be[2]) pal[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
-            if (rb_be[1]) pal[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
-            if (rb_be[0]) pal[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
+            if (rb_be[3]) pal_c[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
+            if (rb_be[2]) pal_c[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
+            if (rb_be[1]) pal_c[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
+            if (rb_be[0]) pal_c[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
         end
-        pal_qa <= pal[rb_addr[11:2]];
+        pal_qa <= pal_c[rb_addr[11:2]];
+    end
+    always @(posedge clk) if (rb_wr && sel_text) begin
+        if (rb_be[3]) text[rb_addr[12:2]][31:24] <= rb_wdata[31:24];
+        if (rb_be[2]) text[rb_addr[12:2]][23:16] <= rb_wdata[23:16];
+        if (rb_be[1]) text[rb_addr[12:2]][15:8]  <= rb_wdata[15:8];
+        if (rb_be[0]) text[rb_addr[12:2]][7:0]   <= rb_wdata[7:0];
     end
     always @(posedge clk) begin
         if (rb_wr && sel_text) begin
-            if (rb_be[3]) text[rb_addr[12:2]][31:24] <= rb_wdata[31:24];
-            if (rb_be[2]) text[rb_addr[12:2]][23:16] <= rb_wdata[23:16];
-            if (rb_be[1]) text[rb_addr[12:2]][15:8]  <= rb_wdata[15:8];
-            if (rb_be[0]) text[rb_addr[12:2]][7:0]   <= rb_wdata[7:0];
+            if (rb_be[3]) text_c[rb_addr[12:2]][31:24] <= rb_wdata[31:24];
+            if (rb_be[2]) text_c[rb_addr[12:2]][23:16] <= rb_wdata[23:16];
+            if (rb_be[1]) text_c[rb_addr[12:2]][15:8]  <= rb_wdata[15:8];
+            if (rb_be[0]) text_c[rb_addr[12:2]][7:0]   <= rb_wdata[7:0];
         end
-        text_qa <= text[rb_addr[12:2]];
+        text_qa <= text_c[rb_addr[12:2]];
+    end
+    always @(posedge clk) if (rb_wr && sel_font) begin
+        if (rb_be[3]) font[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
+        if (rb_be[2]) font[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
+        if (rb_be[1]) font[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
+        if (rb_be[0]) font[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
     end
     always @(posedge clk) begin
         if (rb_wr && sel_font) begin
-            if (rb_be[3]) font[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
-            if (rb_be[2]) font[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
-            if (rb_be[1]) font[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
-            if (rb_be[0]) font[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
+            if (rb_be[3]) font_c[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
+            if (rb_be[2]) font_c[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
+            if (rb_be[1]) font_c[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
+            if (rb_be[0]) font_c[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
         end
-        font_qa <= font[rb_addr[11:2]];
+        font_qa <= font_c[rb_addr[11:2]];
     end
     reg rd_hit;
     always @(posedge clk) begin

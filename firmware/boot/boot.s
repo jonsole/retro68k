@@ -48,7 +48,7 @@ BM_Y        equ 300
 
 start:      move.w  #$2700,sr                   ; supervisor mode, interrupts off
             lea     SYSTEM,a5
-            move.l  #SERCON_EN_M|SERCON_CTLEN_M,SERCON(a5)  ; USB serial on, PC control commands on
+            move.l  #SERCON_EN_M|SERCON_CTLEN_M|SERCON_TXDROP_M,SERCON(a5)  ; USB serial on, PC commands on, never block (no module fitted)
             clr.l   v_fail                      ; (overlay on: writes still reach Chip RAM)
             bsr     screen_init
             bsr     bitmap_init
