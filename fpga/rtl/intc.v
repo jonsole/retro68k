@@ -124,9 +124,9 @@ module intc (
                         else              intena[23:15] <= intena[23:15] & ~rb_wdata[24:16];
                     end
                 end
-                `RM_INTLEVEL0: levels[31:0]  <= merge(levels[31:0],  rb_wdata, rb_be) & 32'h77777777;
-                `RM_INTLEVEL1: levels[63:32] <= merge(levels[63:32], rb_wdata, rb_be) & 32'h77777777;
-                `RM_INTLEVEL2: levels[95:64] <= merge(levels[95:64], rb_wdata, rb_be) & 32'h77777777;
+                `RM_INTPRI0: levels[31:0]  <= merge(levels[31:0],  rb_wdata, rb_be) & 32'h77777777;
+                `RM_INTPRI1: levels[63:32] <= merge(levels[63:32], rb_wdata, rb_be) & 32'h77777777;
+                `RM_INTPRI2: levels[95:64] <= merge(levels[95:64], rb_wdata, rb_be) & 32'h77777777;
                 `RM_VECBASE: if (rb_be[0]) vecbase <= rb_wdata[7:0];
                 `RM_SOFTINT: if (rb_be[0]) begin
                     if (rb_wdata[0]) soft <= 1'b1;
@@ -144,9 +144,9 @@ module intc (
             `RM_INTENA:    rb_rdata <= {7'd0, intena[23:15], 1'b0, intena[14:0]};
             `RM_INTPEND:   rb_rdata <= {7'd0, pending[23:15], 1'b0, pending[14:0]};
             `RM_INTRAW:    rb_rdata <= {7'd0, raw[23:15], 1'b0, raw[14:0]};
-            `RM_INTLEVEL0: rb_rdata <= levels[31:0];
-            `RM_INTLEVEL1: rb_rdata <= levels[63:32];
-            `RM_INTLEVEL2: rb_rdata <= levels[95:64];
+            `RM_INTPRI0: rb_rdata <= levels[31:0];
+            `RM_INTPRI1: rb_rdata <= levels[63:32];
+            `RM_INTPRI2: rb_rdata <= levels[95:64];
             `RM_VECBASE:   rb_rdata <= {24'd0, vecbase};
             `RM_INTID:   rb_rdata <= {27'd0, intid};
             `RM_NMICON:    rb_rdata <= {30'd0, nmicon};

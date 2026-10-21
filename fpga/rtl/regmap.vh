@@ -212,9 +212,9 @@
 `define RM_INTRAW                           16'h000C
 `define RM_INTRAW_SRCL                      14:0
 `define RM_INTRAW_SRCH                      24:16
-`define RM_INTLEVEL0                        16'h0010
-`define RM_INTLEVEL1                        16'h0014
-`define RM_INTLEVEL2                        16'h0018
+`define RM_INTPRI0                          16'h0010
+`define RM_INTPRI1                          16'h0014
+`define RM_INTPRI2                          16'h0018
 `define RM_VECBASE                          16'h001C
 `define RM_VECBASE_VEC                      7:0
 `define RM_SOFTINT                          16'h0020

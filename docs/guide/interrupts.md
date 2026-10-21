@@ -79,7 +79,7 @@ Many units can ask for an interrupt: the video, the copper, the DMA engine, audi
      INTENA bit n ------------------------------+                    |
      INTCON.MASTER -----------------------------+                    |
                                                                      v
-                                   INTLEVEL0-2       +--------------------------+
+                                   INTPRI0-2       +--------------------------+
                                    (level of n) ---->| highest level that has   |
                                                      | a pending source         |
                                                      +------------+-------------+
@@ -99,7 +99,7 @@ Step by step:
 
 1. Something happens in a unit, for example the video reaches the start of vertical blanking. The unit sets a **status flag**, here VIDSTAT.VBLANK. If the unit's own **enable** for that flag is on (here VIDINTEN.VBLANK), the unit raises its **request line** to the controller. You can see the request lines in **INTRAW**.
 2. If the source's bit in **INTENA** is on, and **INTCON.MASTER** is on, the request is **pending**. You can see pending sources in **INTPEND**.
-3. The controller looks up each pending source's level in **INTLEVEL0-2**, finds the highest level that has a pending source, and drives the 68000's IPL lines with that level.
+3. The controller looks up each pending source's level in **INTPRI0-2**, finds the highest level that has a pending source, and drives the 68000's IPL lines with that level.
 4. When the CPU's mask allows that level, the 68000 finishes its current instruction and runs an **interrupt acknowledge** cycle for the level. The controller answers with the vector of the pending source at that level with the **lowest source number**. The vector is **VECBASE + source number**; VECBASE is 64 after reset.
 5. The 68000 saves SR and the PC on the supervisor stack, raises its mask to the level it accepted, and jumps to the address held in the vector table at **vector x 4**.
 6. Your handler clears the cause in the unit, usually by writing 1 to the unit's sticky flag. The request line drops. The handler ends with `RTE`. If another source at the same level is still pending, the CPU is interrupted again straight away.
@@ -345,10 +345,10 @@ The defaults put the timers highest, so that an operating system's tick is never
 
 ### Changing a level
 
-The levels are held in three registers, eight sources in each, four bits per source. Source n is in INTLEVEL(n / 8), in bits 4 x (n mod 8) + 2 to 4 x (n mod 8). The fourth bit of each group is unused.
+The levels are held in three registers, eight sources in each, four bits per source. Source n is in INTPRI(n / 8), in bits 4 x (n mod 8) + 2 to 4 x (n mod 8). The fourth bit of each group is unused.
 
 ```
-   INTLEVEL0  ($010)   sources 0-7
+   INTPRI0  ($010)   sources 0-7
     31  28 27  24 23  20 19  16 15  12 11   8 7    4 3    0
    +------+------+------+------+------+------+------+------+
    |  7   |  6   |  5   |  4   |  3   |  2   |  1   |  0   |    source
@@ -356,8 +356,8 @@ The levels are held in three registers, eight sources in each, four bits per sou
    |0|lvl |0|lvl |0|lvl |0|lvl |0|lvl |0|lvl |0|lvl |0|lvl |    after reset: $44445555
    +------+------+------+------+------+------+------+------+
 
-   INTLEVEL1  ($014)   sources 8-15     after reset: $36666444
-   INTLEVEL2  ($018)   sources 16-23    after reset: $00000122
+   INTPRI1  ($014)   sources 8-15     after reset: $36666444
+   INTPRI2  ($018)   sources 16-23    after reset: $00000122
 
                  Figure 4: The level registers
 ```
@@ -372,10 +372,10 @@ For example, a raster effect driven by the LINE interrupt must start on time, ev
 ; Move the LINE interrupt (source 1) to level 6. a5 = SYSTEM.
 line_to_6:  move.w  sr,-(sp)
             or.w    #$0700,sr
-            move.l  INTLEVEL0(a5),d0
+            move.l  INTPRI0(a5),d0
             and.l   #~($F<<(4*INT_LINE)),d0     ; clear source 1's group
             or.l    #6<<(4*INT_LINE),d0         ; level 6
-            move.l  d0,INTLEVEL0(a5)
+            move.l  d0,INTPRI0(a5)
             move.w  (sp)+,sr
             rts
 ```
@@ -395,7 +395,7 @@ set_level:  movem.l d0-d3/a0,-(sp)
             move.w  d0,d2
             lsr.w   #3,d2                   ; register: source / 8 ...
             lsl.w   #2,d2                   ; ... times 4 bytes
-            lea     INTLEVEL0(a5,d2.w),a0
+            lea     INTPRI0(a5,d2.w),a0
             and.w   #7,d0
             lsl.w   #2,d0                   ; bit: (source mod 8) x 4
             and.l   #7,d1
@@ -422,9 +422,9 @@ VECBASE sets the first vector. Source n uses vector VECBASE + n. After reset VEC
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| INTLEVEL0 | `$010` | RW | Levels of sources 0-7, 4 bits each (0 = off, 1-6) |
-| INTLEVEL1 | `$014` | RW | Levels of sources 8-15 |
-| INTLEVEL2 | `$018` | RW | Levels of sources 16-23 |
+| INTPRI0 | `$010` | RW | Levels of sources 0-7, 4 bits each (0 = off, 1-6) |
+| INTPRI1 | `$014` | RW | Levels of sources 8-15 |
+| INTPRI2 | `$018` | RW | Levels of sources 16-23 |
 | VECBASE | `$01C` | RW | Bits 7-0: first vector, 64-232. 64 after reset |
 
 ---
@@ -1073,9 +1073,9 @@ All registers are in the system block. Addresses are `SYSTEM` (`$F00000`) plus t
 | `$F00004` | INTENA | Set/clear | SETCLRH (31), SRCH (24-16) = sources 15-23; SETCLRL (15), SRCL (14-0) = sources 0-14 |
 | `$F00008` | INTPEND | R | SRCH (24-16), SRCL (14-0): requesting and enabled |
 | `$F0000C` | INTRAW | R | SRCH (24-16), SRCL (14-0): requesting, before INTENA |
-| `$F00010` | INTLEVEL0 | RW | Levels of sources 0-7, 4 bits each |
-| `$F00014` | INTLEVEL1 | RW | Levels of sources 8-15 |
-| `$F00018` | INTLEVEL2 | RW | Levels of sources 16-23 |
+| `$F00010` | INTPRI0 | RW | Levels of sources 0-7, 4 bits each |
+| `$F00014` | INTPRI1 | RW | Levels of sources 8-15 |
+| `$F00018` | INTPRI2 | RW | Levels of sources 16-23 |
 | `$F0001C` | VECBASE | RW | VEC (7-0): first vector, 64-232 |
 | `$F00020` | SOFTINT | W | SET (0), CLR (1): the software interrupt |
 | `$F00024` | INTID | R | SRC (4-0): source at the last acknowledge |
@@ -1106,7 +1106,7 @@ All registers are in the system block. Addresses are `SYSTEM` (`$F00000`) plus t
 |----------|-------------|
 | INTCON | 0: master off |
 | INTENA | 0: every source off |
-| INTLEVEL0, 1, 2 | `$44445555`, `$36666444`, `$00000122` (the default levels) |
+| INTPRI0, 1, 2 | `$44445555`, `$36666444`, `$00000122` (the default levels) |
 | VECBASE | 64 |
 | SOFTINT | Not raised |
 | NMICON | `$3`: button and USB break both on |

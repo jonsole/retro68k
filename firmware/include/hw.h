@@ -433,15 +433,15 @@
 #define INTRAW_SRCL_MASK                   0x7FFFu
 #define INTRAW_SRCH_SHIFT                  16
 #define INTRAW_SRCH_MASK                   0x1FF0000u
-/* INTLEVEL0: RW, spec 13/7 */
-#define INTLEVEL0_OFS                      0x10u
-#define INTLEVEL0                          HW_REG32(SYSTEM_BASE + INTLEVEL0_OFS)
-/* INTLEVEL1: RW, spec 13/7 */
-#define INTLEVEL1_OFS                      0x14u
-#define INTLEVEL1                          HW_REG32(SYSTEM_BASE + INTLEVEL1_OFS)
-/* INTLEVEL2: RW, spec 13/7 */
-#define INTLEVEL2_OFS                      0x18u
-#define INTLEVEL2                          HW_REG32(SYSTEM_BASE + INTLEVEL2_OFS)
+/* INTPRI0: RW, spec 13/7 */
+#define INTPRI0_OFS                        0x10u
+#define INTPRI0                            HW_REG32(SYSTEM_BASE + INTPRI0_OFS)
+/* INTPRI1: RW, spec 13/7 */
+#define INTPRI1_OFS                        0x14u
+#define INTPRI1                            HW_REG32(SYSTEM_BASE + INTPRI1_OFS)
+/* INTPRI2: RW, spec 13/7 */
+#define INTPRI2_OFS                        0x18u
+#define INTPRI2                            HW_REG32(SYSTEM_BASE + INTPRI2_OFS)
 /* VECBASE: RW, spec 13/7 */
 #define VECBASE_OFS                        0x1Cu
 #define VECBASE                            HW_REG32(SYSTEM_BASE + VECBASE_OFS)

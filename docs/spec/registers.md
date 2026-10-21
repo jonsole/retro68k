@@ -192,9 +192,9 @@ Channel n (0–15) at `0x440 + n × 0x20`:
 | `0x004` | INTENA | Set/clear | 13, 7 |
 | `0x008` | INTPEND | R | 13, 7 |
 | `0x00C` | INTRAW | R | 13, 7 |
-| `0x010` | INTLEVEL0 | RW | 13, 7 |
-| `0x014` | INTLEVEL1 | RW | 13, 7 |
-| `0x018` | INTLEVEL2 | RW | 13, 7 |
+| `0x010` | INTPRI0 | RW | 13, 7 |
+| `0x014` | INTPRI1 | RW | 13, 7 |
+| `0x018` | INTPRI2 | RW | 13, 7 |
 | `0x01C` | VECBASE | RW | 13, 7 |
 | `0x020` | SOFTINT | W | 13, 6 |
 | `0x024` | INTID | R | 13, 7 |

@@ -627,9 +627,9 @@ INTRAW_SRCL_M                equ $7FFF
 INTRAW_SRCH_B                equ $10
 INTRAW_SRCH_W                equ $9
 INTRAW_SRCH_M                equ $1FF0000
-INTLEVEL0                    equ $10         ; RW, spec 13/7
-INTLEVEL1                    equ $14         ; RW, spec 13/7
-INTLEVEL2                    equ $18         ; RW, spec 13/7
+INTPRI0                      equ $10         ; RW, spec 13/7
+INTPRI1                      equ $14         ; RW, spec 13/7
+INTPRI2                      equ $18         ; RW, spec 13/7
 VECBASE                      equ $1C         ; RW, spec 13/7
 VECBASE_VEC_B                equ $0
 VECBASE_VEC_W                equ $8

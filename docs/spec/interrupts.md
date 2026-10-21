@@ -93,9 +93,9 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 | `0x004` | INTENA | SETCLRH (31), sources 15–23 (24–16), SETCLRL (15), sources 0–14 (14–0) | Enables. Two set/clear halves, as the Amiga's INTENA: in each 16-bit half, writing with the top bit = 1 sets the bits written as 1, with it = 0 clears them; bits written as 0 are left alone. Each half can be written on its own with `MOVE.W`, or both with `MOVE.L`. Reads give the enables (bits 31 and 15 read 0). All off after reset |
 | `0x008` | INTPEND | As INTENA | Read: sources pending (requesting and enabled) |
 | `0x00C` | INTRAW | As INTENA | Read: sources requesting, before INTENA |
-| `0x010` | INTLEVEL0 | 8 × 4 bits | Levels of sources 0–7: source n in bits 4n+2 … 4n (0 = off, 1–6) |
-| `0x014` | INTLEVEL1 | 8 × 4 bits | Sources 8–15 |
-| `0x018` | INTLEVEL2 | 8 × 4 bits | Sources 16–23 |
+| `0x010` | INTPRI0 | 8 × 4 bits | Levels of sources 0–7: source n in bits 4n+2 … 4n (0 = off, 1–6) |
+| `0x014` | INTPRI1 | 8 × 4 bits | Sources 8–15 |
+| `0x018` | INTPRI2 | 8 × 4 bits | Sources 16–23 |
 | `0x01C` | VECBASE | 7–0 | First vector (64–232, default 64). Source n uses VECBASE + n |
 | `0x020` | SOFTINT | SET (0), CLR (1) | Write 1 to raise or clear the software interrupt |
 | `0x024` | INTID | 4–0 | Read: the source given at the last interrupt acknowledge, for debugging |
