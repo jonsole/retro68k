@@ -6,8 +6,11 @@
 // other buffers: a layer's data registers hold its next 16-pixel group
 // while its shifters (layer_pix.v) show the current one.
 //
-// A layer is "full" once BPL0DAT has been written (by the DMA, which writes
-// the planes high to low and plane 0 last, or by the CPU or copper). The
+// A layer is "full" once its group is complete: when the DMA has fetched
+// the last of the planes it fetches (high to low), or, for a layer with no
+// DMA, when the CPU or copper writes BPL0DAT. Planes whose DMA is off
+// (BPLDMA) keep their data register's value, which the shifters take again
+// every group. The
 // pixel side then takes the group into its shifters when it needs it, and
 // the DMA fetches the next group. Full and taken cross between the clock
 // domains as toggles (fill_t here, take_t there).
@@ -26,7 +29,7 @@
 module bpldma (
     input  wire         clk,
     input  wire         rst,
-    input  wire         enable,        // video on, DMACON.DMAEN and VIDEN
+    input  wire         enable,        // video on, DMACON.DMAEN and BPLEN
 
     input  wire         rb_rd,
     input  wire         rb_wr,
@@ -65,6 +68,7 @@ module bpldma (
     wire [1:0]  rn  = blk[1:0] - 2'd2;
     wire        sel = (rb_addr[23:16] == 8'hE0) && (blk >= 9'd2) && (blk <= 9'd4);
     wire        sel_mod = sel && off[6:0] == 7'h10;
+    wire        sel_dma = sel && off[6:0] == 7'h14;
     wire        sel_pt  = sel && off[6:5] == 2'b01;
     wire        sel_dat = sel && off[6:5] == 2'b10;
     wire [4:0]  ri      = {rn, off[4:2]};                  // layer x 8 + plane
@@ -72,6 +76,7 @@ module bpldma (
     reg  [22:0] pt  [0:23];
     reg  [15:0] dr  [0:23];
     reg  [15:0] mod [0:2];
+    reg  [7:0]  pm  [0:2];             // BPLDMA: DMA enable per plane (chunky: bit 0 for the layer)
 
     genvar g;
     generate for (g = 0; g < 24; g = g + 1) begin : dout
@@ -87,19 +92,43 @@ module bpldma (
     wire [2:0]  full = fill_t ^ take_s2;
 
     reg  [11:0] left   [0:2];          // groups still to start
-    reg  [11:0] issued [0:2];          // words taken from BPL0PT on this line (every pointer moved as often)
-    reg  [3:0]  togo   [0:2];          // words of the current group still to ask for
-    reg  [2:0]  busy;                  // a group is on its way (until its plane 0 arrives)
+    reg  [11:0] issued [0:2];          // groups started on this line
+    reg  [7:0]  rem    [0:2];          // data registers of the current group still to ask for
+    reg  [2:0]  busy;                  // a group is on its way (until its last word arrives)
     // The line being fetched, for finishing it off at the next line_go
     reg  [2:0]  pv_act, pv_adv, pv_chunky;
     reg  [2:0]  pv_planes [0:2];
+    reg  [7:0]  pv_mask [0:2];
     reg  [11:0] pv_len [0:2];
 
-    // Reads on the way: layer, plane, generation
+    // Reads on the way: layer, data register, last word of its group, generation
     reg  [1:0]  q_layer [0:3];
     reg  [2:0]  q_plane [0:3];
+    reg         q_last  [0:3];
     reg         q_gen   [0:3];
     reg  [1:0]  q_h, q_t;
+
+    // The data registers the DMA fills for each layer: its planes with DMA on
+    // (chunky: all its words, if bit 0 is on). The others keep what the CPU
+    // or copper last wrote, and the shifters take that every group.
+    reg  [7:0]  emask [0:2];
+    reg  [2:0]  has_dma;
+    always @(*) begin : masks
+        integer m;
+        reg [7:0] used;
+        for (m = 0; m < 3; m = m + 1) begin
+            used     = 8'hFF >> (3'd7 - planes[3*m +: 3]);
+            emask[m] = chunky[m] ? (pm[m][0] ? used : 8'd0) : (pm[m] & used);
+            has_dma[m] = enable && (emask[m] != 8'd0);
+        end
+    end
+    function [2:0] top(input [7:0] v);                 // highest set bit
+        integer b;
+        begin
+            top = 3'd0;
+            for (b = 0; b < 8; b = b + 1) if (v[b]) top = b;
+        end
+    endfunction
 
     // Who asks next: the layers with a group being asked for, or able to
     // start one, take turns after the last one served
@@ -108,24 +137,29 @@ module bpldma (
     integer n;
     always @(*) begin
         for (n = 0; n < 3; n = n + 1)
-            want[n] = (togo[n] != 0) || (left[n] != 0 && !busy[n] && !full[n]);
+            want[n] = (rem[n] != 0) || (left[n] != 0 && !busy[n] && !full[n] && emask[n] != 8'd0);
         case (last)
             2'd0:    pick = want[1] ? 2'd1 : want[2] ? 2'd2 : 2'd0;
             2'd1:    pick = want[2] ? 2'd2 : want[0] ? 2'd0 : 2'd1;
             default: pick = want[0] ? 2'd0 : want[1] ? 2'd1 : 2'd2;
         endcase
     end
-    // The plane to ask for: high to low, plane 0 last
-    wire [3:0]  pl_n    = (togo[pick] != 0) ? togo[pick] - 1'b1 : {1'b0, planes[3*pick +: 3]};
-    wire [4:0]  di      = {pick, pl_n[2:0]};                       // data register
-    wire [4:0]  pi      = {pick, chunky[pick] ? 3'd0 : pl_n[2:0]}; // pointer
+    // The data register to fill next: high to low
+    wire        gstart  = (rem[pick] == 8'd0);                     // a new group
+    wire [7:0]  gmask   = gstart ? emask[pick] : rem[pick];
+    wire [2:0]  pl_n    = top(gmask);
+    wire [7:0]  rem_n   = gmask & ~(8'd1 << pl_n);
+    wire [4:0]  di      = {pick, pl_n};                            // data register
+    wire [4:0]  pi      = {pick, chunky[pick] ? 3'd0 : pl_n};      // pointer
 
     // Finishing a line: what each plane pointer of layer n gets added:
     // back to the line's start, then on by its length and BPLMOD
     wire [22:0] step [0:2];
     generate for (g = 0; g < 3; g = g + 1) begin : steps
+        // pointer moves per group: 1, or b words for a chunky layer of b bits per pixel
+        wire [1:0] k = !pv_chunky[g] ? 2'd0 : pv_planes[g][2] ? 2'd3 : pv_planes[g][1] ? 2'd2 : pv_planes[g][0] ? 2'd1 : 2'd0;
         assign step[g] = (pv_adv[g] ? {10'd0, pv_len[g], 1'b0} + {{7{mod[g][15]}}, mod[g]} : 23'd0)
-                         - {10'd0, issued[g], 1'b0};
+                         - ({10'd0, issued[g], 1'b0} << k);
     end endgenerate
 
     integer i;
@@ -145,9 +179,10 @@ module bpldma (
             pv_adv <= 3'd0;
             pv_chunky <= 3'd0;
             for (n = 0; n < 3; n = n + 1) begin
-                left[n] <= 12'd0;  issued[n] <= 12'd0;  togo[n] <= 4'd0;
+                left[n] <= 12'd0;  issued[n] <= 12'd0;  rem[n] <= 8'd0;
                 mod[n]  <= 16'd0;
-                pv_planes[n] <= 3'd0;  pv_len[n] <= 12'd0;
+                pm[n]   <= 8'hFF;              // every plane's DMA on
+                pv_planes[n] <= 3'd0;  pv_len[n] <= 12'd0;  pv_mask[n] <= 8'd0;
             end
             for (i = 0; i < 24; i = i + 1) begin
                 pt[i] <= 23'd0;
@@ -158,7 +193,7 @@ module bpldma (
             if (rvalid) begin
                 if (q_gen[q_h] == gen[q_layer[q_h]]) begin
                     dr[{q_layer[q_h], q_plane[q_h]}] <= rdata;
-                    if (q_plane[q_h] == 3'd0) begin
+                    if (q_last[q_h]) begin
                         fill_t[q_layer[q_h]] <= ~fill_t[q_layer[q_h]];
                         busy[q_layer[q_h]]   <= 1'b0;
                     end
@@ -175,12 +210,14 @@ module bpldma (
             if (line_go) begin
                 // Finish off the line just shown, then start the next one
                 for (i = 0; i < 24; i = i + 1)
-                    if (pv_act[i / 8] && (i % 8) <= (pv_chunky[i / 8] ? 3'd0 : pv_planes[i / 8]))
+                    if (pv_act[i / 8] && (pv_chunky[i / 8] ? (i % 8 == 0 && pv_mask[i / 8] != 8'd0) : pv_mask[i / 8][i % 8]))
                         pt[i] <= pt[i] + step[i / 8];
                 for (n = 0; n < 3; n = n + 1) begin
-                    left[n]   <= (enable && act[n]) ? ngroups[12*n +: 12] : 12'd0;
+                    left[n]   <= (has_dma[n] && act[n]) ? ngroups[12*n +: 12] : 12'd0;
                     issued[n] <= 12'd0;
+                    rem[n]    <= 8'd0;
                     pv_planes[n] <= planes[3*n +: 3];
+                    pv_mask[n]   <= emask[n];
                     pv_len[n]    <= len[12*n +: 12];
                     fill_t[n] <= take_s2[n];                 // empty: last line's spare group is dropped
                 end
@@ -196,14 +233,15 @@ module bpldma (
                 last       <= pick;
                 addr       <= pt[pi][21:1];
                 pt[pi]     <= pt[pi] + 23'd2;
-                togo[pick] <= pl_n;
-                if (togo[pick] == 0) begin                   // a new group
+                rem[pick]  <= rem_n;
+                if (gstart) begin
                     left[pick]   <= left[pick] - 1'b1;
+                    issued[pick] <= issued[pick] + 1'b1;
                     busy[pick]   <= 1'b1;
                 end
-                if (pi[2:0] == 3'd0) issued[pick] <= issued[pick] + 1'b1;
                 q_layer[q_t + (ack ? 1'b1 : 1'b0)] <= pick;
                 q_plane[q_t + (ack ? 1'b1 : 1'b0)] <= di[2:0];
+                q_last[q_t + (ack ? 1'b1 : 1'b0)]  <= (rem_n == 8'd0);
                 q_gen[q_t + (ack ? 1'b1 : 1'b0)]   <= gen[pick];
             end
 
@@ -222,14 +260,19 @@ module bpldma (
             if (rb_wr && sel_dat) begin
                 if (rb_be[1]) dr[ri][15:8] <= rb_wdata[15:8];
                 if (rb_be[0]) dr[ri][7:0]  <= rb_wdata[7:0];
-                // Writing BPL0DAT makes the group complete (spec 4, 5.1)
-                if (off[4:2] == 3'd0 && rb_be[0]) fill_t[rn] <= ~take_s2[rn];
+                // With no DMA for the layer, writing BPL0DAT makes the group complete (spec 4, 5.1)
+                if (off[4:2] == 3'd0 && rb_be[0] && !has_dma[rn]) fill_t[rn] <= ~take_s2[rn];
+            end
+            if (rb_wr && sel_dma && rb_be[1:0] == 2'b11) begin     // set/clear (spec 3, rule 6)
+                if (rb_wdata[15]) pm[rn] <= pm[rn] |  rb_wdata[7:0];
+                else              pm[rn] <= pm[rn] & ~rb_wdata[7:0];
             end
         end
 
         rb_rdata <= 32'd0;
         if (rb_rd) begin
             if (sel_mod) rb_rdata <= {16'd0, mod[rn]};
+            if (sel_dma) rb_rdata <= {24'd0, pm[rn]};
             if (sel_pt)  rb_rdata <= {9'd0, pt[ri]};
             if (sel_dat) rb_rdata <= {16'd0, dr[ri]};
         end

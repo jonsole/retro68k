@@ -147,8 +147,8 @@ module video #(
                     `RM_BGCOLOR:  begin v = merge({8'd0, bgcolor}, rb_wdata, rb_be); bgcolor <= v[23:0]; end
                     `RM_PRIO:     begin v = merge({26'd0, prio}, rb_wdata, rb_be); prio <= v[5:0]; end
                     `RM_DMACON:   if (rb_be[1:0] == 2'b11) begin              // set/clear (spec 3, rule 6)
-                        if (rb_wdata[15]) dmacon <= dmacon | (rb_wdata[14:0] & 15'h03F8);
-                        else              dmacon <= dmacon & ~(rb_wdata[14:0] & 15'h03F8);
+                        if (rb_wdata[15]) dmacon <= dmacon | (rb_wdata[14:0] & 15'h03EF);
+                        else              dmacon <= dmacon & ~(rb_wdata[14:0] & 15'h03EF);
                     end
                     default: ;
                 endcase

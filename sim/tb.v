@@ -298,6 +298,8 @@ module tb;
                         dut.vid.l_ctrl[n], dut.vid.l_xs[n], dut.vid.l_xe[n], dut.vid.l_ys[n], dut.vid.l_ye[n],
                         dut.vid.l_sx[n], dut.vid.dma.mod[n]);
             for (n = 0; n < 24; n = n + 1) $fwrite(f, "bpt %0d %0d\n", n, frame_bpt[n]);
+            for (n = 0; n < 3; n = n + 1)  $fwrite(f, "bpldma %0d %0d\n", n, dut.vid.dma.pm[n]);
+            for (n = 0; n < 24; n = n + 1) $fwrite(f, "dat %0d %0d\n", n, dut.vid.dma.dr[n]);
             $fclose(f);
             f = $fopen("vstate_pal.hex", "w");
             for (i = 0; i < 256; i = i + 1) $fwrite(f, "%h\n", dut.vid.pal[i]);

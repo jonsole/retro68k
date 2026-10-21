@@ -4,9 +4,11 @@
 ; dumps the frame and the video state, and vmodel.py checks every pixel.
 ;
 ;   default    palette screen: chunky and planar, scaling, fine scroll,
-;              modulo, a vertically flipped layer, transparency, priority
+;              modulo, a vertically flipped layer, transparency, priority,
+;              and a plane with its DMA off (constant data from BPL4DAT)
 ;   -DDIRECT   direct colour: L0 red (5 planes), L1 green (chunky 8 bpp),
-;              L2 blue (4 planes, narrower window: blue is 0 outside it)
+;              L2 blue (4 planes, narrower window: blue is 0 outside it;
+;              plane 0's DMA off, constant data from BPL0DAT)
 ;
 ; Keep the layouts in step with vgen.py.
 
@@ -35,7 +37,7 @@ start:      move.w  #$2700,sr
             lea     setup(pc),a0
             bsr     regs
             bsr     ptrs
-            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
             move.l  #VIDCON_VALUE,VIDCON(a4)
 
             moveq   #0,d7
@@ -103,6 +105,8 @@ setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|(2<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE
             dc.l    L1+L_WINY,   (50<<16)|350
             dc.l    L1+L_SCROLLX, 7
             dc.l    L1+L_BPLMOD, L1_ROW-40
+            dc.l    L1+L_BPLDMA, 1<<4           ; plane 4: DMA off (SET/CLR clear) ...
+            dc.l    L1+L_BPL4DAT, $F0F0         ; ... it shows this word in every group
             dc.l    L2+L_CTRL,   L_CTRL_EN_M|(3<<L_CTRL_BPP_B)|(2<<L_CTRL_HSCALE_B)|(3<<L_CTRL_VSCALE_B)|L_CTRL_TRANSP_M
             dc.l    L2+L_WINX,   (300<<16)|620
             dc.l    L2+L_WINY,   (200<<16)|460
@@ -143,6 +147,8 @@ setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|L_CTRL_PLANAR_M|(4<<L_CTRL_PLANES_B
             dc.l    L2+L_CTRL,   L_CTRL_EN_M|L_CTRL_PLANAR_M|(3<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
             dc.l    L2+L_WINX,   (64<<16)|400
             dc.l    L2+L_WINY,   (40<<16)|440
+            dc.l    L2+L_BPLDMA, 1<<0           ; plane 0: DMA off; the group completes on plane 1
+            dc.l    L2+L_BPL0DAT, $AAAA
             dc.l    -1
 
 pointers:   dc.l    L0+L_BPL0PT, L0_DATA+0*L0_PLANE

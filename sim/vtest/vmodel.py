@@ -26,7 +26,7 @@ def load_ram(path):
 
 
 def load_state(d):
-    regs, layers, bpt = {}, [], {}
+    regs, layers, bpt, pdma, dat = {}, [], {}, {}, {}
     for line in open(d + "/vstate_regs.txt"):
         f = line.split()
         if f[0] == "layer":
@@ -34,9 +34,14 @@ def load_state(d):
             layers.append(kv)
         elif f[0] == "bpt":
             bpt[int(f[1])] = int(f[2])
+        elif f[0] == "bpldma":
+            pdma[int(f[1])] = int(f[2])
+        elif f[0] == "dat":
+            dat[int(f[1])] = int(f[2])
         else:
             regs[f[0]] = int(f[1])
     pal = [int(l, 16) & 0xFFFFFF for l in open(d + "/vstate_pal.hex")]
+    regs["pdma"], regs["dat"] = pdma, dat
     return regs, layers, bpt, pal
 
 
@@ -77,6 +82,9 @@ def render(regs, layers, bpt, pal, ram):
         depth = planes if planar else bpp
         deep = depth > 4
         ptr = [bpt[8 * n + p] for p in range(8)]
+        pm = regs["pdma"].get(n, 0xFF)
+        # a plane with its DMA off shows its data register in every group
+        const = [None if (pm >> p) & 1 else regs["dat"][8 * n + p] for p in range(8)]
         w = xe - xs
         srcpix = (w + (1 << hs) - 1) >> hs
         length = (srcpix * bpp + 15) // 16 * 2          # bytes per plane line
@@ -92,7 +100,8 @@ def render(regs, layers, bpt, pal, ram):
                         bi = (sx & 15) + k
                         v = 0
                         for p in range(nplanes):
-                            if (word(ptr[p] + 2 * (bi >> 4)) >> (15 - (bi & 15))) & 1:
+                            wv = const[p] if const[p] is not None else word(ptr[p] + 2 * (bi >> 4))
+                            if (wv >> (15 - (bi & 15))) & 1:
                                 v |= 1 << p
                     else:
                         fine = (sx & 15) << lb

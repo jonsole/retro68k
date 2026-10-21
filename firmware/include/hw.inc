@@ -82,14 +82,22 @@ VIDSIZE_HVISIBLE_B           equ $0
 VIDSIZE_HVISIBLE_W           equ $B
 VIDSIZE_HVISIBLE_M           equ $7FF
 DMACON                       equ $94         ; SC, spec 5/8
-DMACON_AUDEN_B               equ $3
-DMACON_AUDEN_M               equ $8
-DMACON_DMXEN_B               equ $6
-DMACON_DMXEN_M               equ $40
+DMACON_AUD0EN_B              equ $0
+DMACON_AUD0EN_M              equ $1
+DMACON_AUD1EN_B              equ $1
+DMACON_AUD1EN_M              equ $2
+DMACON_AUD2EN_B              equ $2
+DMACON_AUD2EN_M              equ $4
+DMACON_AUD3EN_B              equ $3
+DMACON_AUD3EN_M              equ $8
+DMACON_SPREN_B               equ $5
+DMACON_SPREN_M               equ $20
+DMACON_BLTEN_B               equ $6
+DMACON_BLTEN_M               equ $40
 DMACON_COPEN_B               equ $7
 DMACON_COPEN_M               equ $80
-DMACON_VIDEN_B               equ $8
-DMACON_VIDEN_M               equ $100
+DMACON_BPLEN_B               equ $8
+DMACON_BPLEN_M               equ $100
 DMACON_DMAEN_B               equ $9
 DMACON_DMAEN_M               equ $200
 DMACON_SETCLR_B              equ $F
@@ -226,6 +234,12 @@ L_BPLMOD                     equ $10         ; RW, spec 4/4.4 (add to Ln)
 L_BPLMOD_BYTES_B             equ $0
 L_BPLMOD_BYTES_W             equ $10
 L_BPLMOD_BYTES_M             equ $FFFF
+L_BPLDMA                     equ $14         ; SC, spec 4/5.5 (add to Ln)
+L_BPLDMA_PLANES_B            equ $0
+L_BPLDMA_PLANES_W            equ $8
+L_BPLDMA_PLANES_M            equ $FF
+L_BPLDMA_SETCLR_B            equ $F
+L_BPLDMA_SETCLR_M            equ $8000
 L_BPL0PT                     equ $20         ; RW, spec 4/4.4 (add to Ln)
 L_BPL0PT_ADDR_B              equ $0
 L_BPL0PT_ADDR_W              equ $17
@@ -295,6 +309,7 @@ L0_WINX                      equ $104
 L0_WINY                      equ $108
 L0_SCROLLX                   equ $10C
 L0_BPLMOD                    equ $110
+L0_BPLDMA                    equ $114
 L0_BPL0PT                    equ $120
 L0_BPL1PT                    equ $124
 L0_BPL2PT                    equ $128
@@ -316,6 +331,7 @@ L1_WINX                      equ $184
 L1_WINY                      equ $188
 L1_SCROLLX                   equ $18C
 L1_BPLMOD                    equ $190
+L1_BPLDMA                    equ $194
 L1_BPL0PT                    equ $1A0
 L1_BPL1PT                    equ $1A4
 L1_BPL2PT                    equ $1A8
@@ -337,6 +353,7 @@ L2_WINX                      equ $204
 L2_WINY                      equ $208
 L2_SCROLLX                   equ $20C
 L2_BPLMOD                    equ $210
+L2_BPLDMA                    equ $214
 L2_BPL0PT                    equ $220
 L2_BPL1PT                    equ $224
 L2_BPL2PT                    equ $228

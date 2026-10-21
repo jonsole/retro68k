@@ -216,13 +216,13 @@ DMACON turns DMA on and off, as on the Amiga. Its 16-bit value is in the low hal
 |-----|------|---------|
 | 15 | SETCLR | Set or clear the bits written as 1 |
 | 9 | DMAEN | Master enable for all the DMA below |
-| 8 | VIDEN | Display fetch for the bitmap layers |
+| 8 | BPLEN | Bitplane DMA for the layers |
 | 7 | COPEN | Copper (later) |
-| 6 | DMXEN | DMA engine (later) |
-| 4 | STREN | Audio stream (later) |
-| 3 | AUDEN | Audio channels (later) |
+| 6 | BLTEN | DMA engine / blitter (later) |
+| 5 | SPREN | Kept for sprites; no effect yet |
+| 3–0 | AUD3EN–AUD0EN | Audio channels 3–0 (later) |
 
-A DMA user works only when both its own bit and DMAEN are set. DMACON is cleared at every reset.
+The bits are where the Amiga has them. A DMA user works only when both its own bit and DMAEN are set. For finer control, each layer's BPLDMA register turns bitplane DMA on and off plane by plane (see the playfield chapter), so any one plane, or one audio channel, can be left to the CPU or copper. DMACON is cleared at every reset.
 
 To turn on the display fetch:
 
@@ -230,13 +230,13 @@ To turn on the display fetch:
         include "hw.inc"
 
         lea     CUSTOM,a4
-        move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+        move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
 ```
 
 To stop it again, leaving DMAEN on for other users:
 
 ```asm
-        move.w  #DMACON_VIDEN_M,DMACON+2(a4)    ; SETCLR = 0: clear VIDEN
+        move.w  #DMACON_BPLEN_M,DMACON+2(a4)    ; SETCLR = 0: clear BPLEN
 ```
 
 Write DMACON with `MOVE.W` to `DMACON+2` or with `MOVE.L` to `DMACON`. A byte write to DMACON is ignored. Reading DMACON gives the current enables in the low half, with bit 15 reading as 0.
@@ -710,7 +710,7 @@ If a bus error or address error happens while the 68000 is already handling one 
 
 | Name | Address | Access | Function |
 |------|---------|--------|----------|
-| DMACON | `$E00094` (value at `$E00096`) | SC | DMA enables: SETCLR (15), DMAEN (9), VIDEN (8); COPEN (7), DMXEN (6), STREN (4), AUDEN (3) for later blocks |
+| DMACON | `$E00094` (value at `$E00096`) | SC | DMA enables: SETCLR (15), DMAEN (9), BPLEN (8); COPEN (7), BLTEN (6), SPREN (5), AUD3EN–AUD0EN (3–0) for later blocks |
 | SYSID | `$F00800` | R | Machine identity, "R68K" |
 | SYSVER | `$F00804` | R | FPGA build version |
 | SYSCFG | `$F00808` | R | CPU type and speed, Chip RAM size |

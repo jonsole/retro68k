@@ -208,10 +208,10 @@ To enable it: put the handler's address in its vector, enable VBLANK in the vide
 
 ### Step 8: Turn on bitplane DMA and the display
 
-The layers fetch only when **DMACON.DMAEN** and **DMACON.VIDEN** are both set and the display is on (**VIDCON.EN**). DMACON is a set/clear register at the same address as the Amiga's (`$E00096` for its low half): bit 15 set means "set the bits written as 1".
+The layers fetch only when **DMACON.DMAEN** and **DMACON.BPLEN** are both set and the display is on (**VIDCON.EN**). DMACON is a set/clear register at the same address as the Amiga's (`$E00096` for its low half): bit 15 set means "set the bits written as 1".
 
 ```asm
-        move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+        move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
         move.l  #VIDCON_EN_M,VIDCON(a4)
 ```
 
@@ -270,7 +270,7 @@ start:      move.w  #$2700,sr           ; no interrupts while we set up
             move.w  #INTENA_SETCLRL_M|(1<<INTB_VBLANK),INTENA+2(a5)  ; set/clear: other sources untouched
             move.l  #INTCON_MASTER_M,INTCON(a5)
             ; step 8: bitplane DMA and the display on
-            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
             move.w  #$2000,sr           ; take interrupts (video is level 5)
 
@@ -323,10 +323,10 @@ On an 800 × 600 build the same program shows the picture in the top left 640 ×
 
 ### Stopping the display
 
-To turn a layer off, write 0 to its CTRL. To stop all bitplane DMA, clear VIDEN in DMACON (write it with bit 15 clear): the layers then show only what the CPU puts in their data registers (see "Feeding the Data Registers from the CPU"). To show only the background colour, set VIDCON.BLANKALL. Clearing VIDCON.EN stops the beam itself: there is no picture and no sync signal, so the monitor loses the signal.
+To turn a layer off, write 0 to its CTRL. To stop all bitplane DMA, clear BPLEN in DMACON (write it with bit 15 clear): the layers then show only what the CPU puts in their data registers (see "Feeding the Data Registers from the CPU"). To show only the background colour, set VIDCON.BLANKALL. Clearing VIDCON.EN stops the beam itself: there is no picture and no sync signal, so the monitor loses the signal.
 
 ```asm
-        move.w  #DMACON_VIDEN_M,DMACON+2(a4)    ; bit 15 clear: VIDEN off
+        move.w  #DMACON_BPLEN_M,DMACON+2(a4)    ; bit 15 clear: BPLEN off
 ```
 
 ---
@@ -1050,7 +1050,7 @@ start:      move.w  #$2700,sr
             move.l  #VIDINTEN_VBLANK_M,VIDINTEN(a4)
             move.w  #INTENA_SETCLRL_M|(1<<INTB_VBLANK),INTENA+2(a5)  ; set/clear: other sources untouched
             move.l  #INTCON_MASTER_M,INTCON(a5)
-            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
             move.w  #$2000,sr
 
@@ -1287,7 +1287,7 @@ start:      move.w  #$2700,sr
             move.l  #VIDINTEN_VBLANK_M,VIDINTEN(a4)
             move.w  #INTENA_SETCLRL_M|(1<<INTB_VBLANK),INTENA+2(a5)  ; set/clear: other sources untouched
             move.l  #INTCON_MASTER_M,INTCON(a5)
-            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M|VIDCON_DIRECT_M,VIDCON(a4)
             move.w  #$2000,sr
 
@@ -1439,9 +1439,13 @@ If a layer's next group is not complete when its shifters need it, the layer sho
 
 ## Feeding the Data Registers from the CPU
 
-The data registers BPL0DAT–BPL7DAT can be written by the CPU (and later the copper), just as the DMA writes them. A write of **BPL0DAT completes the group** for the layer, exactly as the DMA's last word does. So write the higher data registers first and BPL0DAT last: for a planar layer, one word per plane; for a chunky layer of b bits per pixel, the group's b words from BPL(b−1)DAT (leftmost pixels) down to BPL0DAT. A 1 bpp chunky layer, like a 1-plane layer, needs BPL0DAT only.
+The data registers BPL0DAT–BPL7DAT can be written by the CPU (and later the copper), just as the DMA writes them. You can feed a whole layer this way, or just some of its planes.
 
-With bitplane DMA off (DMACON.VIDEN clear), a layer that is enabled in CTRL shows only what the CPU writes to its data registers. This is how you can make patterns that need no memory at all, or test the display. Note that VIDEN is shared by all three layers: while it is off, none of them fetches.
+### A whole layer
+
+For a layer with no DMA, a write of **BPL0DAT completes the group**, exactly as the DMA's last word does. So write the higher data registers first and BPL0DAT last: for a planar layer, one word per plane; for a chunky layer of b bits per pixel, the group's b words from BPL(b−1)DAT (leftmost pixels) down to BPL0DAT. A 1 bpp chunky layer, like a 1-plane layer, needs BPL0DAT only.
+
+With bitplane DMA off (DMACON.BPLEN clear, or a layer's BPLDMA all clear), a layer that is enabled in CTRL shows only what the CPU writes to its data registers. This is how you can make patterns that need no memory at all, or test the display. BPLEN is shared by all three layers: while it is off, none of them fetches. To stop one layer's DMA only, clear all its bits in BPLDMA.
 
 The timing follows the fetch rules in "How the display fetches":
 
@@ -1464,7 +1468,7 @@ The CPU waits for each horizontal blank and writes two groups into layer 0, a 1-
 
 start:      move.w  #$2700,sr
             lea     CUSTOM,a4
-            move.w  #DMACON_VIDEN_M,DMACON+2(a4)    ; bit 15 clear: VIDEN off
+            move.w  #DMACON_BPLEN_M,DMACON+2(a4)    ; bit 15 clear: BPLEN off
             move.l  #0,L1+L_CTRL(a4)
             move.l  #0,L2+L_CTRL(a4)
             move.l  #$000040,BGCOLOR(a4)
@@ -1499,11 +1503,37 @@ main:       move.w  VIDSIZE+2(a4),d2
 
 The data registers can also be read back, which is occasionally useful when debugging.
 
+### One plane at a time: BPLDMA
+
+Each layer's **BPLDMA** register turns DMA on and off **plane by plane** (bits 7–0 for planes 0–7). Like DMACON it is a set/clear register: write it with bit 15 set to turn the planes written as 1 on, with bit 15 clear to turn them off. All planes are on after reset. For a chunky layer, bit 0 turns the whole layer's DMA on or off.
+
+A plane with its DMA off is not fetched and its pointer does not move. Its data register keeps whatever you last wrote, and the shifters take it again with every group. So a plane can show a constant 16-pixel pattern that costs no memory cycles at all, while the other planes come from memory as usual. Writing the data register changes the pattern from the next group, which lets the copper change it line by line. The DMA still completes each group itself, when it has fetched its last enabled plane; your writes to a DMA-off plane never complete a group.
+
+This is the Amiga trick of setting more planes than are fetched, with more control: any plane can be the one left out.
+
+```asm
+; Layer 1: a 4-plane picture by DMA, plus a fifth plane fed with a constant
+; pattern, so every second group of 8 pixels uses colours 16-31 instead
+; of 0-15. Plane 4 costs no memory cycles. a4 = CUSTOM.
+            include "hw.inc"
+            lea     L1(a4),a0
+            move.w  #1<<4,L_BPLDMA+2(a0)        ; SET/CLR clear: plane 4's DMA off
+            move.w  #$FF00,L_BPL4DAT+2(a0)      ; 8 pixels set, 8 clear, every group
+            move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|(4<<L_CTRL_PLANES_B),L_CTRL(a0)  ; 5 planes
+```
+
+To give plane 4 back to the DMA, set its bit again with bit 15 set, and point BPL4PT at its data:
+
+```asm
+            move.w  #L_BPLDMA_SETCLR_M|(1<<4),L_BPLDMA+2(a0)
+```
+
 ### Summary: data registers
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| BPL0DAT–BPL7DAT | Ln + `$40`–`$5C` | RW | Plane data, 16 bits in the low half; writing BPL0DAT completes the group |
+| BPL0DAT–BPL7DAT | Ln + `$40`–`$5C` | RW | Plane data, 16 bits in the low half; for a layer with no DMA, writing BPL0DAT completes the group. A DMA-off plane shows its value every group |
+| BPLDMA | Ln + `$14` | Set/clear | SETCLR (15), PLANES (7–0): DMA on per plane (chunky: bit 0). All on after reset |
 
 ---
 
@@ -1636,7 +1666,7 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 | BGCOLOR | `$018` | RW | Background colour, RGB (23–0) |
 | PRIO | `$01C` | RW | FRONT (1–0), MIDDLE (3–2), BACK (5–4); 3 = no layer |
 | VIDSIZE | `$020` | R | VVISIBLE (26–16), HVISIBLE (10–0) |
-| DMACON | `$094` | SC | VIDEN (8), DMAEN (9): both needed for bitplane DMA; SETCLR (15). 16 bits, low half at `$096` |
+| DMACON | `$094` | SC | BPLEN (8), DMAEN (9): both needed for bitplane DMA; SETCLR (15). 16 bits, low half at `$096` |
 | PALETTE | `$4000`–`$43FF` | RW | 256 × `$00RRGGBB` |
 
 ### Layer registers
@@ -1648,6 +1678,7 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 | WINY | Ln + `$08` | RW | YSTART (26–16), YEND (10–0) |
 | SCROLLX | Ln + `$0C` | RW | Fine scroll, 0–15 source pixels (3–0) |
 | BPLMOD | Ln + `$10` | RW | Modulo, signed, even (15–0) |
+| BPLDMA | Ln + `$14` | Set/clear | SETCLR (15), PLANES (7–0): DMA on per plane; chunky: bit 0. All on after reset |
 | BPL0PT–BPL7PT | Ln + `$20`, `$24` … `$3C` | RW | Plane pointers (22–0), even; chunky layers use BPL0PT only |
 | BPL0DAT–BPL7DAT | Ln + `$40`, `$44` … `$5C` | RW | Plane data (15–0); writing BPL0DAT completes the group |
 

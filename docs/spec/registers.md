@@ -45,7 +45,7 @@ This spec also replaces spec 2 (memory map), which is folded in here.
    - A low-half read on its own returns the current low half.
 4. **Reading has no side effects,** except the three FIFO data registers in the system block (SERDATA, KBDATA, SDDATA), where reading takes data out. None of these are in the custom block, so DMA and the copper can never disturb anything by reading.
 5. **Sticky flags** (marked W1C below) are cleared by writing 1 to them. Writing 0 leaves them alone.
-6. **Set/clear registers** (DMACON, INTENA): in each 16-bit set/clear half, the top bit = 1 sets the other bits written as 1; = 0 clears them. DMACON is one such half, in the low half. INTENA has two, and each is written at once on its own (it is not held as rule 2 says), so a `MOVE.W` to either half, or a `MOVE.L` to both, works. Byte writes are ignored.
+6. **Set/clear registers** (DMACON, INTENA, BPLDMA): in each 16-bit set/clear half, the top bit = 1 sets the other bits written as 1; = 0 clears them. DMACON is one such half, in the low half. INTENA has two, and each is written at once on its own (it is not held as rule 2 says), so a `MOVE.W` to either half, or a `MOVE.L` to both, works. Byte writes are ignored.
 7. **Unused bits** read as 0; write them as 0.
 8. **Unused addresses** inside the custom and system blocks read as 0 and ignore writes. Only the unmapped regions in section 1 give bus errors.
 9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layer settings before each line).
@@ -96,6 +96,7 @@ Layer n (0–2) at `0x100 + n × 0x80`:
 | `+0x08` | WINY | RW | 4, 4.3 |
 | `+0x0C` | SCROLLX | RW | 4, 4.4 |
 | `+0x10` | BPLMOD | RW | 4, 4.4 |
+| `+0x14` | BPLDMA | Set/clear | 4, 5.5 |
 | `+0x20` | BPL0PT | RW | 4, 4.4 |
 | `+0x24` | BPL1PT | RW | 4, 4.4 |
 | `+0x28` | BPL2PT | RW | 4, 4.4 |

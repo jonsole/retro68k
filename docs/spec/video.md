@@ -174,7 +174,7 @@ With VIDCON.DIRECT set, the palette and priority are not used. Every visible pix
 
 - Each layer has 8 data registers **BPL0DAT–BPL7DAT** and 8 16-bit **shift registers**. There is no other storage: the data registers hold the layer's next group of 16 source pixels, while the shifters show the current group.
 - **A group is always 16 source pixels.** Planar: one word from each plane, plane p in BPLpDAT. Chunky with b bits per pixel: b consecutive words from BPL0PT; the first (leftmost pixels) goes in BPL(b−1)DAT and the last in BPL0DAT. So every layer has 16 pixels of time in hand, whatever its format.
-- **A group is complete when BPL0DAT is written.** The DMA writes a group's words from the highest data register down, with BPL0DAT last. The CPU or copper can also write the data registers (for example with DMA off), and its write of BPL0DAT completes the group the same way.
+- **When a group is complete:** the DMA fills a group's data registers from the highest down, and the group is complete when the last of them arrives (BPL0DAT, unless plane 0's DMA is off; section 5.5). For a layer with no DMA, the CPU or copper writes the data registers, and its write of BPL0DAT completes the group.
 - The shifters take all of a layer's data registers at once. They take the line's first group as soon as it is complete, in the horizontal blank, so the second group is already in the data registers when the window starts (as the Amiga fetches ahead of the display window). After that they take the next group each time the current one is used up (every 16 source pixels). Each take empties the data registers, and the DMA fetches the next group.
 - The display owns **memory cycles 1 and 2 of every slot**: 4 bytes every 100 ns (spec 5, section 4.3). It never touches the CPU's cycle 0.
 - **Order:** the layers that want a word take turns, one word each, so a layer never waits for more than one word from each of the others. With a given screen setup, the fetch pattern is the same on every line and every frame.
@@ -216,9 +216,20 @@ If a layer's next group is not complete when its shifters need it, the layer sho
 |-----------|-------------|
 | CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line. **To change line L, write during the visible part of line L − 1 or earlier** |
 | BPLxPT, BPLMOD | At once: they are live. The next word fetched uses the new value. A CPU or copper write wins over the DMA's own change in the same clock |
-| BPLxDAT | At once; a write of BPL0DAT completes the group (write it last) |
+| BPLxDAT | At once; for a layer with no DMA, a write of BPL0DAT completes the group (write it last). For a plane with DMA off, from the next group |
+| BPLDMA | At once: the next group fetched uses the new enables |
 | PRIO, BGCOLOR | At the start of each line |
 | VIDCON.DIRECT, palette | At once (next pixel) |
+
+### 5.5 DMA per plane (BPLDMA)
+
+As on the Amiga, any plane can be fed by the CPU or copper instead of by DMA, so that one plane costs no memory cycles at all. Each layer's **BPLDMA** register has a DMA enable for each plane (bits 7–0). It is a set/clear register like DMACON: bit 15 = 1 sets the bits written as 1, bit 15 = 0 clears them. All planes are on after reset.
+
+- **A plane with its DMA off** is not fetched, and its pointer stays where it is. Its data register keeps the value the CPU or copper last wrote, and the shifters take that value again with every group (every 16 source pixels). A write takes effect from the next group. So a constant word gives a repeating 16-pixel pattern, and the copper can change it per line, for example to add a colour bar plane or a stripe pattern to a picture without fetching anything.
+- The layer's group is complete when the DMA has fetched its last enabled plane. Writes to the data registers of planes with DMA off never complete a group.
+- **A layer with no planes on** (or with DMACON.BPLEN or DMAEN off) does no DMA. The CPU or copper writes all its data registers, and a write of BPL0DAT completes each group (section 5.1).
+- **Chunky layers:** bit 0 turns the whole layer's DMA on or off; the other bits are ignored.
+- With fewer planes fetched, the layer costs less: count only the planes with DMA on in the budget (section 5.2).
 
 ## 6. Registers
 
@@ -238,7 +249,7 @@ The offsets are within the custom register block at `0xE00000`. Spec 3 has the f
 | `0x01C` | PRIO | See 4.8 | Layer order |
 | `0x020` | VIDSIZE | VVISIBLE 26–16, HVISIBLE 10–0 | Read-only: the screen size of the built mode |
 
-For the layers to fetch, DMACON (spec 5, section 8) must also have DMAEN and VIDEN set.
+For the layers to fetch, DMACON (spec 5, section 8) must also have DMAEN and BPLEN set, and the plane's bit in its layer's BPLDMA.
 
 ### 6.2 Per layer
 
@@ -251,6 +262,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 | `+0x08` | WINY | YSTART 26–16, YEND 10–0 | Window, lines |
 | `+0x0C` | SCROLLX | 3–0 | Fine scroll, pixels |
 | `+0x10` | BPLMOD | 15–0, signed, even | Added to the pointers at the end of each line |
+| `+0x14` | BPLDMA | SETCLR (15), PLANES (7–0) | DMA enable per plane (chunky: bit 0 for the layer). Set/clear. All on after reset |
 | `+0x20`–`+0x3C` | BPL0PT–BPL7PT | 22–0, even | Plane pointers (chunky: BPL0PT only) |
 | `+0x40`–`+0x5C` | BPL0DAT–BPL7DAT | 15–0 | Data registers: the next group (chunky with b bits per pixel: BPL0DAT–BPL(b−1)DAT) |
 

@@ -47,10 +47,14 @@
 `define RM_VIDSIZE_VVISIBLE                 26:16
 `define RM_VIDSIZE_HVISIBLE                 10:0
 `define RM_DMACON                           16'h0094
-`define RM_DMACON_AUDEN                     3
-`define RM_DMACON_DMXEN                     6
+`define RM_DMACON_AUD0EN                    0
+`define RM_DMACON_AUD1EN                    1
+`define RM_DMACON_AUD2EN                    2
+`define RM_DMACON_AUD3EN                    3
+`define RM_DMACON_SPREN                     5
+`define RM_DMACON_BLTEN                     6
 `define RM_DMACON_COPEN                     7
-`define RM_DMACON_VIDEN                     8
+`define RM_DMACON_BPLEN                     8
 `define RM_DMACON_DMAEN                     9
 `define RM_DMACON_SETCLR                    15
 `define RM_DMXINT                           16'h0340
@@ -119,6 +123,9 @@
 `define RM_L_SCROLLX_FINE                   3:0
 `define RM_L_BPLMOD                         16'h0010
 `define RM_L_BPLMOD_BYTES                   15:0
+`define RM_L_BPLDMA                         16'h0014
+`define RM_L_BPLDMA_PLANES                  7:0
+`define RM_L_BPLDMA_SETCLR                  15
 `define RM_L_BPL0PT                         16'h0020
 `define RM_L_BPL0PT_ADDR                    22:0
 `define RM_L_BPL1PT                         16'h0024

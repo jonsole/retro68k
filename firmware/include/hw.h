@@ -92,14 +92,22 @@
 /* DMACON: SC, spec 5/8 */
 #define DMACON_OFS                         0x94u
 #define DMACON                             HW_REG32(CUSTOM_BASE + DMACON_OFS)
-#define DMACON_AUDEN_SHIFT                 3
-#define DMACON_AUDEN_MASK                  0x8u
-#define DMACON_DMXEN_SHIFT                 6
-#define DMACON_DMXEN_MASK                  0x40u
+#define DMACON_AUD0EN_SHIFT                0
+#define DMACON_AUD0EN_MASK                 0x1u
+#define DMACON_AUD1EN_SHIFT                1
+#define DMACON_AUD1EN_MASK                 0x2u
+#define DMACON_AUD2EN_SHIFT                2
+#define DMACON_AUD2EN_MASK                 0x4u
+#define DMACON_AUD3EN_SHIFT                3
+#define DMACON_AUD3EN_MASK                 0x8u
+#define DMACON_SPREN_SHIFT                 5
+#define DMACON_SPREN_MASK                  0x20u
+#define DMACON_BLTEN_SHIFT                 6
+#define DMACON_BLTEN_MASK                  0x40u
 #define DMACON_COPEN_SHIFT                 7
 #define DMACON_COPEN_MASK                  0x80u
-#define DMACON_VIDEN_SHIFT                 8
-#define DMACON_VIDEN_MASK                  0x100u
+#define DMACON_BPLEN_SHIFT                 8
+#define DMACON_BPLEN_MASK                  0x100u
 #define DMACON_DMAEN_SHIFT                 9
 #define DMACON_DMAEN_MASK                  0x200u
 #define DMACON_SETCLR_SHIFT                15
@@ -253,6 +261,12 @@
 #define L_BPLMOD(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPLMOD_OFS)
 #define L_BPLMOD_BYTES_SHIFT               0
 #define L_BPLMOD_BYTES_MASK                0xFFFFu
+#define L_BPLDMA_OFS                       0x14u
+#define L_BPLDMA(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPLDMA_OFS)
+#define L_BPLDMA_PLANES_SHIFT              0
+#define L_BPLDMA_PLANES_MASK               0xFFu
+#define L_BPLDMA_SETCLR_SHIFT              15
+#define L_BPLDMA_SETCLR_MASK               0x8000u
 #define L_BPL0PT_OFS                       0x20u
 #define L_BPL0PT(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPL0PT_OFS)
 #define L_BPL0PT_ADDR_SHIFT                0

@@ -398,7 +398,7 @@ screen_init:
             move.l  #(0<<16)|640,L_WINX(a0)
             move.l  #(0<<16)|480,L_WINY(a0)
             move.l  #L_CTRL_EN_M,L_CTRL(a0)     ; chunky, 1 bit per pixel, colours 0-1
-            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_VIDEN_M,DMACON+2(a4)
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
             rts
 

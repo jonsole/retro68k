@@ -165,16 +165,20 @@ Display data is fetched just in time into each plane's data register (BPLxDAT), 
 
 One register, **DMACON**, at `0xE00094` (spec 3). Its 16-bit value is in the low half at `0xE00096`, the same offset as the Amiga's DMACON. Writes use set/clear:
 
+The bits are where the Amiga has them:
+
 | Bit | Name | Enables |
 |-----|------|---------|
 | 15 | SETCLR | 1 = set the bits written as 1, 0 = clear them |
 | 9 | DMAEN | Master enable for everything below |
-| 8 | VIDEN | Video fetch |
+| 8 | BPLEN | Bitplane DMA for all layers (each plane also has its own enable in its layer's BPLDMA; spec 4, section 5.5) |
 | 7 | COPEN | Copper |
-| 6 | DMXEN | DMA engine (copy and fill; spec 11) |
-| 5–4 | – | Unused (were SPREN and STREN) |
-| 3 | AUDEN | Audio channels (each also has its own enable; spec 6) |
-| 2–0 | – | Unused |
+| 6 | BLTEN | DMA engine / blitter (copy and fill; spec 11) |
+| 5 | SPREN | Kept for sprites (spec 9, on hold); no effect in v1 |
+| 4 | – | Unused |
+| 3–0 | AUD3EN–AUD0EN | Audio channels 3–0 (spec 6) |
+
+Together with BPLDMA, every DMA user can be turned off on its own (one audio channel, one bitplane of one layer), so that the CPU or copper can do its job instead by writing its data registers.
 
 ## 9. Open points
 
