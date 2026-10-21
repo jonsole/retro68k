@@ -94,9 +94,16 @@ module video #(
                   be[1] ? new[15:8]  : old[15:8],  be[0] ? new[7:0]   : old[7:0] };
     endfunction
 
-    // HTOTAL x N must be a multiple of 20, with N = 3..8 (section 3.2)
+    // HTOTAL x N must be a multiple of 20, with N = 3..8 (section 3.2): a
+    // multiple of 4, and of 5. For 5: 16 is 1 more than a multiple of 5, so
+    // a number and the sum of its hex digits leave the same remainder.
+    // (A plain "% 20" costs a divider: about 2,000 LUTs.)
     wire [14:0] line_master = htot * pdiv;
-    wire        timing_ok   = (pdiv >= 4'd3) && (pdiv <= 4'd8) && (line_master % 20 == 0) &&
+    wire [5:0]  hexsum      = line_master[3:0] + line_master[7:4] + line_master[11:8] + line_master[14:12];
+    wire        five        = (hexsum == 0)  || (hexsum == 5)  || (hexsum == 10) || (hexsum == 15) ||
+                              (hexsum == 20) || (hexsum == 25) || (hexsum == 30) || (hexsum == 35) ||
+                              (hexsum == 40) || (hexsum == 45) || (hexsum == 50);
+    wire        timing_ok   = (pdiv >= 4'd3) && (pdiv <= 4'd8) && (line_master[1:0] == 2'b00) && five &&
                               (hvis != 0) && (hvis < htot) && (vvis != 0) && (vvis < vtot);
 
     reg  [1:0] vb_s, ln_s, sm_s;

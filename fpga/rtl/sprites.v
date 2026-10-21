@@ -169,18 +169,17 @@ module sprites #(
     (* mem2reg, ram_style = "registers" *) reg u_valid [0:2*NU-1];
     (* mem2reg, ram_style = "registers" *) reg u_issued[0:2*NU-1];
     (* mem2reg, ram_style = "registers" *) reg u_done  [0:2*NU-1];
-    (* mem2reg, ram_style = "registers" *) reg [5:0] u_spr   [0:2*NU-1];         // sprite number
-    (* mem2reg, ram_style = "registers" *) reg [9:0] u_src   [0:2*NU-1];         // source line (before VFLIP)
-    (* mem2reg, ram_style = "registers" *) reg [11:0] u_x     [0:2*NU-1];         // X (signed)
+    // read only by the fetcher, one at a time: small LUT RAMs
+    (* ram_style = "distributed" *) reg [5:0]  u_spr [0:2*NU-1];   // sprite number
+    (* ram_style = "distributed" *) reg [9:0]  u_src [0:2*NU-1];   // source line (before VFLIP)
+    (* ram_style = "distributed" *) reg [11:0] u_x   [0:2*NU-1];   // X (signed)
     (* mem2reg, ram_style = "registers" *) reg [9:0] u_fslot [0:2*NU-1];         // T when the fetch is due
     (* mem2reg, ram_style = "registers" *) reg u_due   [0:2*NU-1];         // the fetch point has been reached
-    (* mem2reg, ram_style = "registers" *) reg [4:0] u_words [0:2*NU-1];
-    (* mem2reg, ram_style = "registers" *) reg [4:0] u_got   [0:2*NU-1];
     // drawing settings, written at the fetch point
     (* mem2reg, ram_style = "registers" *) reg [10:0] u_xstart[0:2*NU-1];
     (* mem2reg, ram_style = "registers" *) reg [15:0] u_acc0  [0:2*NU-1];
-    (* mem2reg, ram_style = "registers" *) reg [15:0] u_hstep [0:2*NU-1];
-    (* mem2reg, ram_style = "registers" *) reg [6:0] u_width [0:2*NU-1];
+    (* mem2reg, ram_style = "registers" *) reg [8:0] u_hstep [0:2*NU-1];   // 0x040-0x100
+    (* mem2reg, ram_style = "registers" *) reg [1:0] u_wcode [0:2*NU-1];   // width 16 << wcode
     (* mem2reg, ram_style = "registers" *) reg [1:0] u_lb    [0:2*NU-1];
     (* mem2reg, ram_style = "registers" *) reg u_hflip [0:2*NU-1];
     (* mem2reg, ram_style = "registers" *) reg [5:0] u_palofs[0:2*NU-1];
@@ -239,7 +238,7 @@ module sprites #(
     assign spr_urgent = (fs == F_ISSUE) && (f_age >= 10'd112) && (f_age < 10'd512);
 
     // Reads on the way: {bank, unit, word}
-    reg [UW+5:0] q_tag [0:3];
+    reg [UW+5:0] q_tag [0:3];          // {bank, unit, last word, word}
     reg [1:0]  q_h, q_t;
 
     // Line buffers: 16 units x 2 banks x 16 words
@@ -346,13 +345,12 @@ module sprites #(
                     f_words <= (bits > 9'd256) ? 5'd0 : bits[8:4];
                     f_addr  <= f_ptr[22:0] + f_off[22:0];
                     f_k     <= 5'd0;
-                    u_words [f_ub] <= (bits > 9'd256) ? 5'd0 : bits[8:4];
-                    u_got   [f_ub] <= 5'd0;
                     u_xstart[f_ub] <= u_x[f_ub][11] ? 11'd0 : u_x[f_ub][10:0];
                     u_acc0  [f_ub] <= !u_x[f_ub][11] ? 16'd0 :
                                       (f_clip[27:16] != 0) ? 16'hFFFF : f_clip[15:0];   // off the left: skip
-                    u_hstep [f_ub] <= f_scale[15:0];
-                    u_width [f_ub] <= w;
+                    u_hstep [f_ub] <= (f_scale[15:0] < 16'h0040) ? 9'h040 :
+                                      (f_scale[15:0] > 16'h0100) ? 9'h100 : f_scale[8:0];
+                    u_wcode [f_ub] <= (f_ctrl[2:1] == 2'd3) ? 2'd2 : f_ctrl[2:1];
                     u_lb    [f_ub] <= lb;
                     u_hflip [f_ub] <= f_ctrl[5];
                     u_palofs[f_ub] <= f_ctrl[21:16];
@@ -365,7 +363,7 @@ module sprites #(
                     spr_req  <= 1'b1;
                     spr_addr <= f_addr[21:1];
                     f_addr   <= f_addr + 23'd2;
-                    q_tag[q_t + (spr_ack ? 1'b1 : 1'b0)] <= {f_ub, f_k};
+                    q_tag[q_t + (spr_ack ? 1'b1 : 1'b0)] <= {f_ub, f_k == f_words - 1'b1, f_k[3:0]};
                     f_k      <= f_k + 1'b1;
                 end else if (f_k == f_words && (!spr_req || spr_ack))
                     fs <= F_IDLE;
@@ -386,8 +384,7 @@ module sprites #(
                 b_unit <= ub[UW-1:0];
                 b_a    <= {ub[UW], tg[3:0]};
                 b_d    <= rdata;
-                u_got[ub] <= u_got[ub] + 1'b1;
-                if (u_got[ub] + 1'b1 == u_words[ub]) u_done[ub] <= 1'b1;
+                if (tg[4]) u_done[ub] <= 1'b1;            // the line's last word
             end
         end
     end
@@ -412,7 +409,7 @@ module sprites #(
             .clk_pix(clk_pix), .en(en_p), .hn(hn), .bank(ls_t),
             .s_valid(u_valid[(mb * NU + g)]), .s_done(u_done[(mb * NU + g)]),
             .s_xstart(u_xstart[(mb * NU + g)]), .s_acc0(u_acc0[(mb * NU + g)]),
-            .s_hstep(u_hstep[(mb * NU + g)]), .s_width(u_width[(mb * NU + g)]),
+            .s_hstep(u_hstep[(mb * NU + g)]), .s_wcode(u_wcode[(mb * NU + g)]),
             .s_lb(u_lb[(mb * NU + g)]), .s_hflip(u_hflip[(mb * NU + g)]),
             .s_palofs(u_palofs[(mb * NU + g)]), .s_depth(u_depth[(mb * NU + g)]),
             .s_coll(u_coll[(mb * NU + g)]),

@@ -43,4 +43,14 @@ The top level is `fpga/rtl/top_ks3.v`; the board-specific parts are in `fpga/rtl
 
 ## Resource use
 
-Yosys (`yosys_check.sh`) puts the design at about 11,100 LUTs (53%), 5,400 flip-flops (13%), 18.5 of 50 block RAMs and 13 of 90 DSP slices. Vivado's figures will differ a little.
+Yosys (`yosys_check.sh`) puts the design, with 16 sprites per line, at about 14,700 LUTs (71%), 10,100 flip-flops (24%), 19.5 of 50 block RAMs and 19 of 90 DSP slices. Vivado's figures will differ a little.
+
+| Part | LUTs (Yosys) |
+|------|------|
+| Sprites (16 per line) | about 5,800 |
+| Video (layers, text, palette, timing) | about 3,300 |
+| fx68k | about 3,300 |
+| Timers | about 950 |
+| The rest | about 1,350 |
+
+With 8 sprites per line (`UNITS = 8` in `sprites.v`) the sprites take about 2,700 LUTs less.

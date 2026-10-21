@@ -113,6 +113,7 @@ What the first implementation does, where it is simpler than the text above:
 - **Urgent:** a sprite may take the CPU's cycle 0 in the last 16 slots before its first pixel.
 - **The beam in slots** is counted from the start of each line as the 100 MHz side sees it, so the selection and fetch points are fixed but may sit up to a slot later than the exact figures above.
 - A 64-pixel 8 bpp sprite (not allowed, section 3) is simply not drawn.
+- HSTEP is limited to the allowed `0x0040`–`0x0100` when it is read (VSTEP is not checked).
 
 ### 5.1 When writes take effect
 

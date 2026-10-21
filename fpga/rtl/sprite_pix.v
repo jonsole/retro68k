@@ -14,8 +14,8 @@ module sprite_pix (
     input  wire        s_done,         // its data has arrived
     input  wire [10:0] s_xstart,       // first visible pixel
     input  wire [15:0] s_acc0,         // source position there (clipped part skipped), 8.8
-    input  wire [15:0] s_hstep,
-    input  wire [6:0]  s_width,        // 16, 32 or 64 source pixels
+    input  wire [8:0]  s_hstep,        // 0x040-0x100
+    input  wire [1:0]  s_wcode,        // width: 16 << s_wcode source pixels
     input  wire [1:0]  s_lb,           // log2 of bits per pixel: 1, 2, 3
     input  wire        s_hflip,
     input  wire [5:0]  s_palofs,
@@ -35,8 +35,9 @@ module sprite_pix (
 );
     reg        on;
     reg [15:0] acc;
-    reg [15:0] hstep;
-    reg [6:0]  width;
+    reg [8:0]  hstep;
+    reg [1:0]  wcode;
+    wire [6:0] width = 7'd16 << wcode;
     reg [1:0]  lb;
     reg        hflip;
     reg [5:0]  palofs;
@@ -67,7 +68,7 @@ module sprite_pix (
                 if (!s_done) miss_t <= ~miss_t;
                 acc    <= s_acc0;
                 hstep  <= s_hstep;
-                width  <= s_width;
+                wcode  <= s_wcode;
                 lb     <= s_lb;
                 hflip  <= s_hflip;
                 palofs <= s_palofs;
