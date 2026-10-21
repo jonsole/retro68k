@@ -65,19 +65,26 @@ For a bus cycle starting at time 0 (state S0), with the slot grid from spec 5:
 |-----------|-------|--------------|
 | 0 | S0 | Cycle begins; slot k starts |
 | 25 | S1 | Address and FC valid |
-| 50 | S2 | /AS asserted; R/W valid |
+| 50 | S2 | /AS asserted; R/W valid (for reads, /UDS and /LDS too) |
 | 70 | | 100 MHz side captures /AS: the access is known |
 | 75 | S3 | Write data valid |
-| 90 | | 100 MHz side captures write data |
-| 100 | S4 | Slot k+1 starts: the CPU's memory cycle (cycle 0) puts the address on the SRAM |
-| 110 | | /DTACK asserted |
+| 100 | S4 | Slot k+1 starts: a read's memory cycle (cycle 0) is issued; for writes, /UDS and /LDS are asserted |
+| 110 | | /DTACK asserted (reads and writes) |
+| 110–130 | | Read: address on the SRAM pins (the pads add one clock) |
+| 120 | | Write: byte strobes captured; the write is posted |
 | 125 | S5 | fx68k sees /DTACK: no wait state |
-| 120 | | SRAM read data captured (end of memory cycle 0) |
+| 140 | | Read data captured from the SRAM |
 | 160 | | Read data driven to fx68k |
 | 175 | S7 | fx68k latches the read data (end of S6) |
-| 200 | | Next cycle can start |
+| 200 | | Slot k+2 starts: a posted write uses its cycle 0. Next bus cycle can start |
 
-Every slot has a CPU memory cycle (cycle 0, spec 5), so a Chip RAM access always finds one at the start of the cycle's second slot. For block RAM, registers and ROM, the data is also ready well before 160 ns. So all targets give zero wait states.
+**Reads** use cycle 0 of the bus cycle's second slot. /DTACK goes out as soon as that cycle is issued, because the data is certain to follow by 160 ns.
+
+**Writes are posted.** On a 68000 write, /UDS and /LDS only appear at S4, too late for slot k+1's cycle 0. The bus interface gives /DTACK early anyway, keeps the address, data and byte strobes, and writes them in cycle 0 of slot k+2. That is the first slot of the CPU's next bus cycle, which the CPU never uses for its own access (that comes in the cycle's second slot), so writes also cost no wait states. A read that follows always comes after the posted write, so it sees the new data.
+
+For block RAM, registers and ROM, the data is ready well before 160 ns. So all targets give zero wait states.
+
+**Checked in simulation** (`sim/`, phase 2): fx68k asserts /AS 50 ns into the slot, as above, and every bus cycle of the boot ROM test runs with no wait states, with or without the DMA port using every other memory cycle. The one exception is the bus cycle straight after a bus error: exception processing starts it 50 ns off the slot grid, it gets one wait state, and the next one is back in step.
 
 ### 4.2 Wait states
 
@@ -89,6 +96,8 @@ Every slot has a CPU memory cycle (cycle 0, spec 5), so a Chip RAM access always
 | Interrupt acknowledge | 0 |
 
 Waits are always whole slots, 2 CPU clocks each. Since every slot has a CPU cycle, there is no alignment to keep: the next access simply uses the next slot's cycle 0.
+
+**Off the grid:** 68000 bus cycles start on even CPU clocks, so they normally start on a slot boundary. If one ever starts 50 ns into a slot, the early /DTACK simply arrives one 68000 clock later: one wait state, after which the bus cycles are back in step with the slots.
 
 ## 5. Address decoding
 
@@ -156,7 +165,7 @@ Added to the system control registers (spec 7, section 9):
 | # | Item |
 |---|------|
 | B1 | Confirm fx68k meets 40 MHz in Vivado on the XC7A35T-2, with the multicycle constraints |
-| B2 | Confirm in simulation that fx68k's outputs and sampling points match section 4.1 exactly (spec 5, open point M1) |
+| B2 | ~~Confirm in simulation that fx68k's outputs and sampling points match section 4.1~~ Done: /AS at 50 ns into the slot, zero wait states (section 4.1) |
 | B3 | A hardware debugger: pause the CPU by stopping its enables, single-step, breakpoints on addresses, all controlled from the PC over USB |
 | B4 | Whether a user-mode access to Chip RAM should ever be blocked (memory protection beyond PROTECT): not in version 1 |
 

@@ -1,0 +1,262 @@
+// retro68k system testbench (phase 2): fx68k runs the boot ROM from the
+// simulated board: SRAM model, FT232H model, optional DMA load.
+//   +dma        keep the DMA port busy with random reads and writes
+//   +trace      print the first bus cycles with their position in the slot
+//   +serial     after PASS: echo test (with a near-miss of the control
+//               sequence), then the RESET control command; expects a second PASS
+`timescale 1ns/1ps
+module tb;
+    reg clk100 = 1'b1, clk40 = 1'b1;
+    always #5    clk100 = ~clk100;
+    always #12.5 clk40  = ~clk40;
+
+    // Power-on reset: last seen high by the clock edges at 2000 ns (a slot boundary)
+    reg por = 1'b1;
+    initial #2001 por = 1'b0;
+
+    // ---------------------------------------------------------------- DUT
+    wire [20:0] a;
+    wire        ce_n, ub_n, lb_n, oe_r, oe_f, we_r, we_f, t_r, t_f;
+    wire [15:0] dq_o;
+    wire [15:0] dq;
+    wire        ft_rxf_n, ft_txe_n, ft_d_oe, ft_rd_n, ft_wr_n, ft_siwu_n;
+    wire [7:0]  ft_d, ft_d_o;
+
+    reg         dma_req = 0, dma_we = 0;
+    reg  [21:1] dma_addr = 0;
+    reg  [15:0] dma_wdata = 0;
+    reg  [1:0]  dma_be = 2'b11;
+    wire        dma_ack, dma_rvalid;
+    wire [15:0] dma_rdata;
+    wire [3:0]  sc;
+    wire        halted;
+
+    retro68k #(.ROM_INIT("boot.hex")) dut (
+        .clk100(clk100), .clk40(clk40), .por100(por), .por40(por),
+        .btn_reset_n(1'b1), .buttons(2'b00),
+        .sram_a(a), .sram_ce_n(ce_n), .sram_ub_n(ub_n), .sram_lb_n(lb_n),
+        .sram_oe_n_r(oe_r), .sram_oe_n_f(oe_f), .sram_we_n_r(we_r), .sram_we_n_f(we_f),
+        .sram_dq_o(dq_o), .sram_dq_t_r(t_r), .sram_dq_t_f(t_f), .sram_dq_i(dq),
+        .ft_rxf_n(ft_rxf_n), .ft_txe_n(ft_txe_n), .ft_d_i(ft_d), .ft_d_o(ft_d_o),
+        .ft_d_oe(ft_d_oe), .ft_rd_n(ft_rd_n), .ft_wr_n(ft_wr_n), .ft_siwu_n(ft_siwu_n),
+        .dma_req(dma_req), .dma_we(dma_we), .dma_addr(dma_addr), .dma_wdata(dma_wdata),
+        .dma_be(dma_be), .dma_ack(dma_ack), .dma_rvalid(dma_rvalid), .dma_rdata(dma_rdata),
+        .dbg_sc(sc), .dbg_halted(halted)
+    );
+
+    // ---------------------------------------------------------------- SRAM pads
+    // Output registers in the pads: 1 ns clock-to-out
+    reg  [20:0] pa;   reg pce_n = 1, pub_n = 1, plb_n = 1;  reg [15:0] pdq;
+    always @(posedge clk100) begin
+        pa    <= #1 a;
+        pce_n <= #1 ce_n;
+        pub_n <= #1 ub_n;
+        plb_n <= #1 lb_n;
+        pdq   <= #1 dq_o;
+    end
+    wire poe_n, pwe_n, pt;
+    oddr #(.INIT(1'b1)) o_oe (.clk(clk100), .d_r(oe_r), .d_f(oe_f), .q(poe_n));
+    oddr #(.INIT(1'b1)) o_we (.clk(clk100), .d_r(we_r), .d_f(we_f), .q(pwe_n));
+    oddr #(.INIT(1'b1)) o_t  (.clk(clk100), .d_r(t_r),  .d_f(t_f),  .q(pt));
+    assign dq = pt ? 16'hzzzz : pdq;
+
+    sram_model sram (.a(pa), .dq(dq), .ce_n(pce_n), .oe_n(poe_n), .we_n(pwe_n),
+                     .ub_n(pub_n), .lb_n(plb_n), .fpga_drives(!pt));
+
+    // ---------------------------------------------------------------- FT232H
+    assign ft_d = ft_d_oe ? ft_d_o : 8'hzz;
+    ft232h_model ft (.d(ft_d), .rxf_n(ft_rxf_n), .txe_n(ft_txe_n),
+                     .rd_n(ft_rd_n), .wr_n(ft_wr_n), .siwu_n(ft_siwu_n));
+
+    // ---------------------------------------------------------------- DMA load
+    // Random word reads and writes in 0x300000-0x3FFFFF, checked against a copy.
+    reg  [15:0] shadow [0:(1<<19)-1];
+    reg  [18:0] pend_q [0:7];      // addresses of reads waiting for their data
+    reg  [15:0] pend_v [0:7];      // and the value at the time each read was issued
+    integer     pend_h = 0, pend_t = 0;
+    integer     dma_reads = 0, dma_writes = 0, dma_errors = 0, i;
+    reg         dma_on = 0;
+    initial begin
+        for (i = 0; i < (1<<19); i = i + 1) shadow[i] = 16'h0000;
+        for (i = 0; i < (1<<19); i = i + 1) sram.mem[(1<<20) + (1<<19) + i] = 16'h0000;
+        dma_on = $test$plusargs("dma");
+    end
+    always @(posedge clk100) begin
+        if (dma_rvalid) begin
+            dma_reads = dma_reads + 1;
+            if (pend_h == pend_t) begin
+                $display("%t DMA ERROR: read data with no read waiting", $realtime);
+                dma_errors = dma_errors + 1;
+            end else begin
+                if (dma_rdata !== pend_v[pend_h % 8]) begin
+                    if (dma_errors < 10)
+                        $display("%t DMA ERROR: read %h from %h, expected %h", $realtime,
+                                 dma_rdata, {2'b11, pend_q[pend_h % 8], 1'b0}, pend_v[pend_h % 8]);
+                    dma_errors = dma_errors + 1;
+                end
+                pend_h = pend_h + 1;
+            end
+        end
+        if (dma_ack) begin
+            if (dma_we) begin
+                shadow[dma_addr[19:1]] = dma_wdata;
+                dma_writes = dma_writes + 1;
+            end else begin
+                pend_q[pend_t % 8] = dma_addr[19:1];
+                pend_v[pend_t % 8] = shadow[dma_addr[19:1]];
+                pend_t = pend_t + 1;
+            end
+            dma_req <= 1'b0;
+        end
+        if (dma_on && !por && (!dma_req || dma_ack)) begin
+            dma_req   <= 1'b1;
+            dma_we    <= $random;
+            dma_addr  <= {2'b11, 1'b0, $random} & 21'h1FFFFF | 21'h180000;
+            dma_wdata <= $random;
+        end
+    end
+
+    // ---------------------------------------------------------------- bus cycle monitor
+    // Length of /AS low in ns: a zero-wait-state cycle has the same length
+    // every time; each wait state adds 50 ns.
+    real    t_as = 0;
+    integer hist [0:15];
+    integer ncyc = 0, ntrace = 0, trace = 0, nslow = 0;
+    initial begin
+        for (i = 0; i < 16; i = i + 1) hist[i] = 0;
+        trace = $test$plusargs("trace");
+    end
+    reg [23:0] tr_addr; reg tr_rw; reg [2:0] tr_fc;
+    always @(negedge dut.c_as_n) begin
+        t_as = $realtime;
+        tr_addr = {dut.c_addr, 1'b0}; tr_rw = dut.c_rw; tr_fc = dut.c_fc;
+        if (trace && ntrace < 12)
+            $display("%t bus cycle %0d: /AS low %0.0f ns into the slot", $realtime,
+                     ntrace, $realtime - 2000.0 - 100.0 * $floor(($realtime - 2000.0) / 100.0));
+    end
+    // Full bus trace (+bustrace=N): address, direction and data of the first N cycles
+    integer nbus = 0;
+    always @(posedge dut.c_as_n) if (!por && t_as > 0 && nbus > 0) begin
+        if (tr_rw) $display("%t  R %h = %h %s", $realtime, tr_addr, dut.din, dut.berr_n ? "" : "BERR");
+        else       $display("%t  W %h = %h %b%b", $realtime, tr_addr, dut.c_dout, !dut.c_uds_n, !dut.c_lds_n);
+        nbus = nbus - 1;
+        ntrace = ntrace + 1;
+    end
+    initial if (!$value$plusargs("bustrace=%d", nbus)) nbus = 0;
+    always @(posedge dut.c_as_n) if (!por && t_as > 0) begin
+        i = ($realtime - t_as) / 50.0;
+        hist[(i > 15) ? 15 : i] = hist[(i > 15) ? 15 : i] + 1;
+        if (i > 3 && nslow < 10) begin
+            $display("%t slow bus cycle: /AS low %0.0f ns, %s %h fc %0d", $realtime, $realtime - t_as,
+                     tr_rw ? "read" : "write", tr_addr, tr_fc);
+            nslow = nslow + 1;
+        end
+        ncyc = ncyc + 1;
+    end
+
+    // Register bus trace (+rbtrace): the first 40 register accesses
+    integer nrb = 0, rbtrace = 0;
+    initial rbtrace = $test$plusargs("rbtrace");
+    always @(posedge clk100) if (rbtrace && nrb < 40) begin
+        if (dut.rb_wr) begin
+            $display("%t rb write %h = %h be %b", $realtime, {dut.rb_addr, 2'b00}, dut.rb_wdata, dut.rb_be);
+            nrb = nrb + 1;
+        end
+        if (dut.rb_rd) begin
+            $display("%t rb read  %h", $realtime, {dut.rb_addr, 2'b00});
+            nrb = nrb + 1;
+        end
+    end
+
+    // ---------------------------------------------------------------- serial test
+    // The near-miss must come back unchanged; the full sequence must not appear.
+    event start_serial;
+    reg [7:0] echo_exp [0:15];
+    integer   n_echo = 0, j, serial_errors = 0;
+    task push(input [7:0] b); begin ft.send(b); echo_exp[n_echo] = b; n_echo = n_echo + 1; end endtask
+    initial begin
+        @(start_serial);
+        #2000;
+        $display("\n%t PC: sending text with a near-miss of the control sequence", $realtime);
+        push("H"); push("i"); push(8'h00); push(8'hFF); push("R"); push("6"); push("!");
+        push(8'h00); push(8'hFF); push("R"); push("6"); push("8"); push("K"); push("?");
+        #150000;    // a 68000 echo loop takes about 6 us per byte
+        for (j = 0; j < n_echo; j = j + 1)
+            if (ft.from_fpga[echo_at + j] !== echo_exp[j]) begin
+                $display("SERIAL ERROR: echo byte %0d is %h, expected %h", j, ft.from_fpga[echo_at + j], echo_exp[j]);
+                serial_errors = serial_errors + 1;
+            end
+        if (serial_errors == 0) $display("%t PC: echo ok (%0d bytes)", $realtime, n_echo);
+        $display("%t PC: sending the RESET control command", $realtime);
+        for (j = 0; j < 14; j = j + 1)
+            ft.send(j == 0 ? 8'h00 : j == 1 ? 8'hFF : j == 2 ? "R" : j == 3 ? "6" : j == 4 ? "8" : j == 5 ? "K" :
+                    j == 6 ? "-" : j == 7 ? "C" : j == 8 ? "T" : j == 9 ? "L" : j == 10 ? 8'hFF : j == 11 ? 8'h00 :
+                    j == 12 ? 8'hA5 : 8'h5A);
+        ft.send(8'h02); ft.send(8'hFD);
+    end
+
+    // ---------------------------------------------------------------- finish
+    integer k, done = 0, ok = 0;
+    task report;
+        begin
+            $display("");
+            $display("---- %0d bus cycles; /AS low time:", ncyc);
+            for (k = 0; k < 16; k = k + 1)
+                if (hist[k] != 0) $display("     %0d-%0d ns: %0d", k * 50, k * 50 + 49, hist[k]);
+            $display("---- DMA: %0d reads, %0d writes, %0d errors", dma_reads, dma_writes, dma_errors);
+            $display("---- SRAM timing errors: %0d, FT232H errors: %0d, send-immediate pulses: %0d",
+                     sram.errors, ft.errors, ft.siwu_count);
+        end
+    endtask
+
+    integer scan = 0, ls = 0, npass = 0, need = 1, serial_test = 0, echo_at = 0;
+    initial begin
+        serial_test = $test$plusargs("serial");
+        if (serial_test) need = 2;
+    end
+    always @(posedge clk100) if (!done) begin
+        // A line starting "PASS" or "FAIL" ends the test
+        while (scan < ft.nout) begin
+            if (scan == 0 || ft.from_fpga[scan-1] == 8'h0A) ls = scan;
+            if (scan - ls == 3) begin
+                if ({ft.from_fpga[ls], ft.from_fpga[ls+1], ft.from_fpga[ls+2], ft.from_fpga[ls+3]} == "PASS") begin
+                    npass = npass + 1;
+                    if (npass == need) begin done = 1; ok = 1; end
+                    else if (npass == 1) begin echo_at = scan + 3; -> start_serial; end
+                end
+                if ({ft.from_fpga[ls], ft.from_fpga[ls+1], ft.from_fpga[ls+2], ft.from_fpga[ls+3]} == "FAIL") begin
+                    done = 1; ok = 0;
+                end
+            end
+            scan = scan + 1;
+        end
+        if (halted) begin
+            $display("\n%t CPU halted (double bus fault)", $realtime);
+            done = 1; ok = 0;
+        end
+        if (done) begin
+            #20000;    // let the rest of the line out
+            report;
+            if (serial_test)
+                $display("---- serial: %0d errors; RESETWHY after the command: %h", serial_errors, dut.resetwhy);
+            if (serial_test && dut.resetwhy !== 8'h10) serial_errors = serial_errors + 1;
+            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0) $display("TEST PASSED");
+            else $display("TEST FAILED");
+            $finish;
+        end
+    end
+
+    integer tmo;
+    initial begin
+        if ($test$plusargs("vcd")) begin
+            $dumpfile("tb.vcd");
+            $dumpvars(0, tb);
+        end
+        if (!$value$plusargs("timeout=%d", tmo)) tmo = 50_000_000;
+        #(tmo);
+        $display("\nTIMEOUT");
+        report;
+        $display("TEST FAILED");
+        $finish;
+    end
+endmodule

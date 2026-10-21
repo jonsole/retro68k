@@ -43,7 +43,8 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 | `fpga/`             | Register map source (`regmap.def`); Verilog in `fpga/rtl/` |
 | `firmware/boot/`    | 68000 assembly boot ROM / monitor              |
 | `firmware/include/` | Generated hardware definitions for assembler (`hw.inc`) and C (`hw.h`) |
-| `tools/`            | Register map generator (`regmap.py`); later build scripts and the USB loader |
+| `tools/`            | Register map generator (`regmap.py`), `bin2hex.py`; later build scripts and the USB loader |
+| `sim/`              | System simulation (Icarus Verilog): `make -C sim` |
 | `hardware/`         | Wiring for the FT232H module                   |
 
 ## Toolchain
@@ -55,7 +56,7 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 ## Roadmap
 
 1. [ ] FPGA bring-up: HDMI/VGA test pattern, USB serial echo
-2. [ ] Whole computer in simulation: prints "hello"
+2. [ ] Whole computer in simulation: prints "hello" (serial done, screen next)
 3. [ ] Computer on the board: "hello" on a monitor, RAM test, boot monitor
 4. [ ] Video: bitmap layers, palette, scrolling, sprites, copper
 5. [ ] Audio: sample channels and stream

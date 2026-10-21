@@ -1,0 +1,191 @@
+// retro68k: the computer, without board-specific parts (clocks, pads).
+//
+// Version 1 (phase 2): fx68k, bus interface, SRAM controller, boot ROM,
+// system registers and USB serial. One DMA port stands in for the DMA users
+// still to come, so tests can load the memory while the CPU runs.
+module retro68k #(
+    parameter ROM_INIT = "boot.hex",
+    parameter [5:0] CHIPMB = 6'd4
+) (
+    input  wire        clk100,
+    input  wire        clk40,
+    input  wire        por100,        // power-on reset; last seen high on a slot boundary
+    input  wire        por40,         // the same, in the 40 MHz domain
+    input  wire        btn_reset_n,   // debounced
+    input  wire [1:0]  buttons,       // MULTIFACE (0), DIVMMC (1), 1 = pressed
+
+    // SRAM (before the DDR output registers)
+    output wire [20:0] sram_a,
+    output wire        sram_ce_n, sram_ub_n, sram_lb_n,
+    output wire        sram_oe_n_r, sram_oe_n_f,
+    output wire        sram_we_n_r, sram_we_n_f,
+    output wire [15:0] sram_dq_o,
+    output wire        sram_dq_t_r, sram_dq_t_f,
+    input  wire [15:0] sram_dq_i,
+
+    // FT232H
+    input  wire        ft_rxf_n, ft_txe_n,
+    input  wire [7:0]  ft_d_i,
+    output wire [7:0]  ft_d_o,
+    output wire        ft_d_oe, ft_rd_n, ft_wr_n, ft_siwu_n,
+
+    // DMA port (tests; later the DMA users)
+    input  wire        dma_req, dma_we,
+    input  wire [21:1] dma_addr,
+    input  wire [15:0] dma_wdata,
+    input  wire [1:0]  dma_be,
+    output wire        dma_ack, dma_rvalid,
+    output wire [15:0] dma_rdata,
+
+    // Debug
+    output wire [3:0]  dbg_sc,
+    output wire        dbg_halted
+);
+    // ---------------------------------------------------------------- timebase
+    wire [2:0] ph;
+    wire [3:0] sc;
+    timebase tb0 (.clk(clk100), .rst(por100), .ph(ph), .sc(sc));
+    assign dbg_sc = sc;
+
+    reg [6:0] us_div;
+    wire      us_tick = (us_div == 7'd99);
+    always @(posedge clk100) us_div <= (por100 || us_tick) ? 7'd0 : us_div + 1'b1;
+
+    // ---------------------------------------------------------------- reset (spec 7, section 2)
+    wire soft_reset, cmd_break, cmd_reset, cmd_upload, haltreset;
+    wire c_halted_n;
+    reg  [1:0] btn_s;
+    always @(posedge clk100) btn_s <= {btn_s[0], btn_reset_n};
+
+    wire halted   = !c_halted_n;
+    wire rst_req  = !btn_s[1] || soft_reset || cmd_reset || cmd_upload || (halted && haltreset);
+    reg  [8:0] rst_cnt;
+    reg        sys_rst;
+    reg        cold;                 // power-on: fx68k's pwrUp
+    reg  [7:0] resetwhy;
+
+    always @(posedge clk100) begin
+        if (por100) begin
+            rst_cnt  <= 9'd0;
+            sys_rst  <= 1'b1;
+            cold     <= 1'b1;
+            resetwhy <= 8'h01;       // POWER
+        end else if (rst_req && !sys_rst) begin
+            rst_cnt  <= 9'd0;
+            sys_rst  <= 1'b1;
+            resetwhy <= {halted && haltreset, 1'b0, cmd_upload, cmd_reset || cmd_upload,
+                         soft_reset, !btn_s[1], 1'b0, 1'b0};
+        end else if (sys_rst) begin
+            // Hold reset for 5.12 us, and end it on a slot boundary
+            if (rst_cnt != 9'd511) rst_cnt <= rst_cnt + 1'b1;
+            else if (sc == 4'd9) begin
+                sys_rst <= 1'b0;
+                cold    <= 1'b0;
+            end
+        end
+    end
+
+    // fx68k's reset inputs cross like its other inputs (they change at 10 or 30 ns)
+    reg cpu_rst = 1'b1, cpu_cold = 1'b1;
+    always @(posedge clk100) if (ph == 3'd0 || ph == 3'd2) begin
+        cpu_rst  <= sys_rst;
+        cpu_cold <= cold;
+    end
+
+    // ---------------------------------------------------------------- CPU
+    wire        c_as_n, c_uds_n, c_lds_n, c_rw, c_reset_n;
+    wire [2:0]  c_fc;
+    wire [23:1] c_addr;
+    wire [15:0] c_dout;
+    wire        dtack_n, berr_n;
+    wire [15:0] din;
+
+    cpu_fx68k cpu (
+        .clk(clk40), .por(por40), .rst(cpu_rst), .pwrup(cpu_cold),
+        .as_n(c_as_n), .uds_n(c_uds_n), .lds_n(c_lds_n), .rw(c_rw),
+        .fc(c_fc), .addr(c_addr), .dout(c_dout),
+        .reset_out_n(c_reset_n), .halted_n(c_halted_n),
+        .dtack_n(dtack_n), .berr_n(berr_n), .ipl_n(3'b111), .din(din)
+    );
+    assign dbg_halted = halted;
+
+    // ---------------------------------------------------------------- bus
+    wire        overlay, romwe, protect;
+    wire        m_req, m_we, m_ack, m_rvalid;
+    wire [21:1] m_addr;
+    wire [15:0] m_wdata, mem_rdata;
+    wire [1:0]  m_be;
+    wire        rom_en;
+    wire [1:0]  rom_we;
+    wire [14:1] rom_addr;
+    wire [15:0] rom_wdata, rom_rdata;
+    wire        rb_rd, rb_wr;
+    wire [23:2] rb_addr;
+    wire [31:0] rb_wdata;
+    wire [3:0]  rb_be;
+    wire [31:0] rd_sys, rd_ser;
+    wire        iack;
+    wire [2:0]  iack_level;
+    wire        berr_ev;
+    wire [23:0] berr_addr;
+    wire [3:0]  berr_why;
+
+    bus_if #(.CHIP_TOP({CHIPMB[3:0], 20'd0})) bus (
+        .clk(clk100), .rst(sys_rst), .ph(ph),
+        .c_as_n(c_as_n), .c_uds_n(c_uds_n), .c_lds_n(c_lds_n), .c_rw(c_rw),
+        .c_fc(c_fc), .c_addr(c_addr), .c_dout(c_dout),
+        .dtack_n(dtack_n), .berr_n(berr_n), .din(din),
+        .overlay(overlay), .romwe(romwe), .protect(protect),
+        .m_req(m_req), .m_we(m_we), .m_addr(m_addr), .m_wdata(m_wdata), .m_be(m_be),
+        .m_ack(m_ack), .m_rvalid(m_rvalid), .m_rdata(mem_rdata),
+        .rom_en(rom_en), .rom_we(rom_we), .rom_addr(rom_addr), .rom_wdata(rom_wdata),
+        .rom_rdata(rom_rdata),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_sys | rd_ser),
+        .iack(iack), .iack_level(iack_level), .iack_vector(8'd24),   // spurious until spec 13
+        .berr_ev(berr_ev), .berr_addr(berr_addr), .berr_why(berr_why)
+    );
+
+    // ---------------------------------------------------------------- memory
+    sram_ctl mem (
+        .clk(clk100), .rst(sys_rst), .sc(sc),
+        .cpu_req(m_req), .cpu_we(m_we), .cpu_addr(m_addr), .cpu_wdata(m_wdata), .cpu_be(m_be),
+        .cpu_ack(m_ack), .cpu_rvalid(m_rvalid),
+        .dma_req(dma_req), .dma_we(dma_we), .dma_addr(dma_addr), .dma_wdata(dma_wdata),
+        .dma_be(dma_be), .dma_ack(dma_ack), .dma_rvalid(dma_rvalid),
+        .rdata(mem_rdata),
+        .sram_a(sram_a), .sram_ce_n(sram_ce_n), .sram_ub_n(sram_ub_n), .sram_lb_n(sram_lb_n),
+        .sram_oe_n_r(sram_oe_n_r), .sram_oe_n_f(sram_oe_n_f),
+        .sram_we_n_r(sram_we_n_r), .sram_we_n_f(sram_we_n_f),
+        .sram_dq_o(sram_dq_o), .sram_dq_t_r(sram_dq_t_r), .sram_dq_t_f(sram_dq_t_f),
+        .sram_dq_i(sram_dq_i)
+    );
+    assign dma_rdata = mem_rdata;
+
+    bootrom #(.INIT(ROM_INIT)) rom (
+        .clk(clk100), .en(rom_en), .we(rom_we), .addr(rom_addr), .wdata(rom_wdata),
+        .rdata(rom_rdata)
+    );
+
+    // ---------------------------------------------------------------- system block
+    sysregs #(.CHIPMB(CHIPMB)) sys (
+        .clk(clk100), .rst(sys_rst), .por(por100),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_sys),
+        .resetwhy(resetwhy), .buttons(buttons), .halted(halted),
+        .berr_ev(berr_ev), .berr_addr(berr_addr), .berr_why(berr_why),
+        .overlay(overlay), .romwe(romwe), .protect(protect), .haltreset(haltreset),
+        .soft_reset(soft_reset)
+    );
+
+    // The USB link survives resets it causes itself (spec 14), so only power-on resets it
+    wire ser_irq;
+    serial ser (
+        .clk(clk100), .rst(por100), .us_tick(us_tick),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_ser),
+        .irq(ser_irq), .cmd_break(cmd_break), .cmd_reset(cmd_reset), .cmd_upload(cmd_upload),
+        .ft_rxf_n(ft_rxf_n), .ft_txe_n(ft_txe_n), .ft_d_i(ft_d_i), .ft_d_o(ft_d_o),
+        .ft_d_oe(ft_d_oe), .ft_rd_n(ft_rd_n), .ft_wr_n(ft_wr_n), .ft_siwu_n(ft_siwu_n)
+    );
+endmodule

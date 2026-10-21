@@ -44,3 +44,7 @@ Example (C):
 VIDCON = VIDCON_EN_MASK;
 L_PTR(0) = (uint32_t)picture;
 ```
+
+## bin2hex.py
+
+Turns the assembled boot ROM (`boot.bin`) into a `$readmemh` file of 16-bit words for the block RAM: `bin2hex.py boot.bin boot.hex [words]`.

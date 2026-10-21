@@ -1,0 +1,3 @@
+[submodule "fpga/third_party/fx68k"]
+	path = fpga/third_party/fx68k
+	url = https://github.com/ijor/fx68k

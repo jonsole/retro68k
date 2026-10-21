@@ -1,21 +1,203 @@
-; retro68k boot ROM - minimal start-up
-; Assemble: vasmm68k_mot -Fbin -I ../include -o boot.bin boot.s
+; retro68k boot ROM, phase 2: start-up checks over the USB serial link.
+;
+;   1. banner and SYSID (a 32-bit register read in two halves)
+;   2. vector table built in Chip RAM, then the reset overlay turned off
+;   3. Chip RAM test: address pattern, its inverse, and byte writes
+;   4. a deliberate bus error, checked against BUSERRADDR and BUSERRWHY
+;   5. "PASS" or "FAIL", then echo whatever arrives over USB
+;
+; Assemble: vasmm68k_mot -Fbin -I ../include [-DSIM] -o boot.bin boot.s
+; With SIM defined, the RAM test covers only 8 KB, to keep simulation short.
 
             include "hw.inc"
 
-STACK_TOP   equ $00004000       ; top of the first 16 KB of Chip RAM (temporary RAM in phase 3)
+; While the reset overlay is on, reads of 0-$7FFF come from the ROM, so the
+; stack and variables live above that.
+VECTORS     equ $000000             ; 256 vectors, 1 KB
+VARS        equ $008000             ; boot ROM variables
+STACK_TOP   equ $010000             ; stack grows down from here
+RAMTEST     equ $010000             ; RAM test starts here
 
-            org ROM             ; $F80000; also seen at 0 while the reset overlay is on
-            dc.l STACK_TOP      ; initial supervisor stack pointer
-            dc.l start          ; initial program counter
-            dcb.l 254,unhandled ; remaining exception vectors
+; variables
+v_fail      equ VARS+0              ; long: number of failed checks
+v_savesp    equ VARS+4              ; long: stack pointer for the bus error test
+v_berr      equ VARS+8              ; long: bus errors seen
+
+            org ROM                 ; $F80000; also seen at 0 while the reset overlay is on
+            dc.l STACK_TOP          ; initial supervisor stack pointer
+            dc.l start              ; initial program counter
+            dcb.l 254,unhandled     ; remaining exception vectors
 
 start:      move.w  #$2700,sr                   ; supervisor mode, interrupts off
             lea     SYSTEM,a5
             move.l  #SERCON_EN_M|SERCON_CTLEN_M,SERCON(a5)  ; USB serial on, PC control commands on
-            lea     hello(pc),a0
+            clr.l   v_fail                      ; (overlay on: writes still reach Chip RAM)
+
+            lea     s_banner(pc),a0
             bsr     puts
-.loop:      bra.s   .loop
+
+; ---- 1. SYSID
+            lea     s_sysid(pc),a0
+            bsr     puts
+            move.l  SYSID(a5),d0
+            bsr     puthex8
+            cmp.l   #$5236384B,d0
+            bsr     okfail
+
+; ---- 2. vector table in RAM, overlay off
+            lea     VECTORS,a0
+            move.l  #STACK_TOP,(a0)+
+            move.l  #start,(a0)+
+            move.w  #254-1,d0
+.vec:       move.l  #unhandled,(a0)+
+            dbra    d0,.vec
+            move.l  #buserr,VECTORS+2*4
+
+            lea     s_overlay(pc),a0
+            bsr     puts
+            clr.l   SYSCON(a5)                  ; overlay off
+            move.l  VECTORS+4,d0                ; now read from Chip RAM, not ROM
+            cmp.l   #start,d0
+            bne.s   .ovl_bad
+            move.l  VECTORS+8,d0
+            cmp.l   #buserr,d0
+.ovl_bad:   bsr     okfail
+
+; ---- 3. RAM test
+            lea     s_ram(pc),a0
+            bsr     puts
+            move.l  #RAMTEST,d0
+            bsr     puthex8
+            moveq   #'-',d0
+            bsr     putc
+            bsr     ramtop
+            move.l  d0,d7                       ; d7 = end of the test area
+            bsr     puthex8
+            moveq   #' ',d0
+            bsr     putc
+
+            ; a) each long holds its own address
+            lea     RAMTEST,a0
+.wa:        move.l  a0,(a0)+
+            cmp.l   d7,a0
+            blo.s   .wa
+            lea     RAMTEST,a0
+.ra:        move.l  (a0),d0
+            cmp.l   a0,d0
+            bne     .ramfail
+            addq.l  #4,a0
+            cmp.l   d7,a0
+            blo.s   .ra
+
+            ; b) the inverse
+            lea     RAMTEST,a0
+.wb:        move.l  a0,d0
+            not.l   d0
+            move.l  d0,(a0)+
+            cmp.l   d7,a0
+            blo.s   .wb
+            lea     RAMTEST,a0
+.rb:        move.l  a0,d1
+            not.l   d1
+            move.l  (a0),d0
+            cmp.l   d1,d0
+            bne     .ramfail
+            addq.l  #4,a0
+            cmp.l   d7,a0
+            blo.s   .rb
+
+            ; c) byte writes: 256 bytes counting up, read back as words
+            lea     RAMTEST,a0
+            moveq   #0,d2
+.wc:        move.b  d2,(a0)+
+            addq.b  #1,d2
+            bne.s   .wc
+            lea     RAMTEST,a0
+            move.w  #$0001,d1
+            moveq   #128-1,d3
+.rc:        move.w  (a0),d0
+            cmp.w   d1,d0
+            bne.s   .ramfail
+            addq.l  #2,a0
+            add.w   #$0202,d1
+            dbra    d3,.rc
+
+            moveq   #0,d0                       ; Z set: ok
+            bsr     okfail
+            bra.s   .ramdone
+
+.ramfail:   move.l  a0,-(sp)
+            move.l  d0,-(sp)
+            moveq   #1,d0                       ; Z clear: fail
+            bsr     okfail
+            lea     s_at(pc),a0
+            bsr     puts
+            move.l  4(sp),d0
+            bsr     puthex8
+            lea     s_read(pc),a0
+            bsr     puts
+            move.l  (sp),d0
+            bsr     puthex8
+            bsr     newline
+            addq.l  #8,sp
+.ramdone:
+
+; ---- 4. bus error
+            lea     s_berr(pc),a0
+            bsr     puts
+            clr.l   v_berr
+            move.l  sp,v_savesp
+            tst.w   $400000                     ; reserved: bus error
+berr_back:  move.l  v_berr,d0                   ; the handler comes back here
+            cmp.l   #1,d0
+            bne.s   .berr_bad
+            move.l  BUSERRADDR(a5),d0
+            cmp.l   #$400000,d0
+            bne.s   .berr_bad
+            move.l  BUSERRWHY(a5),d0
+            cmp.l   #BUSERRWHY_UNMAPPED_M,d0
+.berr_bad:  bsr     okfail
+
+; ---- 5. result
+            tst.l   v_fail
+            bne.s   .fail
+            lea     s_pass(pc),a0
+            bsr     puts
+            bra.s   echoloop
+.fail:      lea     s_fail(pc),a0
+            bsr     puts
+
+; echo everything that arrives over USB
+echoloop:   move.l  SERDATA(a5),d0
+            btst    #SERDATA_EMPTY_B,d0
+            bne.s   echoloop
+            bsr     putc
+            bra.s   echoloop
+
+; ---------------------------------------------------------------- routines
+
+; d0 = end of Chip RAM to test
+ramtop:
+    ifd SIM
+            move.l  #RAMTEST+$2000,d0
+    else
+            move.l  SYSCFG(a5),d0
+            and.l   #SYSCFG_CHIPMB_M,d0
+            moveq   #SYSCFG_CHIPMB_B,d1
+            lsr.l   d1,d0
+            swap    d0
+            lsl.l   #4,d0                       ; MB -> bytes
+    endif
+            rts
+
+; print " ok" if Z is set, else " FAIL" and count it
+okfail:     beq.s   .ok
+            addq.l  #1,v_fail
+            lea     s_bad(pc),a0
+            bra.s   .p
+.ok:        lea     s_ok(pc),a0
+.p:         bsr     puts
+            rts
 
 ; print zero-terminated string at a0
 puts:       move.b  (a0)+,d0
@@ -24,14 +206,53 @@ puts:       move.b  (a0)+,d0
             bra.s   puts
 .done:      rts
 
-; send d0 over the USB serial link (spec 14); a5 = SYSTEM
+newline:    moveq   #13,d0
+            bsr     putc
+            moveq   #10,d0
+            ; fall through
+
+; send d0.b over the USB serial link (spec 14); a5 = SYSTEM
 putc:       move.w  SERSTAT+2(a5),d1            ; low half: TXSPACE
             and.w   #SERSTAT_TXSPACE_M,d1
             beq.s   putc                        ; no room yet
             move.b  d0,SERDATA+3(a5)            ; low byte of SERDATA sends one byte
             rts
 
+; print d0.l as 8 hex digits (d0 kept)
+puthex8:    movem.l d0-d2,-(sp)
+            move.l  d0,d2
+            moveq   #8-1,d1
+.dig:       rol.l   #4,d2
+            move.b  d2,d0
+            and.b   #$0F,d0
+            add.b   #'0',d0
+            cmp.b   #'9',d0
+            bls.s   .out
+            addq.b  #'A'-'9'-1,d0
+.out:       move.l  d1,-(sp)
+            bsr     putc
+            move.l  (sp)+,d1
+            dbra    d1,.dig
+            movem.l (sp)+,d0-d2
+            rts
+
+; bus error handler for the test: count it, then carry on after the access
+; (a 68000 bus error can't simply return, so restore the stack and jump back)
+buserr:     addq.l  #1,v_berr
+            move.l  v_savesp,sp
+            jmp     berr_back
+
 unhandled:  bra.s   unhandled
 
-hello:      dc.b    "retro68k boot ROM",13,10,0
+s_banner:   dc.b    13,10,"retro68k boot ROM",13,10,0
+s_sysid:    dc.b    "SYSID ",0
+s_overlay:  dc.b    "overlay off",0
+s_ram:      dc.b    "RAM ",0
+s_berr:     dc.b    "bus error",0
+s_ok:       dc.b    " ok",13,10,0
+s_bad:      dc.b    " FAIL",13,10,0
+s_at:       dc.b    "  at ",0
+s_read:     dc.b    " read ",0
+s_pass:     dc.b    "PASS",13,10,0
+s_fail:     dc.b    "FAIL",13,10,0
             even

@@ -246,4 +246,6 @@ All the planning specs are drafted (section 3). To finish phase 0:
    - **Next core format** (Q4): read how third-party cores are installed on the KS3.
 3. ~~Write the register-map generator.~~ Done: `fpga/regmap.def` and `tools/regmap.py` (spec 3, section 6).
 
+**Phase 2 has started** (it needs no board): fx68k, the bus interface, the SRAM controller, boot ROM, system registers and USB serial run in Icarus Verilog (`sim/`). The boot ROM prints its checks over the simulated serial link with zero CPU wait states, also while a DMA port uses every other memory cycle. Still to do for phase 2: the text layer (so "hello" appears on the simulated screen) and the interrupt controller.
+
 Then phase 1 (FPGA bring-up) starts: scripted Vivado build, JTAG loading, HDMI/VGA test pattern and USB echo.

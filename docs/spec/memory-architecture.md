@@ -70,7 +70,7 @@ The SRAM is asynchronous: give it an address and it answers within 10 ns. With t
 
 - Any address, any mix of reads and writes, back to back: there are no rows, banks or bursts to worry about.
 - Between a read and a following write, the controller releases /OE early and starts driving data half a clock later, so the SRAM and FPGA never drive the bus at the same time. No gap cycle is needed. This must be checked against the datasheet timings (tHZOE, tPWE, tSD; open point M2).
-- Address, data and control outputs come from the FPGA's I/O flip-flops, so their timing is the same every cycle.
+- Address, data and control outputs come from the FPGA's I/O flip-flops, so their timing is the same every cycle. Those flip-flops add one clock: a cycle issued at a cycle boundary is on the pins from 10 to 30 ns after it, and its read data is captured at 30 ns. The cycle table below is in the controller's terms.
 
 ### 4.3 Who owns each cycle
 
@@ -101,12 +101,13 @@ A 20 MHz 68000 bus cycle takes 4 CPU clocks = 2 slots. For a cycle starting in s
  time:    0    25   50   75   | 100  125  150  175  200 ns
  address:      valid ->
  /AS:               asserted ------------------------>
- SRAM:                        | cycle 0: read (100-120)
+ SRAM:                        | cycle 0: read (pins 110-130)
  /DTACK:                      | asserted (110) ------>
  CPU latches read data:                      end of S6 (175 ns)
 ```
 
-- The CPU's access uses **cycle 0 of slot k+1**. The address and R/W are known since S1–S2 and write data since S3. Read data is back at 120 ns, 55 ns before the CPU latches it.
+- A **read** uses **cycle 0 of slot k+1**. The address and R/W are known since S1–S2. Read data reaches the CPU at 160 ns, 15 ns before it latches it (spec 1, section 4.1).
+- A **write** is posted: its byte strobes only appear at S4 (100 ns), so it uses **cycle 0 of slot k+2**, the first slot of the CPU's next bus cycle, where the CPU never makes its own access. /DTACK is given early, so writes have no wait states either.
 - Every slot has a cycle 0, so it doesn't matter where in the slot grid a bus cycle starts: **there is no alignment to keep and no realignment wait**.
 - Block RAM, registers and ROM don't use SRAM cycles at all.
 
@@ -188,7 +189,7 @@ One register, **DMACON**, at `0xE00094` (spec 3). Its 16-bit value is in the low
 
 | # | Item |
 |---|------|
-| M1 | Confirm fx68k's exact bus timing (when address and write data are valid) in simulation; section 5 assumes real-68000 timing |
+| M1 | ~~Confirm fx68k's exact bus timing in simulation~~ Done: it matches the real 68000; writes are posted (section 5) |
 | M2 | Check the 20 ns read and write cycles, and read-to-write turnaround, against the IS61WV204816BLL-10 datasheet and the KS3's board timing |
 | M3 | Is the KS3 fitted with 4 MB or 2 MB? Check, and test both settings |
 | M4 | A faster memory cycle (e.g. 15 ns with careful pin timing) would give 6–7 cycles per slot; not needed for version 1 |
@@ -197,5 +198,5 @@ One register, **DMACON**, at `0xE00094` (spec 3). Its 16-bit value is in the low
 
 - **Cycle table:** for every video preset, check each owner gets its cycles at the same `hslot` on every line.
 - **CPU zero-wait:** run fx68k from Chip RAM with all display, audio and normal DMA on; assert /DTACK is never delayed. With HIGH jobs or urgent sprites, assert every delay is exactly 2 clocks and caused by them.
-- **SRAM model:** run the controller against an SRAM simulation model with the datasheet timing checks on (setup, hold, pulse widths, bus turnaround).
+- **SRAM model:** run the controller against an SRAM simulation model with the datasheet timing checks on (setup, hold, pulse widths, bus turnaround). Done in `sim/` for version 1.
 - **Board test:** a full 4 MB pattern test from the CPU and from the DMA engine at once, at every video preset.
