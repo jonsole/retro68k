@@ -80,7 +80,7 @@ s_pass:     dc.b    "PASS",13,10,0
 VIDCON_VALUE equ VIDCON_EN_M
 
 ; L0: chunky 4 bpp, 2x by 2x, window 0-640 x 16-464 (320 x 224 source),
-; fine scroll 5 (taken as 1: 4 bpp scrolls within a word), rows of 200 bytes
+; fine scroll 5, rows of 200 bytes
 L0_DATA     equ $100000
 L0_ROW      equ 200
 ; L1: 5 planes, separate, 1x, window 100-420 x 50-350, fine scroll 7,

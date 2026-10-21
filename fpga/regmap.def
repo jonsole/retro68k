@@ -118,9 +118,9 @@ block SYSTEM 0xF00000 0x10000 "System registers: interrupts, timers, serial, SD 
 
 # Interrupt controller (spec 13)
 reg 0x000 INTCON    RW  13/7  MASTER=0
-reg 0x004 INTENA    RW  13/7  SRC=23:0
-reg 0x008 INTPEND   R   13/7  SRC=23:0
-reg 0x00C INTRAW    R   13/7  SRC=23:0
+reg 0x004 INTENA    SC  13/7  SRCL=14:0 SETCLRL=15 SRCH=24:16 SETCLRH=31
+reg 0x008 INTPEND   R   13/7  SRCL=14:0 SRCH=24:16
+reg 0x00C INTRAW    R   13/7  SRCL=14:0 SRCH=24:16
 reg 0x010 INTLEVEL0 RW  13/7
 reg 0x014 INTLEVEL1 RW  13/7
 reg 0x018 INTLEVEL2 RW  13/7
@@ -237,6 +237,25 @@ const INT_SERIAL 15
 const INT_SD     16
 const INT_KEYB   17
 const INT_SOFT   18
+const INTB_VBLANK 0   "bit of source 0 in INTENA, INTPEND and INTRAW"
+const INTB_LINE   1   "bit of source 1 in INTENA, INTPEND and INTRAW"
+const INTB_COPPER 2   "bit of source 2 in INTENA, INTPEND and INTRAW"
+const INTB_VIDERR 3   "bit of source 3 in INTENA, INTPEND and INTRAW"
+const INTB_DMA0   4   "bit of source 4 in INTENA, INTPEND and INTRAW"
+const INTB_DMA1   5   "bit of source 5 in INTENA, INTPEND and INTRAW"
+const INTB_DMA2   6   "bit of source 6 in INTENA, INTPEND and INTRAW"
+const INTB_DMA3   7   "bit of source 7 in INTENA, INTPEND and INTRAW"
+const INTB_AUDSTR 8   "bit of source 8 in INTENA, INTPEND and INTRAW"
+const INTB_AUDCH  9   "bit of source 9 in INTENA, INTPEND and INTRAW"
+const INTB_AUDERR 10  "bit of source 10 in INTENA, INTPEND and INTRAW"
+const INTB_TIMER0 11  "bit of source 11 in INTENA, INTPEND and INTRAW"
+const INTB_TIMER1 12  "bit of source 12 in INTENA, INTPEND and INTRAW"
+const INTB_TIMER2 13  "bit of source 13 in INTENA, INTPEND and INTRAW"
+const INTB_TIMER3 14  "bit of source 14 in INTENA, INTPEND and INTRAW"
+const INTB_SERIAL 16  "bit of source 15 in INTENA, INTPEND and INTRAW"
+const INTB_SD     17  "bit of source 16 in INTENA, INTPEND and INTRAW"
+const INTB_KEYB   18  "bit of source 17 in INTENA, INTPEND and INTRAW"
+const INTB_SOFT   19  "bit of source 18 in INTENA, INTPEND and INTRAW"
 const VEC_NMI      31
 const VEC_SPURIOUS 24
 

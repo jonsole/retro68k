@@ -25,7 +25,7 @@ If you have programmed the Amiga, most of this will be familiar. The big differe
 | Interrupt sources | 14, in Paula | 24 plus NMI, in the interrupt controller |
 | Finding the source | One autovector per level; the handler reads INTREQR | One vector per source: the CPU jumps straight to the right handler |
 | Levels | Fixed for each source | You choose, 1 to 6, for each source |
-| Enables | INTENA (set/clear register) with a master bit | INTENA (ordinary read/write register) and INTCON.MASTER |
+| Enables | INTENA (set/clear register, bit 15) with a master bit | INTENA (two set/clear halves, bits 15 and 31) and INTCON.MASTER |
 | Clearing | Write INTREQ | Write 1 to the flag in the unit that asked |
 | Software interrupt | SOFTINT in INTREQ | SOFTINT register |
 | Timers | 4 x 16 bits, in two 8520 CIAs, about 0.7 MHz | 4 x 32 bits with 16-bit prescalers, from 100 MHz |
@@ -202,9 +202,7 @@ vbl_on:     move.w  #$2700,sr               ; 1. no interrupts while setting up
             move.l  VIDINTEN(a4),d0                 ; 4. the unit's enable
             or.l    #VIDINTEN_VBLANK_M,d0
             move.l  d0,VIDINTEN(a4)
-            move.l  INTENA(a5),d0                   ; 5. the controller's enable
-            or.l    #1<<INT_VBLANK,d0
-            move.l  d0,INTENA(a5)
+            move.w  #INTENA_SETCLRL_M|(1<<INTB_VBLANK),INTENA+2(a5)                   ; 5. the controller's enable
             move.l  #INTCON_MASTER_M,INTCON(a5)     ; 6. the master enable
             move.w  #$2000,sr                       ; 7. accept levels 1-7
             rts
@@ -244,34 +242,46 @@ Use each for a different job:
 - **INTCON.MASTER** turns off every interrupt except the NMI with a single write. Pending requests are kept, and are taken when you turn it back on.
 - **The CPU's mask** is the quickest way to hold off interrupts for a few instructions, for example around code that must not be interrupted. Use `MOVE.W SR,-(SP)`, `OR.W #$0700,SR`, ... `MOVE.W (SP)+,SR`.
 
-### INTENA is not a set/clear register
+### INTENA is a set/clear register
 
-On the Amiga, INTENA is a set/clear register: bit 15 says whether the other bits written as 1 are set or cleared. On retro68k, **INTENA is an ordinary read/write register**: whatever you write replaces all 24 bits. To change one source without disturbing the others, read INTENA, change the bit and write it back. Do this with the CPU's mask raised, so that no handler changes INTENA in between.
+As on the Amiga, you never read INTENA, change a bit and write it back. You write only the bits you want to change, together with a SET/CLR bit that says whether they are turned on or off. Bits written as 0 are left alone, so two pieces of code can each turn their own sources on and off without getting in each other's way, even from interrupt handlers.
+
+There are 24 sources, more than fit in the Amiga's 15 bits, so INTENA has **two set/clear halves**, each a 16-bit register of its own:
+
+```
+  31  30 ... 25  24 ...... 16   15  14 .............. 0
+ +---+---------+-------------+ +---+------------------+
+ |S/C|  (0)    | sources     | |S/C| sources          |
+ | H |         | 23 ..... 15 | | L | 14 ............ 0|
+ +---+---------+-------------+ +---+------------------+
+        high half (INTENA)           low half (INTENA+2)
+```
+
+- In each half, writing with the top bit (SET/CLR) = 1 **sets** the bits written as 1; with it = 0, it **clears** them.
+- Sources 0–14 are bits 14–0 of the low half. Sources 15–23 are bits 24–16, in the high half: source n is bit n + 1. `hw.inc` gives every source's bit as `INTB_name` (`INTB_VBLANK` = 0 … `INTB_SERIAL` = 16, `INTB_SOFT` = 19), so you never need to work it out.
+- Each half takes effect as soon as it is written. This is the one exception to the rule that a high-half write is held until the low half follows: you can write either half alone with `MOVE.W`, or both at once with `MOVE.L`.
+- INTPEND and INTRAW use exactly the same bit positions, so a mask built from `INTB_` names works on all three.
+- Reading INTENA gives the enables; bits 31 and 15 read as 0.
 
 ```asm
             include "hw.inc"
 
-; Turn on the interrupt sources in d0 (a mask, e.g. 1<<INT_TIMER0).
-; a5 = SYSTEM. Safe to call with interrupts on. d0 is changed.
-int_enable: move.w  sr,-(sp)
-            or.w    #$0700,sr               ; nothing else may change INTENA now
-            or.l    INTENA(a5),d0
-            move.l  d0,INTENA(a5)
-            move.w  (sp)+,sr
-            rts
+; Sources 0-14: the low half, at INTENA+2
+            move.w  #INTENA_SETCLRL_M|(1<<INTB_TIMER0),INTENA+2(a5)  ; turn TIMER0 on
+            move.w  #1<<INTB_TIMER0,INTENA+2(a5)                     ; turn TIMER0 off
 
-; Turn off the interrupt sources in d0. a5 = SYSTEM. d0 is changed.
-int_disable:
-            move.w  sr,-(sp)
-            or.w    #$0700,sr
-            not.l   d0
-            and.l   INTENA(a5),d0
-            move.l  d0,INTENA(a5)
-            move.w  (sp)+,sr
-            rts
+; Sources 15-23: the high half, at INTENA
+            move.w  #(INTENA_SETCLRH_M|(1<<INTB_SOFT))>>16,INTENA(a5)  ; turn SOFT on
+            move.w  #(1<<INTB_SOFT)>>16,INTENA(a5)                     ; turn SOFT off
+
+; Both halves at once: VBLANK and SERIAL on, nothing else changed
+            move.l  #INTENA_SETCLRH_M|INTENA_SETCLRL_M|(1<<INTB_VBLANK)|(1<<INTB_SERIAL),INTENA(a5)
+
+; Everything off
+            move.l  #INTENA_SRCH_M|INTENA_SRCL_M,INTENA(a5)
 ```
 
-**Warning:** Do not use `BSET` or `BCLR` on the high half of a register. INTENA bits 23-16 (sources 16-23, including SOFT) are in the high half, at `INTENA+1`. A byte write there is held, like any high-half write, and is applied only when the low half is next written. Bits 15-0 (sources 0-15) are in the low half and can be changed with `BSET`/`BCLR` on `INTENA+2` and `INTENA+3`, but the `MOVE.L` read-change-write above works for every source.
+Do not use `BSET` or `BCLR` on INTENA: byte writes are ignored.
 
 ### Clearing an interrupt
 
@@ -300,9 +310,9 @@ Three read-only registers show the controller's state. They are useful for debug
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
 | INTCON | `$000` | RW | Bit 0 MASTER: all interrupts except NMI on. Off after reset |
-| INTENA | `$004` | RW | Bits 23-0: enable for each source. All off after reset |
-| INTPEND | `$008` | R | Bits 23-0: sources requesting and enabled |
-| INTRAW | `$00C` | R | Bits 23-0: sources requesting, before INTENA |
+| INTENA | `$004` | Set/clear | Bit 31 SET/CLR for sources 15-23 (bits 24-16); bit 15 SET/CLR for sources 0-14 (bits 14-0). All off after reset |
+| INTPEND | `$008` | R | Same bits: sources requesting and enabled |
+| INTRAW | `$00C` | R | Same bits: sources requesting, before INTENA |
 | LASTSRC | `$024` | R | Bits 4-0: source given at the last acknowledge |
 
 ---
@@ -494,9 +504,7 @@ VECTORS     equ     $000000
 soft_on:    move.w  #$2700,sr
             move.l  #softint,VECTORS+(VECBASE_DEFAULT+INT_SOFT)*4
             move.l  #SOFTINT_CLR_M,SOFTINT(a5)
-            move.l  INTENA(a5),d0
-            or.l    #1<<INT_SOFT,d0
-            move.l  d0,INTENA(a5)
+            move.w  #(INTENA_SETCLRH_M|(1<<INTB_SOFT))>>16,INTENA(a5)
             move.l  #INTCON_MASTER_M,INTCON(a5)
             move.w  #$2000,sr
             rts
@@ -770,9 +778,7 @@ tick_on:    move.w  #$2700,sr
             move.l  #999,TMR0+TMR_COUNT(a5)             ;    the first period too
             move.l  #0,ticks
             move.l  #tick,VECTORS+(VECBASE_DEFAULT+INT_TIMER0)*4  ; 4.
-            move.l  INTENA(a5),d0
-            or.l    #1<<INT_TIMER0,d0
-            move.l  d0,INTENA(a5)
+            move.w  #INTENA_SETCLRL_M|(1<<INTB_TIMER0),INTENA+2(a5)
             move.l  #INTCON_MASTER_M,INTCON(a5)
             move.l  #TMR_CTRL_EN_M|TMR_CTRL_REPEAT_M|TMR_CTRL_IRQ_M,TMR0+TMR_CTRL(a5)  ; 5.
             move.w  #$2000,sr
@@ -840,9 +846,7 @@ every3_on:  move.w  #$2700,sr
             move.l  #2,TMR2+TMR_RELOAD(a5)              ; 3 frames a period
             move.l  #2,TMR2+TMR_COUNT(a5)
             move.l  #every3,VECTORS+(VECBASE_DEFAULT+INT_TIMER2)*4
-            move.l  INTENA(a5),d0
-            or.l    #1<<INT_TIMER2,d0
-            move.l  d0,INTENA(a5)
+            move.w  #INTENA_SETCLRL_M|(1<<INTB_TIMER2),INTENA+2(a5)
             move.l  #INTCON_MASTER_M,INTCON(a5)
             move.l  #TMR_CTRL_EN_M|TMR_CTRL_REPEAT_M|(2<<TMR_CTRL_SRC_B)|TMR_CTRL_IRQ_M,TMR2+TMR_CTRL(a5)
             move.w  #$2000,sr
@@ -912,9 +916,7 @@ sec_on:     move.w  #$2700,sr
             move.l  #999,TMR1+TMR_RELOAD(a5)            ; 1000 x 1 ms
             move.l  #999,TMR1+TMR_COUNT(a5)
             move.l  #second,VECTORS+(VECBASE_DEFAULT+INT_TIMER1)*4
-            move.l  INTENA(a5),d0
-            or.l    #1<<INT_TIMER1,d0
-            move.l  d0,INTENA(a5)
+            move.w  #INTENA_SETCLRL_M|(1<<INTB_TIMER1),INTENA+2(a5)
             move.l  #INTCON_MASTER_M,INTCON(a5)
             move.l  #TMR_CTRL_EN_M|TMR_CTRL_REPEAT_M|(3<<TMR_CTRL_SRC_B)|TMR_CTRL_IRQ_M,TMR1+TMR_CTRL(a5)
             move.w  #$2000,sr
@@ -1068,9 +1070,9 @@ All registers are in the system block. Addresses are `SYSTEM` (`$F00000`) plus t
 | Address | Name | Access | Function |
 |---------|------|--------|----------|
 | `$F00000` | INTCON | RW | MASTER (0): all interrupts except NMI on |
-| `$F00004` | INTENA | RW | SRC (23-0): enable for each source |
-| `$F00008` | INTPEND | R | SRC (23-0): requesting and enabled |
-| `$F0000C` | INTRAW | R | SRC (23-0): requesting, before INTENA |
+| `$F00004` | INTENA | Set/clear | SETCLRH (31), SRCH (24-16) = sources 15-23; SETCLRL (15), SRCL (14-0) = sources 0-14 |
+| `$F00008` | INTPEND | R | SRCH (24-16), SRCL (14-0): requesting and enabled |
+| `$F0000C` | INTRAW | R | SRCH (24-16), SRCL (14-0): requesting, before INTENA |
 | `$F00010` | INTLEVEL0 | RW | Levels of sources 0-7, 4 bits each |
 | `$F00014` | INTLEVEL1 | RW | Levels of sources 8-15 |
 | `$F00018` | INTLEVEL2 | RW | Levels of sources 16-23 |

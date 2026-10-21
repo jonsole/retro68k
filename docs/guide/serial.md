@@ -215,7 +215,7 @@ To take serial interrupts:
 1. Put your handler's address in the vector table at vector 79. The vector table must be in RAM, with the overlay off.
 2. Set the thresholds in SERLEVEL, and the timeout in SERTIME if you use RXTIMEOUT.
 3. Set the flags you want in SERIRQEN.
-4. Set bit 15 (`INT_SERIAL`) in INTENA, and INTCON.MASTER, in the interrupt controller.
+4. Enable source 15 (`INT_SERIAL`) in INTENA, and set INTCON.MASTER. Source 15 is bit 16 (`INTB_SERIAL`), in INTENA's high half, whose SET/CLR bit is bit 31.
 5. Lower the CPU's interrupt mask to 2 or less.
 
 In the handler:
@@ -249,9 +249,7 @@ serinit:
         move.l  #SERCON_EN_M|SERCON_CTLEN_M,SERCON(a5)
         move.l  #(1<<SERLEVEL_RXLEVEL_B)|1,SERLEVEL(a5) ; 1 byte waiting, 1 byte of room
         move.l  #SERIRQ_RXREADY_M,SERIRQEN(a5)          ; TXREADY only when needed
-        move.l  INTENA(a5),d0
-        bset    #INT_SERIAL,d0
-        move.l  d0,INTENA(a5)
+        move.w  #(INTENA_SETCLRH_M|(1<<INTB_SERIAL))>>16,INTENA(a5)  ; high half: set source 15
         move.l  #INTCON_MASTER_M,INTCON(a5)
         move.w  #$2000,sr               ; take interrupts of level 1 and up
         rts

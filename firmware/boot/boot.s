@@ -192,7 +192,7 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             bsr     puts
             clr.l   v_irq
             move.l  #softirq,VECTORS+(VECBASE_DEFAULT+INT_SOFT)*4
-            move.l  #1<<INT_SOFT,INTENA(a5)
+            move.w  #(INTENA_SETCLRH_M|(1<<INTB_SOFT))>>16,INTENA(a5)   ; high half: sources 15-23
             move.l  #INTCON_MASTER_M,INTCON(a5)
             move.w  #$2000,sr                   ; CPU takes interrupts of level 1 and up
             move.l  #SOFTINT_SET_M,SOFTINT(a5)
@@ -200,6 +200,7 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             nop
             move.w  #$2700,sr
             move.l  #0,INTCON(a5)
+            move.w  #(1<<INTB_SOFT)>>16,INTENA(a5)       ; (SET/CLR bit clear: clear)
             move.l  v_irq,d0
             cmp.l   #1,d0
             bne.s   .irq_bad
@@ -215,7 +216,7 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             move.l  #99,TMR0+TMR_PRESCALE(a5)      ; 100 MHz / 100 = 1 MHz
             move.l  #9,TMR0+TMR_RELOAD(a5)         ; every 10 ticks
             move.l  #9,TMR0+TMR_COUNT(a5)
-            move.l  #1<<INT_TIMER0,INTENA(a5)
+            move.w  #INTENA_SETCLRL_M|(1<<INTB_TIMER0),INTENA+2(a5)    ; low half: sources 0-14
             move.l  #INTCON_MASTER_M,INTCON(a5)
             move.l  TIMEHI(a5),d0                  ; the time now, in 10 ns ticks
             move.l  TIMELO(a5),d6
@@ -228,6 +229,7 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             move.w  #$2700,sr
             move.l  #0,TMR0+TMR_CTRL(a5)        ; (CLR.L would write the low half first)
             move.l  #0,INTCON(a5)
+            move.w  #1<<INT_TIMER0,INTENA+2(a5)
             sub.l   d6,d5                       ; 3 x 10 us plus the 68000's own time: 30-50 us
             moveq   #' ',d0
             bsr     putc
@@ -250,7 +252,7 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             move.l  #vblank,VECTORS+(VECBASE_DEFAULT+INT_VBLANK)*4
             move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)       ; clear any old flag
             move.l  #VIDSTAT_VBLANK_M,VIDINTEN(a4)
-            move.l  #1<<INT_VBLANK,INTENA(a5)
+            move.w  #INTENA_SETCLRL_M|(1<<INTB_VBLANK),INTENA+2(a5)
             move.l  #INTCON_MASTER_M,INTCON(a5)
             move.w  #$2000,sr
 .wait_vbl:  tst.l   v_vbl

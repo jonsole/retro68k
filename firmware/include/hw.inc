@@ -602,18 +602,31 @@ SYSTEM_SIZE                  equ $10000
 INTCON                       equ $0          ; RW, spec 13/7
 INTCON_MASTER_B              equ $0
 INTCON_MASTER_M              equ $1
-INTENA                       equ $4          ; RW, spec 13/7
-INTENA_SRC_B                 equ $0
-INTENA_SRC_W                 equ $18
-INTENA_SRC_M                 equ $FFFFFF
+INTENA                       equ $4          ; SC, spec 13/7
+INTENA_SRCL_B                equ $0
+INTENA_SRCL_W                equ $F
+INTENA_SRCL_M                equ $7FFF
+INTENA_SETCLRL_B             equ $F
+INTENA_SETCLRL_M             equ $8000
+INTENA_SRCH_B                equ $10
+INTENA_SRCH_W                equ $9
+INTENA_SRCH_M                equ $1FF0000
+INTENA_SETCLRH_B             equ $1F
+INTENA_SETCLRH_M             equ $80000000
 INTPEND                      equ $8          ; R, spec 13/7
-INTPEND_SRC_B                equ $0
-INTPEND_SRC_W                equ $18
-INTPEND_SRC_M                equ $FFFFFF
+INTPEND_SRCL_B               equ $0
+INTPEND_SRCL_W               equ $F
+INTPEND_SRCL_M               equ $7FFF
+INTPEND_SRCH_B               equ $10
+INTPEND_SRCH_W               equ $9
+INTPEND_SRCH_M               equ $1FF0000
 INTRAW                       equ $C          ; R, spec 13/7
-INTRAW_SRC_B                 equ $0
-INTRAW_SRC_W                 equ $18
-INTRAW_SRC_M                 equ $FFFFFF
+INTRAW_SRCL_B                equ $0
+INTRAW_SRCL_W                equ $F
+INTRAW_SRCL_M                equ $7FFF
+INTRAW_SRCH_B                equ $10
+INTRAW_SRCH_W                equ $9
+INTRAW_SRCH_M                equ $1FF0000
 INTLEVEL0                    equ $10         ; RW, spec 13/7
 INTLEVEL1                    equ $14         ; RW, spec 13/7
 INTLEVEL2                    equ $18         ; RW, spec 13/7
@@ -1116,6 +1129,25 @@ INT_SERIAL                   equ $F
 INT_SD                       equ $10
 INT_KEYB                     equ $11
 INT_SOFT                     equ $12
+INTB_VBLANK                  equ $0          ; bit of source 0 in INTENA, INTPEND and INTRAW
+INTB_LINE                    equ $1          ; bit of source 1 in INTENA, INTPEND and INTRAW
+INTB_COPPER                  equ $2          ; bit of source 2 in INTENA, INTPEND and INTRAW
+INTB_VIDERR                  equ $3          ; bit of source 3 in INTENA, INTPEND and INTRAW
+INTB_DMA0                    equ $4          ; bit of source 4 in INTENA, INTPEND and INTRAW
+INTB_DMA1                    equ $5          ; bit of source 5 in INTENA, INTPEND and INTRAW
+INTB_DMA2                    equ $6          ; bit of source 6 in INTENA, INTPEND and INTRAW
+INTB_DMA3                    equ $7          ; bit of source 7 in INTENA, INTPEND and INTRAW
+INTB_AUDSTR                  equ $8          ; bit of source 8 in INTENA, INTPEND and INTRAW
+INTB_AUDCH                   equ $9          ; bit of source 9 in INTENA, INTPEND and INTRAW
+INTB_AUDERR                  equ $A          ; bit of source 10 in INTENA, INTPEND and INTRAW
+INTB_TIMER0                  equ $B          ; bit of source 11 in INTENA, INTPEND and INTRAW
+INTB_TIMER1                  equ $C          ; bit of source 12 in INTENA, INTPEND and INTRAW
+INTB_TIMER2                  equ $D          ; bit of source 13 in INTENA, INTPEND and INTRAW
+INTB_TIMER3                  equ $E          ; bit of source 14 in INTENA, INTPEND and INTRAW
+INTB_SERIAL                  equ $10         ; bit of source 15 in INTENA, INTPEND and INTRAW
+INTB_SD                      equ $11         ; bit of source 16 in INTENA, INTPEND and INTRAW
+INTB_KEYB                    equ $12         ; bit of source 17 in INTENA, INTPEND and INTRAW
+INTB_SOFT                    equ $13         ; bit of source 18 in INTENA, INTPEND and INTRAW
 VEC_NMI                      equ $1F
 VEC_SPURIOUS                 equ $18
 DMX_OP_COPY                  equ $0

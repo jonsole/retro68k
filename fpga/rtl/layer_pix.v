@@ -7,8 +7,11 @@
 // BPL0DAT has not been written by then, the layer shows transparent pixels
 // for that group (OVERRUN).
 //
-//   chunky: plane 0 only; 1, 2, 4 or 8 bits per pixel, leftmost pixel in the top bits
-//   planar: 1-8 planes, one bit each, leftmost pixel in bit 15
+// A group is always 16 source pixels:
+//   planar: one word from each of 1-8 planes, leftmost pixel in bit 15
+//   chunky: 1, 2, 4 or 8 consecutive words (bits per pixel), packed pixels,
+//           leftmost pixel in the top bits of the first word, which is in
+//           the highest data register used (BPL0DAT holds the last word)
 //
 // Scaling repeats each source pixel 1, 2, 4 or 8 times.
 module layer_pix (
@@ -26,7 +29,7 @@ module layer_pix (
     input  wire [1:0]   lb,            // chunky: log2 of bits per pixel
     input  wire [2:0]   planes,        // planar: planes - 1
     input  wire [1:0]   hs,            // log2 of the horizontal scale
-    input  wire [3:0]   pos0,          // first pixel: bit (chunky) or pixel (planar) in the first group
+    input  wire [3:0]   pos0,          // first pixel in the first group (fine scroll)
     input  wire         transp,
     input  wire [3:0]   palofs,
 
@@ -49,12 +52,14 @@ module layer_pix (
     reg  [15:0] sh [0:7];              // shifters
     reg         ok;                    // the current group arrived
     reg         primed;                // the line's first group is in the shifters
-    reg  [3:0]  pos;                   // bit (chunky) or pixel (planar) in the group
+    reg  [3:0]  pos;                   // pixel in the group
     reg  [2:0]  hsub;                  // screen pixels shown of this source pixel
 
     // The pixel at pos
     wire [4:0]  bpp   = 5'd1 << lb;
-    wire [15:0] cw    = sh[0] << pos;
+    wire [6:0]  bitp  = {3'd0, pos} << lb;                 // chunky: bit of the pixel in the group
+    wire [2:0]  wi    = ((3'd1 << lb) - 1'b1) - bitp[6:4]; // ... and its data register
+    wire [15:0] cw    = sh[wi] << bitp[3:0];
     reg  [7:0]  value;
     always @(*) begin : px
         integer p;
@@ -67,7 +72,7 @@ module layer_pix (
     wire deep = planar ? planes[2] : (lb == 2'd3);         // more than 4 bits: no palette offset
 
     // Moving on by one source pixel
-    wire [4:0]  np    = pos + (planar ? 5'd1 : bpp);
+    wire [4:0]  np    = pos + 1'b1;
     wire        last  = np[4];                             // the group is used up
     wire        step  = (hsub == (3'd7 >> (2'd3 - hs)));   // last screen pixel of this source pixel
     wire        first = active && (hn == xs);              // the window starts with the next pixel

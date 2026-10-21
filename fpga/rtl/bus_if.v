@@ -18,6 +18,8 @@
 // If a bus cycle ever starts in the middle of a slot (the wrong 50 ns of
 // the grid), the early /DTACK simply comes one 68000 clock later: one wait
 // state, after which the bus cycles are back in step with the slots.
+`include "regmap.vh"
+
 module bus_if #(
     parameter CHIP_TOP = 24'h400000      // end of Chip RAM (0x200000 on 2 MB boards)
 ) (
@@ -126,7 +128,9 @@ module bus_if #(
     wire        in_chip   = (a24 < CHIP_TOP);
     wire        in_custom = (a24[23:16] == 8'hE0);                       // E00000-E0FFFF
     wire        in_system = (a24[23:16] == 8'hF0);
-    wire        in_plain  = 1'b0;      // no plain-memory areas in the custom block for now (spec 3, section 2)
+    // INTENA's two halves are separate set/clear registers: each half is written
+    // at once, not held (spec 3, section 2)
+    wire        in_plain  = (a24[23:2] == (`RM_SYSTEM_BASE + `RM_INTENA) >> 2);
     wire        hw_area   = (a24[23:21] == 3'b111);                      // E00000-FFFFFF
 
     reg [2:0] target;

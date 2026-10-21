@@ -99,7 +99,7 @@ Each layer runs on its own: its own pointers, data registers, shifters, window, 
 | Format | Layout |
 |--------|--------|
 | **Planar**, 1–8 planes | As on the Amiga: each plane holds one bit of every pixel, 16 pixels per word, leftmost pixel in bit 15. Plane 0 gives bit 0 of the pixel value, plane 1 bit 1, and so on |
-| **Chunky**, 1, 2, 4 or 8 bits per pixel | Pixels packed in words, leftmost pixel in the most significant bits. A chunky layer is one plane: it uses only BPL0PT and BPL0DAT |
+| **Chunky**, 1, 2, 4 or 8 bits per pixel | Pixels packed in words, leftmost pixel in the most significant bits. A chunky layer has one pointer, BPL0PT. Its 16-pixel group is 1, 2, 4 or 8 consecutive words (its bits per pixel), held in that many data registers |
 
 ### 4.3 Display window
 
@@ -115,12 +115,11 @@ Each layer has a rectangle `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND` (WINX, W
 | BPLMOD | 16, signed (even) | Bytes added to every pointer of the layer at the end of each line, as the Amiga's BPL1MOD/BPL2MOD |
 | SCROLLX | 4 | Fine scroll: pixels (0–15) skipped at the start of each line, as the Amiga's BPLCON1 delay |
 
-- **At the end of each line** inside the layer's window, each pointer the layer uses ends up at the line's start plus **the line's length plus BPLMOD**. The line's length is the window width in source pixels × bits per pixel ÷ 8, rounded up to whole words (for planar layers, one plane's worth, so 1 bit per pixel). Fine scroll does not change it: with fine scroll, one extra word is fetched and not counted.
+- **At the end of each line** inside the layer's window, each pointer the layer uses ends up at the line's start plus **the line's length plus BPLMOD**. The line's length is the window width in source pixels × bits per pixel ÷ 8, rounded up to whole words (for planar layers, one plane's worth, so 1 bit per pixel). Fine scroll does not change it. The DMA fetches whole groups, so it may read a few words past the line's end (more with fine scroll); that does not change where the pointers end up.
 - **The pointers are not reset by the hardware.** As on the Amiga, the copper (spec 10) writes them at the start of every frame, normally in the vertical blank (or the CPU does it in its VBLANK interrupt). If nothing rewrites them, the next frame carries on through memory.
 - Vertical scrolling and coarse horizontal scrolling are done by changing the pointers. Split screens are done by writing new pointers mid-frame.
 - BPLMOD = 0 shows a picture whose lines follow each other. A 320-pixel window into a 640-pixel-wide 4bpp chunky picture has a line length of 160 bytes, so BPLMOD = 160. A negative BPLMOD shows lines again or flips the picture: −(row bytes + line length) steps back one row.
 - With vertical scaling, the pointers return to the line's start after each copy of a source line except the last.
-- **Fine scroll** on a chunky layer stays within a word: SCROLLX is taken modulo 16 ÷ bits per pixel (0–1 at 8bpp, 0–3 at 4bpp, 0–7 at 2bpp, 0–15 at 1bpp).
 
 | Layout | Pointers | BPLMOD |
 |--------|----------|--------|
@@ -173,8 +172,9 @@ With VIDCON.DIRECT set, the palette and priority are not used. Every visible pix
 
 ### 5.1 Data registers and shifters
 
-- Each plane of each layer has a data register **BPLxDAT** and a 16-bit **shift register**. There is no other storage: the data registers hold the layer's next group of 16 source pixels (one word per plane), while the shifters show the current group.
-- **A group is complete when BPL0DAT is written.** The DMA writes a group's words from the highest plane down, with plane 0 last. The CPU or copper can also write the data registers (for example with DMA off), and its write of BPL0DAT completes the group the same way.
+- Each layer has 8 data registers **BPL0DAT–BPL7DAT** and 8 16-bit **shift registers**. There is no other storage: the data registers hold the layer's next group of 16 source pixels, while the shifters show the current group.
+- **A group is always 16 source pixels.** Planar: one word from each plane, plane p in BPLpDAT. Chunky with b bits per pixel: b consecutive words from BPL0PT; the first (leftmost pixels) goes in BPL(b−1)DAT and the last in BPL0DAT. So every layer has 16 pixels of time in hand, whatever its format.
+- **A group is complete when BPL0DAT is written.** The DMA writes a group's words from the highest data register down, with BPL0DAT last. The CPU or copper can also write the data registers (for example with DMA off), and its write of BPL0DAT completes the group the same way.
 - The shifters take all of a layer's data registers at once. They take the line's first group as soon as it is complete, in the horizontal blank, so the second group is already in the data registers when the window starts (as the Amiga fetches ahead of the display window). After that they take the next group each time the current one is used up (every 16 source pixels). Each take empties the data registers, and the DMA fetches the next group.
 - The display owns **memory cycles 1 and 2 of every slot**: 4 bytes every 100 ns (spec 5, section 4.3). It never touches the CPU's cycle 0.
 - **Order:** the layers that want a word take turns, one word each, so a layer never waits for more than one word from each of the others. With a given screen setup, the fetch pattern is the same on every line and every frame.
@@ -216,7 +216,7 @@ If a layer's next group is not complete when its shifters need it, the layer sho
 |-----------|-------------|
 | CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line. **To change line L, write during the visible part of line L − 1 or earlier** |
 | BPLxPT, BPLMOD | At once: they are live. The next word fetched uses the new value. A CPU or copper write wins over the DMA's own change in the same clock |
-| BPLxDAT | At once; a write of BPL0DAT completes the group |
+| BPLxDAT | At once; a write of BPL0DAT completes the group (write it last) |
 | PRIO, BGCOLOR | At the start of each line |
 | VIDCON.DIRECT, palette | At once (next pixel) |
 
@@ -252,7 +252,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 | `+0x0C` | SCROLLX | 3–0 | Fine scroll, pixels |
 | `+0x10` | BPLMOD | 15–0, signed, even | Added to the pointers at the end of each line |
 | `+0x20`–`+0x3C` | BPL0PT–BPL7PT | 22–0, even | Plane pointers (chunky: BPL0PT only) |
-| `+0x40`–`+0x5C` | BPL0DAT–BPL7DAT | 15–0 | Plane data registers (chunky: BPL0DAT only) |
+| `+0x40`–`+0x5C` | BPL0DAT–BPL7DAT | 15–0 | Data registers: the next group (chunky with b bits per pixel: BPL0DAT–BPL(b−1)DAT) |
 
 ### 6.3 Memory-mapped area
 

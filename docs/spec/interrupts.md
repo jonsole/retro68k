@@ -23,7 +23,7 @@ The interrupt controller gathers every interrupt request in the machine and pass
 | Sources | 14 | 24 + NMI |
 | Vectors | Autovectored: one vector per level; the handler reads INTREQR to find the source | One vector per source |
 | Levels | Fixed per source | Programmable per source |
-| Masking | INTENA, with a master bit | INTENA, with a master bit |
+| Masking | INTENA (set/clear, bit 15), with a master bit | INTENA (two set/clear halves, bits 15 and 31), with a master bit |
 | Software interrupt | SOFTINT | SOFTINT |
 | NMI | Level 7, rarely used | Button and USB "break", for a debug monitor |
 
@@ -90,9 +90,9 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `0x000` | INTCON | MASTER (0) | All interrupts (except NMI) on/off. Off after reset |
-| `0x004` | INTENA | 23–0 | Enable per source. All off after reset |
-| `0x008` | INTPEND | 23–0 | Read: sources pending (requesting and enabled) |
-| `0x00C` | INTRAW | 23–0 | Read: sources requesting, before INTENA |
+| `0x004` | INTENA | SETCLRH (31), sources 15–23 (24–16), SETCLRL (15), sources 0–14 (14–0) | Enables. Two set/clear halves, as the Amiga's INTENA: in each 16-bit half, writing with the top bit = 1 sets the bits written as 1, with it = 0 clears them; bits written as 0 are left alone. Each half can be written on its own with `MOVE.W`, or both with `MOVE.L`. Reads give the enables (bits 31 and 15 read 0). All off after reset |
+| `0x008` | INTPEND | As INTENA | Read: sources pending (requesting and enabled) |
+| `0x00C` | INTRAW | As INTENA | Read: sources requesting, before INTENA |
 | `0x010` | INTLEVEL0 | 8 × 4 bits | Levels of sources 0–7: source n in bits 4n+2 … 4n (0 = off, 1–6) |
 | `0x014` | INTLEVEL1 | 8 × 4 bits | Sources 8–15 |
 | `0x018` | INTLEVEL2 | 8 × 4 bits | Sources 16–23 |
@@ -101,6 +101,8 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 | `0x024` | LASTSRC | 4–0 | Read: the source given at the last interrupt acknowledge, for debugging |
 | `0x028` | NMICON | BUTTONEN (0), USBEN (1) | Enable each NMI source. Both on after reset |
 | `0x02C` | NMISTAT | BUTTON (0), USB (1) | Which caused the last NMI; sticky, write 1 to clear |
+
+**Bit positions:** in INTENA, INTPEND and INTRAW, source n is bit n for sources 0–14, and bit n + 1 for sources 15–23 (bit 15 is the low half's SET/CLR bit). `hw.inc` names each position: `INTB_VBLANK` … `INTB_SOFT`.
 
 After reset everything except NMI is off, so the boot ROM can set up its vector table (in RAM, once the ROM overlay is off) before enabling anything.
 

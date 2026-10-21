@@ -95,7 +95,7 @@ def render(regs, layers, bpt, pal, ram):
                             if (word(ptr[p] + 2 * (bi >> 4)) >> (15 - (bi & 15))) & 1:
                                 v |= 1 << p
                     else:
-                        fine = (sx & (15 >> lb)) << lb
+                        fine = (sx & 15) << lb
                         bo = fine + k * bpp
                         v = (word(ptr[0] + 2 * (bo >> 4)) >> (16 - bpp - (bo & 15))) & ((1 << bpp) - 1)
                     idx = v if deep else (palofs * 16 + (v & 15))

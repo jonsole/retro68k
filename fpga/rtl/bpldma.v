@@ -39,7 +39,8 @@ module bpldma (
     input  wire         line_t,
     input  wire [2:0]   act,           // the layer shows on the next line
     input  wire [2:0]   adv,           // ... and its pointers move on after it (last copy of a source line)
-    input  wire [8:0]   planes,        // 3 x 3 bits: planes - 1 (0 for chunky)
+    input  wire [8:0]   planes,        // 3 x 3 bits: words per group - 1 (planes, or chunky bits per pixel)
+    input  wire [2:0]   chunky,        // the layer's words all come from BPL0PT
     input  wire [35:0]  ngroups,       // 3 x 12: groups to fetch
     input  wire [35:0]  len,           // 3 x 12: line length in words per plane
     output wire         line_go,       // 1 clock: a new line started here
@@ -86,11 +87,11 @@ module bpldma (
     wire [2:0]  full = fill_t ^ take_s2;
 
     reg  [11:0] left   [0:2];          // groups still to start
-    reg  [11:0] issued [0:2];          // groups started on this line
+    reg  [11:0] issued [0:2];          // words taken from BPL0PT on this line (every pointer moved as often)
     reg  [3:0]  togo   [0:2];          // words of the current group still to ask for
     reg  [2:0]  busy;                  // a group is on its way (until its plane 0 arrives)
     // The line being fetched, for finishing it off at the next line_go
-    reg  [2:0]  pv_act, pv_adv;
+    reg  [2:0]  pv_act, pv_adv, pv_chunky;
     reg  [2:0]  pv_planes [0:2];
     reg  [11:0] pv_len [0:2];
 
@@ -116,7 +117,8 @@ module bpldma (
     end
     // The plane to ask for: high to low, plane 0 last
     wire [3:0]  pl_n    = (togo[pick] != 0) ? togo[pick] - 1'b1 : {1'b0, planes[3*pick +: 3]};
-    wire [4:0]  pi      = {pick, pl_n[2:0]};
+    wire [4:0]  di      = {pick, pl_n[2:0]};                       // data register
+    wire [4:0]  pi      = {pick, chunky[pick] ? 3'd0 : pl_n[2:0]}; // pointer
 
     // Finishing a line: what each plane pointer of layer n gets added:
     // back to the line's start, then on by its length and BPLMOD
@@ -141,6 +143,7 @@ module bpldma (
             busy   <= 3'd0;
             pv_act <= 3'd0;
             pv_adv <= 3'd0;
+            pv_chunky <= 3'd0;
             for (n = 0; n < 3; n = n + 1) begin
                 left[n] <= 12'd0;  issued[n] <= 12'd0;  togo[n] <= 4'd0;
                 mod[n]  <= 16'd0;
@@ -172,7 +175,7 @@ module bpldma (
             if (line_go) begin
                 // Finish off the line just shown, then start the next one
                 for (i = 0; i < 24; i = i + 1)
-                    if (pv_act[i / 8] && (i % 8) <= pv_planes[i / 8])
+                    if (pv_act[i / 8] && (i % 8) <= (pv_chunky[i / 8] ? 3'd0 : pv_planes[i / 8]))
                         pt[i] <= pt[i] + step[i / 8];
                 for (n = 0; n < 3; n = n + 1) begin
                     left[n]   <= (enable && act[n]) ? ngroups[12*n +: 12] : 12'd0;
@@ -183,6 +186,7 @@ module bpldma (
                 end
                 pv_act <= enable ? act : 3'd0;
                 pv_adv <= adv;
+                pv_chunky <= chunky;
                 busy   <= 3'd0;
                 gen    <= ~gen;
                 req    <= 1'b0;
@@ -195,11 +199,11 @@ module bpldma (
                 togo[pick] <= pl_n;
                 if (togo[pick] == 0) begin                   // a new group
                     left[pick]   <= left[pick] - 1'b1;
-                    issued[pick] <= issued[pick] + 1'b1;
                     busy[pick]   <= 1'b1;
                 end
+                if (pi[2:0] == 3'd0) issued[pick] <= issued[pick] + 1'b1;
                 q_layer[q_t + (ack ? 1'b1 : 1'b0)] <= pick;
-                q_plane[q_t + (ack ? 1'b1 : 1'b0)] <= pl_n[2:0];
+                q_plane[q_t + (ack ? 1'b1 : 1'b0)] <= di[2:0];
                 q_gen[q_t + (ack ? 1'b1 : 1'b0)]   <= gen[pick];
             end
 

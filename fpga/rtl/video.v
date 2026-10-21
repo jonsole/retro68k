@@ -270,7 +270,7 @@ module video #(
     reg  [2:0]  b_act, b_adv;
     reg  [3:0]  n_pos0 [0:2];
     reg  [11:0] n_groups [0:2], n_len [0:2];
-    reg  [2:0]  f_act, f_adv;
+    reg  [2:0]  f_act, f_adv, f_chunky;
     reg  [11:0] f_groups [0:2], f_len [0:2];
     reg  [2:0]  f_planes [0:2];
     reg         line_t;
@@ -308,15 +308,11 @@ module video #(
             for (n = 0; n < 3; n = n + 1) begin
                 w      = l_xe[n] - l_xs[n];
                 srcpix = (w + (3'd7 >> (2'd3 - l_ctrl[n][7:6]))) >> l_ctrl[n][7:6];
-                if (l_ctrl[n][1]) begin                        // planar: 1 bit per plane
-                    bits = {3'd0, srcpix};
-                    fine = l_sx[n];
-                end else begin                                 // chunky: fine scroll within a word
-                    bits = {3'd0, srcpix} << l_ctrl[n][3:2];
-                    fine = (l_sx[n] & (4'd15 >> l_ctrl[n][3:2])) << l_ctrl[n][3:2];
-                end
+                // a group is 16 source pixels in either format
+                bits = l_ctrl[n][1] ? {3'd0, srcpix} : {3'd0, srcpix} << l_ctrl[n][3:2];   // per plane line
+                fine = l_sx[n];
                 n_pos0[n]   <= fine;
-                n_groups[n] <= ({10'd0, fine} + bits + 14'd15) >> 4;
+                n_groups[n] <= ({10'd0, fine} + {3'd0, srcpix} + 14'd15) >> 4;
                 n_len[n]    <= (bits + 14'd15) >> 4;
             end
         end else if (hc == HVIS + 2'd2) begin
@@ -328,7 +324,8 @@ module video #(
             for (n = 0; n < 3; n = n + 1) begin
                 f_groups[n] <= n_groups[n];
                 f_len[n]    <= n_len[n];
-                f_planes[n] <= l_ctrl[n][1] ? l_ctrl[n][18:16] : 3'd0;
+                f_planes[n] <= l_ctrl[n][1] ? l_ctrl[n][18:16] : (3'd1 << l_ctrl[n][3:2]) - 1'b1;
+                f_chunky[n] <= !l_ctrl[n][1];
                 c_xs[n]     <= l_xs[n];
                 c_xe[n]     <= l_xe[n];
                 c_planar[n] <= l_ctrl[n][1];
@@ -351,7 +348,7 @@ module video #(
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(dma_q),
         .line_t(line_t), .act(f_act), .adv(f_adv),
-        .planes({f_planes[2], f_planes[1], f_planes[0]}),
+        .planes({f_planes[2], f_planes[1], f_planes[0]}), .chunky(f_chunky),
         .ngroups({f_groups[2], f_groups[1], f_groups[0]}),
         .len({f_len[2], f_len[1], f_len[0]}),
         .line_go(line_go), .line_gen(line_gen),

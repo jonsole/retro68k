@@ -45,7 +45,7 @@ This spec also replaces spec 2 (memory map), which is folded in here.
    - A low-half read on its own returns the current low half.
 4. **Reading has no side effects,** except the three FIFO data registers in the system block (SERDATA, KBDATA, SDDATA), where reading takes data out. None of these are in the custom block, so DMA and the copper can never disturb anything by reading.
 5. **Sticky flags** (marked W1C below) are cleared by writing 1 to them. Writing 0 leaves them alone.
-6. **Set/clear registers** (DMACON): bit 15 = 1 sets the other bits written as 1; bit 15 = 0 clears them.
+6. **Set/clear registers** (DMACON, INTENA): in each 16-bit set/clear half, the top bit = 1 sets the other bits written as 1; = 0 clears them. DMACON is one such half, in the low half. INTENA has two, and each is written at once on its own (it is not held as rule 2 says), so a `MOVE.W` to either half, or a `MOVE.L` to both, works. Byte writes are ignored.
 7. **Unused bits** read as 0; write them as 0.
 8. **Unused addresses** inside the custom and system blocks read as 0 and ignore writes. Only the unmapped regions in section 1 give bus errors.
 9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layer settings before each line).
@@ -189,7 +189,7 @@ Channel n (0–15) at `0x440 + n × 0x20`:
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
 | `0x000` | INTCON | RW | 13, 7 |
-| `0x004` | INTENA | RW | 13, 7 |
+| `0x004` | INTENA | Set/clear | 13, 7 |
 | `0x008` | INTPEND | R | 13, 7 |
 | `0x00C` | INTRAW | R | 13, 7 |
 | `0x010` | INTLEVEL0 | RW | 13, 7 |

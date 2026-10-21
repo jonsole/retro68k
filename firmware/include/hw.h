@@ -408,21 +408,31 @@
 #define INTCON                             HW_REG32(SYSTEM_BASE + INTCON_OFS)
 #define INTCON_MASTER_SHIFT                0
 #define INTCON_MASTER_MASK                 0x1u
-/* INTENA: RW, spec 13/7 */
+/* INTENA: SC, spec 13/7 */
 #define INTENA_OFS                         0x4u
 #define INTENA                             HW_REG32(SYSTEM_BASE + INTENA_OFS)
-#define INTENA_SRC_SHIFT                   0
-#define INTENA_SRC_MASK                    0xFFFFFFu
+#define INTENA_SRCL_SHIFT                  0
+#define INTENA_SRCL_MASK                   0x7FFFu
+#define INTENA_SETCLRL_SHIFT               15
+#define INTENA_SETCLRL_MASK                0x8000u
+#define INTENA_SRCH_SHIFT                  16
+#define INTENA_SRCH_MASK                   0x1FF0000u
+#define INTENA_SETCLRH_SHIFT               31
+#define INTENA_SETCLRH_MASK                0x80000000u
 /* INTPEND: R, spec 13/7 */
 #define INTPEND_OFS                        0x8u
 #define INTPEND                            HW_REG32(SYSTEM_BASE + INTPEND_OFS)
-#define INTPEND_SRC_SHIFT                  0
-#define INTPEND_SRC_MASK                   0xFFFFFFu
+#define INTPEND_SRCL_SHIFT                 0
+#define INTPEND_SRCL_MASK                  0x7FFFu
+#define INTPEND_SRCH_SHIFT                 16
+#define INTPEND_SRCH_MASK                  0x1FF0000u
 /* INTRAW: R, spec 13/7 */
 #define INTRAW_OFS                         0xCu
 #define INTRAW                             HW_REG32(SYSTEM_BASE + INTRAW_OFS)
-#define INTRAW_SRC_SHIFT                   0
-#define INTRAW_SRC_MASK                    0xFFFFFFu
+#define INTRAW_SRCL_SHIFT                  0
+#define INTRAW_SRCL_MASK                   0x7FFFu
+#define INTRAW_SRCH_SHIFT                  16
+#define INTRAW_SRCH_MASK                   0x1FF0000u
 /* INTLEVEL0: RW, spec 13/7 */
 #define INTLEVEL0_OFS                      0x10u
 #define INTLEVEL0                          HW_REG32(SYSTEM_BASE + INTLEVEL0_OFS)
@@ -956,6 +966,25 @@ _Static_assert(sizeof(dmxdesc_t) == 32, "DMXDESC layout");
 #define INT_SD                             0x10u
 #define INT_KEYB                           0x11u
 #define INT_SOFT                           0x12u
+#define INTB_VBLANK                        0x0u  /* bit of source 0 in INTENA, INTPEND and INTRAW */
+#define INTB_LINE                          0x1u  /* bit of source 1 in INTENA, INTPEND and INTRAW */
+#define INTB_COPPER                        0x2u  /* bit of source 2 in INTENA, INTPEND and INTRAW */
+#define INTB_VIDERR                        0x3u  /* bit of source 3 in INTENA, INTPEND and INTRAW */
+#define INTB_DMA0                          0x4u  /* bit of source 4 in INTENA, INTPEND and INTRAW */
+#define INTB_DMA1                          0x5u  /* bit of source 5 in INTENA, INTPEND and INTRAW */
+#define INTB_DMA2                          0x6u  /* bit of source 6 in INTENA, INTPEND and INTRAW */
+#define INTB_DMA3                          0x7u  /* bit of source 7 in INTENA, INTPEND and INTRAW */
+#define INTB_AUDSTR                        0x8u  /* bit of source 8 in INTENA, INTPEND and INTRAW */
+#define INTB_AUDCH                         0x9u  /* bit of source 9 in INTENA, INTPEND and INTRAW */
+#define INTB_AUDERR                        0xAu  /* bit of source 10 in INTENA, INTPEND and INTRAW */
+#define INTB_TIMER0                        0xBu  /* bit of source 11 in INTENA, INTPEND and INTRAW */
+#define INTB_TIMER1                        0xCu  /* bit of source 12 in INTENA, INTPEND and INTRAW */
+#define INTB_TIMER2                        0xDu  /* bit of source 13 in INTENA, INTPEND and INTRAW */
+#define INTB_TIMER3                        0xEu  /* bit of source 14 in INTENA, INTPEND and INTRAW */
+#define INTB_SERIAL                        0x10u  /* bit of source 15 in INTENA, INTPEND and INTRAW */
+#define INTB_SD                            0x11u  /* bit of source 16 in INTENA, INTPEND and INTRAW */
+#define INTB_KEYB                          0x12u  /* bit of source 17 in INTENA, INTPEND and INTRAW */
+#define INTB_SOFT                          0x13u  /* bit of source 18 in INTENA, INTPEND and INTRAW */
 #define VEC_NMI                            0x1Fu
 #define VEC_SPURIOUS                       0x18u
 #define DMX_OP_COPY                        0x0u

@@ -191,7 +191,7 @@ module tb;
         $display("\n%t PC: sending text with a near-miss of the control sequence", $realtime);
         push("H"); push("i"); push(8'h00); push(8'hFF); push("R"); push("6"); push("!");
         push(8'h00); push(8'hFF); push("R"); push("6"); push("8"); push("K"); push("?");
-        wait_out(echo_at + n_echo, 1000);
+        wait_out(echo_at + n_echo, 5000);       // each echoed byte is also drawn on the bitmap console
         for (j = 0; j < n_echo; j = j + 1)
             if (ft.from_fpga[echo_at + j] !== echo_exp[j]) begin
                 $display("SERIAL ERROR: echo byte %0d is %h, expected %h", j, ft.from_fpga[echo_at + j], echo_exp[j]);

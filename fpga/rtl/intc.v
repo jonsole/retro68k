@@ -112,10 +112,17 @@ module intc (
 
             if (rb_wr && sel) case (off)
                 `RM_INTCON:  if (rb_be[0]) master <= rb_wdata[0];
-                `RM_INTENA:  begin : wena
-                    reg [31:0] v;
-                    v = merge({8'd0, intena}, rb_wdata, rb_be);
-                    intena <= v[23:0];
+                // Two set/clear halves (spec 13, section 7), each written on its own:
+                // bit 15 sets or clears sources 0-14 (bits 14-0), bit 31 sources 15-23 (bits 24-16)
+                `RM_INTENA: begin
+                    if (rb_be[1:0] == 2'b11) begin
+                        if (rb_wdata[15]) intena[14:0] <= intena[14:0] |  rb_wdata[14:0];
+                        else              intena[14:0] <= intena[14:0] & ~rb_wdata[14:0];
+                    end
+                    if (rb_be[3:2] == 2'b11) begin
+                        if (rb_wdata[31]) intena[23:15] <= intena[23:15] |  rb_wdata[24:16];
+                        else              intena[23:15] <= intena[23:15] & ~rb_wdata[24:16];
+                    end
                 end
                 `RM_INTLEVEL0: levels[31:0]  <= merge(levels[31:0],  rb_wdata, rb_be) & 32'h77777777;
                 `RM_INTLEVEL1: levels[63:32] <= merge(levels[63:32], rb_wdata, rb_be) & 32'h77777777;
@@ -134,9 +141,9 @@ module intc (
         rb_rdata <= 32'd0;
         if (rb_rd && sel) case (off)
             `RM_INTCON:    rb_rdata <= {31'd0, master};
-            `RM_INTENA:    rb_rdata <= {8'd0, intena};
-            `RM_INTPEND:   rb_rdata <= {8'd0, pending};
-            `RM_INTRAW:    rb_rdata <= {8'd0, raw};
+            `RM_INTENA:    rb_rdata <= {7'd0, intena[23:15], 1'b0, intena[14:0]};
+            `RM_INTPEND:   rb_rdata <= {7'd0, pending[23:15], 1'b0, pending[14:0]};
+            `RM_INTRAW:    rb_rdata <= {7'd0, raw[23:15], 1'b0, raw[14:0]};
             `RM_INTLEVEL0: rb_rdata <= levels[31:0];
             `RM_INTLEVEL1: rb_rdata <= levels[63:32];
             `RM_INTLEVEL2: rb_rdata <= levels[95:64];
