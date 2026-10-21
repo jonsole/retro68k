@@ -40,6 +40,8 @@ This spec also replaces spec 2 (memory map), which is folded in here.
    - A byte write behaves like a 16-bit write that keeps the other byte.
 
    The 68000's MOVE.L writes the high word first in every addressing mode except −(An), so ordinary code just works. DMA jobs write all 32 bits at once.
+
+   **Don't use CLR.L on registers.** The 68000's CLR.L writes the low word first (seen in simulation with fx68k), so the high half would be held and never written. It also reads the register first, which takes a byte out of a FIFO data register. Use `MOVE.L #0,...` instead.
 3. **Reading in halves.**
    - Reading the high half captures the whole register at that moment.
    - The next read of the low half returns the captured value, so a MOVE.L always gets a matching pair.

@@ -66,7 +66,8 @@ module retro68k #(
     always @(posedge clk100) btn_s <= {btn_s[0], btn_reset_n};
 
     wire halted   = !c_halted_n;
-    wire rst_req  = !btn_s[1] || soft_reset || cmd_reset || cmd_upload || (halted && haltreset);
+    wire wd_reset;
+    wire rst_req  = !btn_s[1] || soft_reset || cmd_reset || cmd_upload || (halted && haltreset) || wd_reset;
     reg  [8:0] rst_cnt;
     reg        sys_rst;
     reg        cold;                 // power-on: fx68k's pwrUp
@@ -82,7 +83,7 @@ module retro68k #(
             rst_cnt  <= 9'd0;
             sys_rst  <= 1'b1;
             resetwhy <= {halted && haltreset, 1'b0, cmd_upload, cmd_reset || cmd_upload,
-                         soft_reset, !btn_s[1], 1'b0, 1'b0};
+                         soft_reset, !btn_s[1], wd_reset, 1'b0};
         end else if (sys_rst) begin
             // Hold reset for 5.12 us, and end it on a slot boundary
             if (rst_cnt != 9'd511) rst_cnt <= rst_cnt + 1'b1;
@@ -139,7 +140,7 @@ module retro68k #(
     wire        iack;
     wire [2:0]  iack_level;
     wire [7:0]  iack_vector;
-    wire [31:0] rd_int, rd_vid;
+    wire [31:0] rd_int, rd_vid, rd_tmr;
     wire        berr_ev;
     wire [23:0] berr_addr;
     wire [3:0]  berr_why;
@@ -155,7 +156,7 @@ module retro68k #(
         .rom_en(rom_en), .rom_we(rom_we), .rom_addr(rom_addr), .rom_wdata(rom_wdata),
         .rom_rdata(rom_rdata),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
-        .rb_rdata(rd_sys | rd_ser | rd_int | rd_vid),
+        .rb_rdata(rd_sys | rd_ser | rd_int | rd_vid | rd_tmr),
         .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector),
         .berr_ev(berr_ev), .berr_addr(berr_addr), .berr_why(berr_why)
     );
@@ -208,17 +209,29 @@ module retro68k #(
     );
 
     // ---------------------------------------------------------------- video (spec 4)
-    wire irq_vblank, irq_line, irq_viderr;
+    wire irq_vblank, irq_line, irq_viderr, line_tick, frame_tick;
     wire [15:0] dmacon;
     video #(.FONT_INIT(FONT_INIT)) vid (
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_vid),
         .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
+        .line_tick(line_tick), .frame_tick(frame_tick),
         .pclkdiv(pclkdiv), .pclk_locked(pclk_locked),
         .dmacon(dmacon), .wide(wide), .disp_req(disp_req), .disp_addr(disp_addr),
         .disp_ack(disp_ack), .disp_rvalid(disp_rvalid), .disp_rdata(mem_rdata),
         .clk_pix(clk_pix), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
+    );
+
+    // ---------------------------------------------------------------- timers (spec 12)
+    wire [3:0] tmr_irq, tmr_dma_start;
+    wire [7:0] tmr_dma_ch;
+    timers tmr (
+        .clk(clk100), .por(por100), .rst(sys_rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_tmr),
+        .us_tick(us_tick), .line_tick(line_tick), .frame_tick(frame_tick),
+        .irq(tmr_irq), .dma_start(tmr_dma_start), .dma_ch(tmr_dma_ch), .wd_reset(wd_reset)
     );
 
     // ---------------------------------------------------------------- interrupts (spec 13)
@@ -229,7 +242,7 @@ module retro68k #(
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_int),
-        .req({8'd0, ser_irq, 11'd0, irq_viderr, 1'b0, irq_line, irq_vblank}),
+        .req({8'd0, ser_irq, tmr_irq, 7'd0, irq_viderr, 1'b0, irq_line, irq_vblank}),
         .nmi_button(nmi_s[1]), .nmi_usb(cmd_break),
         .level(int_level), .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector)
     );

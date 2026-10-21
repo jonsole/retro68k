@@ -15,6 +15,7 @@ Written (phase 2, version 1):
 | `sysregs.v` | System control registers (no I2C yet) | 7 |
 | `serial.v` | USB serial: FT232H async FIFO interface, 2 KB FIFOs, control commands | 14 |
 | `intc.v` | Interrupt controller: 24 vectored sources, programmable levels, NMI | 13 |
+| `timers.v` | 64-bit time counter, 4 chainable timers (clock, lines, frames), watchdog | 12 |
 | `video.v` | Video: programmable timing, palette, background, 4 layers (bitmap or text), priority, beam position, VBLANK, LINE and OVERRUN, DMACON | 4, 5 |
 | `vfetch.v` | Display fetch: fills the bitmap layers' buffers from Chip RAM in display cycles | 4, 5 |
 | `layer_pix.v` | One bitmap layer, pixel side: 1/2/4/8 bpp, scroll, scaling, transparency | 4 |
@@ -24,6 +25,6 @@ Written (phase 2, version 1):
 | `platform/sim/oddr.v` | Behavioural DDR output register | |
 | `platform/sim/pixclk.v` | Pixel clock: the master gated to every Nth edge, as a BUFGCE | 4 |
 
-Still to come: timers, sprites, copper, audio, DMA engine, SD card, keyboard, I2C, `platform/artix7/` (MMCMs, OSERDESE2, ODDR, pads) and `top_ks3.v` (the KS3 pin-level top).
+Still to come: sprites, copper, audio, DMA engine, SD card, keyboard, I2C, `platform/artix7/` (MMCMs, OSERDESE2, ODDR, pads) and `top_ks3.v` (the KS3 pin-level top).
 
 fx68k itself is a git submodule in `fpga/third_party/fx68k` (GPL-3.0).

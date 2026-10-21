@@ -5,6 +5,7 @@
 ;   3. Chip RAM test: address pattern, its inverse, and byte writes
 ;   4. a deliberate bus error, checked against BUSERRADDR and BUSERRWHY
 ;   5. the software interrupt, through its own vector
+;   5b. timer 0 interrupts, against the time counter
 ;   6. the vertical blank interrupt from the video
 ;   7. a bitmap layer (layer 1, 8 bpp, 2x) fetched from Chip RAM: no overruns
 ;   8. "PASS" or "FAIL", then echo whatever arrives over USB
@@ -31,6 +32,7 @@ v_irq       equ VARS+12             ; long: software interrupts seen
 v_vbl       equ VARS+16             ; long: vertical blank interrupts seen
 v_col       equ VARS+20             ; word: text cursor column
 v_row       equ VARS+22             ; word: text cursor row
+v_tmr       equ VARS+24             ; long: timer 0 interrupts seen
 
 ATTR        equ $1F                 ; text colours: white (15) on blue (1)
 BITMAP      equ $020000             ; the test picture for layer 1
@@ -74,7 +76,7 @@ start:      move.w  #$2700,sr                   ; supervisor mode, interrupts of
 
             lea     s_overlay(pc),a0
             bsr     puts
-            clr.l   SYSCON(a5)                  ; overlay off
+            move.l  #0,SYSCON(a5)                  ; overlay off
             move.l  VECTORS+4,d0                ; now read from Chip RAM, not ROM
             cmp.l   #start,d0
             bne.s   .ovl_bad
@@ -189,13 +191,48 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             nop                                 ; the interrupt is taken around here
             nop
             move.w  #$2700,sr
-            clr.l   INTCON(a5)
+            move.l  #0,INTCON(a5)
             move.l  v_irq,d0
             cmp.l   #1,d0
             bne.s   .irq_bad
             move.l  LASTSRC(a5),d0
             cmp.l   #INT_SOFT,d0
 .irq_bad:   bsr     okfail
+
+; ---- 5b. timers: timer 0 at 1 MHz, every 10 us, three interrupts (level 6)
+            lea     s_tmr(pc),a0
+            bsr     puts
+            clr.l   v_tmr
+            move.l  #timer0,VECTORS+(VECBASE_DEFAULT+INT_TIMER0)*4
+            move.l  #99,TMR0+TMR_PRESCALE(a5)      ; 100 MHz / 100 = 1 MHz
+            move.l  #9,TMR0+TMR_RELOAD(a5)         ; every 10 ticks
+            move.l  #9,TMR0+TMR_COUNT(a5)
+            move.l  #1<<INT_TIMER0,INTENA(a5)
+            move.l  #INTCON_MASTER_M,INTCON(a5)
+            move.l  TIMEHI(a5),d0                  ; the time now, in 10 ns ticks
+            move.l  TIMELO(a5),d6
+            move.w  #$2000,sr
+            move.l  #TMR_CTRL_EN_M|TMR_CTRL_REPEAT_M|TMR_CTRL_IRQ_M,TMR0+TMR_CTRL(a5)
+.wait_tmr:  cmp.l   #3,v_tmr
+            blo.s   .wait_tmr
+            move.l  TIMEHI(a5),d0
+            move.l  TIMELO(a5),d5
+            move.w  #$2700,sr
+            move.l  #0,TMR0+TMR_CTRL(a5)        ; (CLR.L would write the low half first)
+            move.l  #0,INTCON(a5)
+            sub.l   d6,d5                       ; 3 x 10 us plus the 68000's own time: 30-50 us
+            moveq   #' ',d0
+            bsr     putc
+            move.l  d5,d0
+            bsr     puthex8
+            cmp.l   #2900,d5
+            blo.s   .tmr_bad
+            cmp.l   #5000,d5
+            bhs.s   .tmr_bad
+            moveq   #0,d0                       ; Z set: ok
+            bra.s   .tmr_ok
+.tmr_bad:   moveq   #1,d0
+.tmr_ok:    bsr     okfail
 
 ; ---- 6. video: wait for the vertical blank interrupt (source 0, level 5)
             lea     s_vbl(pc),a0
@@ -211,8 +248,8 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
 .wait_vbl:  tst.l   v_vbl
             beq.s   .wait_vbl
             move.w  #$2700,sr
-            clr.l   INTCON(a5)
-            clr.l   VIDINTEN(a4)
+            move.l  #0,INTCON(a5)
+            move.l  #0,VIDINTEN(a4)
             move.l  FRAMECOUNT(a4),d0           ; frames have been counted
             tst.l   d0
             seq     d1
@@ -360,6 +397,11 @@ nmi:        movem.l d0-d1/a0/a5,-(sp)
             movem.l (sp)+,d0-d1/a0/a5
             rte
 
+; timer 0: clear its flag and count it
+timer0:     move.l  #TMR_STAT_UNDER_M,TMR0+TMR_STAT(a5)
+            addq.l  #1,v_tmr
+            rte
+
 ; software interrupt handler: clear it and count it
 softirq:    move.l  #SOFTINT_CLR_M,SOFTINT(a5)
             addq.l  #1,v_irq
@@ -430,6 +472,7 @@ s_ram:      dc.b    "RAM ",0
 s_berr:     dc.b    "bus error",0
 s_irq:      dc.b    "interrupt",0
 s_vbl:      dc.b    "vertical blank",0
+s_tmr:      dc.b    "timer",0
 s_layer:    dc.b    "bitmap layer",0
 s_nmi:      dc.b    "NMI",13,10,0
 s_ok:       dc.b    " ok",13,10,0

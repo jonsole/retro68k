@@ -28,6 +28,8 @@ module video #(
     output wire        irq_vblank,
     output wire        irq_line,
     output wire        irq_viderr,
+    output wire        line_tick,      // 1 clock (100 MHz) per video line, for the timers
+    output wire        frame_tick,     // 1 clock at the start of each vertical blank
 
     output wire [3:0]  pclkdiv,        // N, for the pixel clock generator
     input  wire        pclk_locked,    // HDMI multiplier locked (PCLKLOCK)
@@ -227,6 +229,11 @@ module video #(
             endcase
         end
     end
+
+    reg  [2:0] lt_s;
+    always @(posedge clk) lt_s <= {lt_s[1:0], line_t};
+    assign line_tick  = lt_s[2] != lt_s[1];
+    assign frame_tick = vb_s[1] != vb_s[0];
 
     wire [13:0] irqflags = vidstat & vidinten;
     assign irq_vblank = irqflags[0];
