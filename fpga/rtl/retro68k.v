@@ -5,10 +5,14 @@
 // still to come, so tests can load the memory while the CPU runs.
 module retro68k #(
     parameter ROM_INIT = "boot.hex",
+    parameter FONT_INIT = "font8x16.hex",
     parameter [5:0] CHIPMB = 6'd4
 ) (
     input  wire        clk100,
     input  wire        clk40,
+    input  wire        clk_pix,       // 200 MHz / PCLKDIV, from the same master
+    output wire [3:0]  pclkdiv,
+    input  wire        pclk_locked,
     input  wire        por100,        // power-on reset; last seen high on a slot boundary
     input  wire        por40,         // the same, in the 40 MHz domain
     input  wire        btn_reset_n,   // debounced
@@ -36,6 +40,10 @@ module retro68k #(
     input  wire [1:0]  dma_be,
     output wire        dma_ack, dma_rvalid,
     output wire [15:0] dma_rdata,
+
+    // Video out (pixel clock domain)
+    output wire [23:0] vid_rgb,
+    output wire        vid_hsync, vid_vsync, vid_de,
 
     // Debug
     output wire [3:0]  dbg_sc,
@@ -131,7 +139,7 @@ module retro68k #(
     wire        iack;
     wire [2:0]  iack_level;
     wire [7:0]  iack_vector;
-    wire [31:0] rd_int;
+    wire [31:0] rd_int, rd_vid;
     wire        berr_ev;
     wire [23:0] berr_addr;
     wire [3:0]  berr_why;
@@ -147,7 +155,7 @@ module retro68k #(
         .rom_en(rom_en), .rom_we(rom_we), .rom_addr(rom_addr), .rom_wdata(rom_wdata),
         .rom_rdata(rom_rdata),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
-        .rb_rdata(rd_sys | rd_ser | rd_int),
+        .rb_rdata(rd_sys | rd_ser | rd_int | rd_vid),
         .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector),
         .berr_ev(berr_ev), .berr_addr(berr_addr), .berr_why(berr_why)
     );
@@ -195,6 +203,17 @@ module retro68k #(
         .ft_d_oe(ft_d_oe), .ft_rd_n(ft_rd_n), .ft_wr_n(ft_wr_n), .ft_siwu_n(ft_siwu_n)
     );
 
+    // ---------------------------------------------------------------- video (spec 4)
+    wire irq_vblank, irq_line, irq_viderr;
+    video #(.FONT_INIT(FONT_INIT)) vid (
+        .clk(clk100), .rst(sys_rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_vid),
+        .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
+        .pclkdiv(pclkdiv), .pclk_locked(pclk_locked),
+        .clk_pix(clk_pix), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
+    );
+
     // ---------------------------------------------------------------- interrupts (spec 13)
     reg [1:0] nmi_s;
     always @(posedge clk100) nmi_s <= {nmi_s[0], buttons[0]};
@@ -203,7 +222,7 @@ module retro68k #(
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_int),
-        .req({8'd0, ser_irq, 15'd0}),        // 15 SERIAL; more sources as units arrive
+        .req({8'd0, ser_irq, 11'd0, irq_viderr, 1'b0, irq_line, irq_vblank}),
         .nmi_button(nmi_s[1]), .nmi_usb(cmd_break),
         .level(int_level), .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector)
     );

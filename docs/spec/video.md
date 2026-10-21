@@ -51,6 +51,8 @@ One MMCM (the Artix-7's clock generator), set once at power-on and never changed
 | 4 | 50.0 MHz | 5 |
 | 3 | 66.7 MHz | 6.67 |
 
+The pixel clock is the 200 MHz master passed through a clock buffer with an enable (BUFGCE) that lets every Nth edge through, so its edges always line up with the master's, and signals cross between it and the 100 MHz system clock as ordinary timed paths.
+
 N = 2 (100 MHz) would need 1 Gbit/s per HDMI lane; the Artix-7 -2 might manage it, but it is not assumed. N above 8 would go below DVI's 25 MHz minimum.
 
 If fx68k cannot reach 40 MHz (the 16.7 MHz fallback in spec 5), the slot becomes 24 master clocks (120 ns), and the rule in 3.2 becomes "a multiple of 48". The pixel clocks stay the same.
@@ -212,6 +214,8 @@ A large virtual screen, for example 2048×1024 at 8bpp with STRIDE = 2048, can b
 | Scaling | HSTEP/VSTEP as for bitmaps (e.g. `0x0080` horizontally for 40 columns) |
 
 The text layer uses PTR as the cell offset into the text buffer, and ignores STRIDE.
+
+**Layout seen by the CPU:** cell n is the 16-bit word at `0xE10000 + 2n` (row r, column c is cell `128r + c`); the character code is its low byte, at the odd address. Character k's 16 rows are the bytes at `0xE12000 + 16k`, leftmost pixel in bit 7. At power-on the font holds Spleen 8×16 in code page 437 (BSD licence, `third_party/spleen`).
 
 ### 4.8 Priority
 

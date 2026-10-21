@@ -2,11 +2,13 @@
 // simulated board: SRAM model, FT232H model, optional DMA load.
 //   +dma        keep the DMA port busy with random reads and writes
 //   +trace      print the first bus cycles with their position in the slot
+//   +frame      after PASS, wait for one more frame and write it to frame.ppm
 //   +serial     after PASS: echo test (with a near-miss of the control
 //               sequence), then the RESET control command; expects a second PASS
 `timescale 1ns/1ps
 module tb;
-    reg clk100 = 1'b1, clk40 = 1'b1;
+    reg clk200 = 1'b1, clk100 = 1'b1, clk40 = 1'b1;
+    always #2.5  clk200 = ~clk200;
     always #5    clk100 = ~clk100;
     always #12.5 clk40  = ~clk40;
 
@@ -30,9 +32,16 @@ module tb;
     wire [15:0] dma_rdata;
     wire [3:0]  sc;
     wire        halted;
+    wire [3:0]  pclkdiv;
+    wire        clk_pix;
+    wire [23:0] rgb;
+    wire        hs, vs, de;
+    pixclk pc (.clk200(clk200), .n(pclkdiv), .clk_pix(clk_pix));
 
-    retro68k #(.ROM_INIT("boot.hex")) dut (
+    retro68k #(.ROM_INIT("boot.hex"), .FONT_INIT("font8x16.hex")) dut (
         .clk100(clk100), .clk40(clk40), .por100(por), .por40(por),
+        .clk_pix(clk_pix), .pclkdiv(pclkdiv), .pclk_locked(1'b1),
+        .vid_rgb(rgb), .vid_hsync(hs), .vid_vsync(vs), .vid_de(de),
         .btn_reset_n(1'b1), .buttons(2'b00),
         .sram_a(a), .sram_ce_n(ce_n), .sram_ub_n(ub_n), .sram_lb_n(lb_n),
         .sram_oe_n_r(oe_r), .sram_oe_n_f(oe_f), .sram_we_n_r(we_r), .sram_we_n_f(we_f),
@@ -180,7 +189,7 @@ module tb;
         $display("\n%t PC: sending text with a near-miss of the control sequence", $realtime);
         push("H"); push("i"); push(8'h00); push(8'hFF); push("R"); push("6"); push("!");
         push(8'h00); push(8'hFF); push("R"); push("6"); push("8"); push("K"); push("?");
-        #150000;    // a 68000 echo loop takes about 6 us per byte
+        wait_out(echo_at + n_echo, 1000);
         for (j = 0; j < n_echo; j = j + 1)
             if (ft.from_fpga[echo_at + j] !== echo_exp[j]) begin
                 $display("SERIAL ERROR: echo byte %0d is %h, expected %h", j, ft.from_fpga[echo_at + j], echo_exp[j]);
@@ -190,7 +199,7 @@ module tb;
         $display("%t PC: sending the BREAK control command", $realtime);
         j = ft.nout;
         send_ctl(8'h01);
-        #80000;
+        wait_out(j + 5, 1000);
         if (ft.nout < j + 5 || {ft.from_fpga[j], ft.from_fpga[j+1], ft.from_fpga[j+2]} != "NMI") begin
             $display("SERIAL ERROR: no NMI after BREAK");
             serial_errors = serial_errors + 1;
@@ -198,6 +207,13 @@ module tb;
         $display("%t PC: sending the RESET control command", $realtime);
         send_ctl(8'h02);
     end
+    // Wait until the computer has sent n bytes in all, or us microseconds pass
+    task wait_out(input integer n, input integer us);
+        integer w;
+        begin
+            for (w = 0; w < us && ft.nout < n; w = w + 1) #1000;
+        end
+    endtask
     task send_ctl(input [7:0] c);
         integer m;
         begin
@@ -206,6 +222,75 @@ module tb;
                         m == 6 ? "-" : m == 7 ? "C" : m == 8 ? "T" : m == 9 ? "L" : m == 10 ? 8'hFF : m == 11 ? 8'h00 :
                         m == 12 ? 8'hA5 : 8'h5A);
             ft.send(c); ft.send(~c);
+        end
+    endtask
+
+    // ---------------------------------------------------------------- sync timing
+    // 640x480 preset: 800 x 525 at 25 MHz, both syncs active low;
+    // hsync 96 pixels, vsync 2 lines.
+    real t_hs = 0, t_vs = 0;
+    integer n_hs = 0, n_vs = 0, sync_errors = 0;
+    always @(negedge dut.vid.en_p) begin n_hs = 0; n_vs = 0; end
+    always @(negedge hs) begin
+        if (n_hs > 2 && ($realtime - t_hs < 31999.0 || $realtime - t_hs > 32001.0)) begin
+            if (sync_errors < 5) $display("%t VIDEO ERROR: line period %0.1f ns, expected 32000", $realtime, $realtime - t_hs);
+            sync_errors = sync_errors + 1;
+        end
+        t_hs = $realtime; n_hs = n_hs + 1;
+    end
+    always @(posedge hs) if (n_hs > 0 && ($realtime - t_hs < 3839.0 || $realtime - t_hs > 3841.0)) begin
+        if (sync_errors < 5) $display("%t VIDEO ERROR: hsync %0.1f ns, expected 3840", $realtime, $realtime - t_hs);
+        sync_errors = sync_errors + 1;
+    end
+    always @(negedge vs) begin
+        if (n_vs > 0 && ($realtime - t_vs < 16799000.0 || $realtime - t_vs > 16801000.0)) begin
+            $display("%t VIDEO ERROR: frame period %0.0f ns, expected 16800000", $realtime, $realtime - t_vs);
+            sync_errors = sync_errors + 1;
+        end
+        t_vs = $realtime; n_vs = n_vs + 1;
+    end
+    always @(posedge vs) if (n_vs > 0 && ($realtime - t_vs < 63999.0 || $realtime - t_vs > 64001.0)) begin
+        $display("%t VIDEO ERROR: vsync %0.0f ns, expected 64000", $realtime, $realtime - t_vs);
+        sync_errors = sync_errors + 1;
+    end
+
+    // ---------------------------------------------------------------- frame grabber
+    // Visible pixels (de) into a buffer; a long gap in de marks a new frame.
+    reg  [23:0] fb [0:1280*800-1];
+    integer fx = 0, fy = 0, fw = 0, fh = 0, gap = 0, frames_seen = 0;
+    reg de_d = 0;
+    always @(posedge clk_pix) begin
+        if (de) begin
+            if (fx < 1280 && fy < 800) fb[fy * 1280 + fx] = rgb;
+            fx = fx + 1;
+            gap = 0;
+        end else begin
+            if (de_d) begin
+                if (fx > fw) fw = fx;
+                fy = fy + 1;
+                if (fy > fh) fh = fy;
+                fx = 0;
+            end
+            gap = gap + 1;
+            if (gap == 4000 && fy != 0) begin
+                fy = 0;
+                frames_seen = frames_seen + 1;
+            end
+        end
+        de_d = de;
+    end
+    task write_frame;
+        integer f, x, y;
+        begin
+            f = $fopen("frame.ppm", "w");
+            $fwrite(f, "P3\n%0d %0d\n255\n", fw, fh);
+            for (y = 0; y < fh; y = y + 1) begin
+                for (x = 0; x < fw; x = x + 1)
+                    $fwrite(f, "%0d %0d %0d ", fb[y*1280+x][23:16], fb[y*1280+x][15:8], fb[y*1280+x][7:0]);
+                $fwrite(f, "\n");
+            end
+            $fclose(f);
+            $display("---- frame.ppm: %0d x %0d, %0d frames seen", fw, fh, frames_seen);
         end
     endtask
 
@@ -220,6 +305,7 @@ module tb;
             $display("---- DMA: %0d reads, %0d writes, %0d errors", dma_reads, dma_writes, dma_errors);
             $display("---- SRAM timing errors: %0d, FT232H errors: %0d, send-immediate pulses: %0d",
                      sram.errors, ft.errors, ft.siwu_count);
+            $display("---- video: %0d lines, %0d frames, %0d timing errors", n_hs, n_vs, sync_errors);
         end
     endtask
 
@@ -250,11 +336,16 @@ module tb;
         end
         if (done) begin
             #20000;    // let the rest of the line out
+            if ($test$plusargs("frame")) begin
+                k = frames_seen;
+                wait (frames_seen == k + 2);   // a complete frame after PASS
+                write_frame;
+            end
             report;
             if (serial_test)
                 $display("---- serial: %0d errors; RESETWHY after the command: %h", serial_errors, dut.resetwhy);
             if (serial_test && dut.resetwhy !== 8'h10) serial_errors = serial_errors + 1;
-            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0) $display("TEST PASSED");
+            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0) $display("TEST PASSED");
             else $display("TEST FAILED");
             $finish;
         end
@@ -266,7 +357,7 @@ module tb;
             $dumpfile("tb.vcd");
             $dumpvars(0, tb);
         end
-        if (!$value$plusargs("timeout=%d", tmo)) tmo = 50_000_000;
+        if (!$value$plusargs("timeout=%d", tmo)) tmo = ($test$plusargs("frame") || $test$plusargs("serial")) ? 120_000_000 : 60_000_000;
         #(tmo);
         $display("\nTIMEOUT");
         report;

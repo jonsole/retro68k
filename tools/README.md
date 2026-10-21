@@ -48,3 +48,7 @@ L_PTR(0) = (uint32_t)picture;
 ## bin2hex.py
 
 Turns the assembled boot ROM (`boot.bin`) into a `$readmemh` file of 16-bit words for the block RAM: `bin2hex.py boot.bin boot.hex [words]`.
+
+## bdf2font.py
+
+Turns an 8×16 BDF bitmap font into the text layer's font RAM contents: `bdf2font.py third_party/spleen/spleen-8x16-ibm-437.bdf fpga/rtl/font8x16.hex`.

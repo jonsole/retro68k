@@ -50,6 +50,7 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 7. **Unused bits** read as 0; write them as 0.
 8. **Unused addresses** inside the custom and system blocks read as 0 and ignore writes. Only the unmapped regions in section 1 give bus errors.
 9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layers before each line, sprites at their selection and fetch points), some only while the device is off (video timing).
+10. **The text screen and font are plain memory.** At `0xE10000`–`0xE13FFF`, byte, word and long accesses take effect at once, with no held halves, so a `MOVE.W` writes one character cell. The halves rules above apply to registers and to the 32-bit tables in the custom block (palette, sprite table, descriptor RAM).
 
 **Access column key:** R = read only, W = write only, RW = read and write, W1C = sticky flags cleared by writing 1.
 

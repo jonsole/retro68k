@@ -7,9 +7,11 @@ make                      # build and run
 make run ARGS=+dma        # with a DMA port reading and writing every free memory cycle
 make run ARGS=+trace      # the first bus cycles and their position in the slot
 make run ARGS=+bustrace=N # every bus cycle (address and data) for the first N
+make run ARGS=+serial     # echo test, PC BREAK (NMI) and RESET commands
+make frame                # also save the screen as build/frame.png (needs Pillow)
 make run ARGS=+vcd        # waveform in build/tb.vcd
 ```
 
-Needs `iverilog` (12), `sv2v` (converts fx68k from SystemVerilog), `vasmm68k_mot` and `python3`. Paths can be given with `make SV2V=... VASM=...`. A run takes about 1–2 minutes.
+Needs `iverilog` (12), `sv2v` (converts fx68k from SystemVerilog), `vasmm68k_mot` and `python3`. Paths can be given with `make SV2V=... VASM=...`. A run takes about 2–5 minutes. The test also checks the video sync timing against the 640×480 preset.
 
 The test reports how long /AS stayed low for every bus cycle. A zero-wait-state cycle is 150–199 ns; each wait state adds 50 ns.

@@ -5,7 +5,10 @@
 ;   3. Chip RAM test: address pattern, its inverse, and byte writes
 ;   4. a deliberate bus error, checked against BUSERRADDR and BUSERRWHY
 ;   5. the software interrupt, through its own vector
-;   6. "PASS" or "FAIL", then echo whatever arrives over USB
+;   6. the vertical blank interrupt from the video
+;   7. "PASS" or "FAIL", then echo whatever arrives over USB
+;
+; Everything printed also appears on the screen (text layer 0, 80 x 30).
 ;
 ; Assemble: vasmm68k_mot -Fbin -I ../include [-DSIM] -o boot.bin boot.s
 ; With SIM defined, the RAM test covers only 8 KB, to keep simulation short.
@@ -24,6 +27,11 @@ v_fail      equ VARS+0              ; long: number of failed checks
 v_savesp    equ VARS+4              ; long: stack pointer for the bus error test
 v_berr      equ VARS+8              ; long: bus errors seen
 v_irq       equ VARS+12             ; long: software interrupts seen
+v_vbl       equ VARS+16             ; long: vertical blank interrupts seen
+v_col       equ VARS+20             ; word: text cursor column
+v_row       equ VARS+22             ; word: text cursor row
+
+ATTR        equ $1F                 ; text colours: white (15) on blue (1)
 
             org ROM                 ; $F80000; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP          ; initial supervisor stack pointer
@@ -34,6 +42,7 @@ start:      move.w  #$2700,sr                   ; supervisor mode, interrupts of
             lea     SYSTEM,a5
             move.l  #SERCON_EN_M|SERCON_CTLEN_M,SERCON(a5)  ; USB serial on, PC control commands on
             clr.l   v_fail                      ; (overlay on: writes still reach Chip RAM)
+            bsr     screen_init
 
             lea     s_banner(pc),a0
             bsr     puts
@@ -181,7 +190,29 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             cmp.l   #INT_SOFT,d0
 .irq_bad:   bsr     okfail
 
-; ---- 6. result
+; ---- 6. video: wait for the vertical blank interrupt (source 0, level 5)
+            lea     s_vbl(pc),a0
+            bsr     puts
+            clr.l   v_vbl
+            lea     CUSTOM,a4
+            move.l  #vblank,VECTORS+(VECBASE_DEFAULT+INT_VBLANK)*4
+            move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)       ; clear any old flag
+            move.l  #VIDSTAT_VBLANK_M,VIDINTEN(a4)
+            move.l  #1<<INT_VBLANK,INTENA(a5)
+            move.l  #INTCON_MASTER_M,INTCON(a5)
+            move.w  #$2000,sr
+.wait_vbl:  tst.l   v_vbl
+            beq.s   .wait_vbl
+            move.w  #$2700,sr
+            clr.l   INTCON(a5)
+            clr.l   VIDINTEN(a4)
+            move.l  FRAMECOUNT(a4),d0           ; frames have been counted
+            tst.l   d0
+            seq     d1
+            tst.b   d1                          ; Z set if FRAMECOUNT != 0
+            bsr     okfail
+
+; ---- 7. result
             tst.l   v_fail
             bne.s   .fail
             lea     s_pass(pc),a0
@@ -234,11 +265,52 @@ newline:    moveq   #13,d0
             moveq   #10,d0
             ; fall through
 
-; send d0.b over the USB serial link (spec 14); a5 = SYSTEM
+; send d0.b over the USB serial link (spec 14) and to the screen; a5 = SYSTEM
 putc:       move.w  SERSTAT+2(a5),d1            ; low half: TXSPACE
             and.w   #SERSTAT_TXSPACE_M,d1
             beq.s   putc                        ; no room yet
             move.b  d0,SERDATA+3(a5)            ; low byte of SERDATA sends one byte
+            ; fall through
+
+; put d0.b on the screen at the cursor: CR, LF, or a character
+scrputc:    movem.l d1/a0,-(sp)
+            cmp.b   #13,d0
+            bne.s   .lf
+            clr.w   v_col
+            bra.s   .done
+.lf:        cmp.b   #10,d0
+            bne.s   .chr
+            addq.w  #1,v_row
+            and.w   #31,v_row                   ; wraps round the 32-row buffer
+            bra.s   .done
+.chr:       move.w  v_row,d1
+            lsl.w   #7,d1                       ; 128 cells per row
+            add.w   v_col,d1
+            add.w   d1,d1                       ; 2 bytes per cell
+            lea     TEXT,a0
+            move.b  #ATTR,0(a0,d1.w)
+            move.b  d0,1(a0,d1.w)
+            addq.w  #1,v_col
+.done:      movem.l (sp)+,d1/a0
+            rts
+
+; palette, clear text, layer 0 = text over the whole screen, video on
+screen_init:
+            lea     CUSTOM,a4
+            lea     PALETTE(a4),a0
+            lea     palette(pc),a1
+            moveq   #16-1,d0
+.pal:       move.l  (a1)+,(a0)+
+            dbra    d0,.pal
+            lea     TEXT,a0
+            move.l  #(ATTR<<24)|($20<<16)|(ATTR<<8)|$20,d1
+            move.w  #128*32/2-1,d0
+.clr:       move.l  d1,(a0)+
+            dbra    d0,.clr
+            clr.l   v_col                       ; column and row
+            move.l  #$202020,BGCOLOR(a4)
+            move.l  #L_CTRL_EN_M|L_CTRL_TYPE_M,L0+L_CTRL(a4)
+            move.l  #VIDCON_EN_M,VIDCON(a4)
             rts
 
 ; print d0.l as 8 hex digits (d0 kept)
@@ -279,7 +351,19 @@ softirq:    move.l  #SOFTINT_CLR_M,SOFTINT(a5)
             addq.l  #1,v_irq
             rte
 
+; vertical blank: count it and clear the flag
+vblank:     move.l  a4,-(sp)
+            lea     CUSTOM,a4
+            move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)
+            addq.l  #1,v_vbl
+            move.l  (sp)+,a4
+            rte
+
 unhandled:  bra.s   unhandled
+
+; the 16 PC text colours, 0x00RRGGBB
+palette:    dc.l    $000000,$0000AA,$00AA00,$00AAAA,$AA0000,$AA00AA,$AA5500,$AAAAAA
+            dc.l    $555555,$5555FF,$55FF55,$55FFFF,$FF5555,$FF55FF,$FFFF55,$FFFFFF
 
 s_banner:   dc.b    13,10,"retro68k boot ROM",13,10,0
 s_sysid:    dc.b    "SYSID ",0
@@ -287,6 +371,7 @@ s_overlay:  dc.b    "overlay off",0
 s_ram:      dc.b    "RAM ",0
 s_berr:     dc.b    "bus error",0
 s_irq:      dc.b    "interrupt",0
+s_vbl:      dc.b    "vertical blank",0
 s_nmi:      dc.b    "NMI",13,10,0
 s_ok:       dc.b    " ok",13,10,0
 s_bad:      dc.b    " FAIL",13,10,0

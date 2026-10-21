@@ -1,0 +1,403 @@
+// Video, version 1 (spec 4): programmable timing, palette, background
+// colour, the text layer, beam position, VBLANK and LINE interrupts.
+// Bitmap layers (and their Chip RAM fetch) come next; until then a bitmap
+// layer shows nothing.
+//
+// Two clock domains:
+//   clk     100 MHz: registers, palette / text / font writes, interrupts
+//   clk_pix 200 MHz / N: the beam and the pixel pipeline
+// Both come from the same 200 MHz master (clk_pix is the master gated to
+// every Nth edge), so signals cross between them as ordinary related-clock
+// paths. Timing registers only change while video is off; layer registers
+// are copied into the pixel domain at the start of each horizontal blank.
+`include "regmap.vh"
+
+module video #(
+    parameter FONT_INIT = "font8x16.hex"
+) (
+    input  wire        clk,            // 100 MHz
+    input  wire        rst,
+
+    input  wire        rb_rd,
+    input  wire        rb_wr,
+    input  wire [23:2] rb_addr,
+    input  wire [31:0] rb_wdata,
+    input  wire [3:0]  rb_be,
+    output wire [31:0] rb_rdata,
+
+    output wire        irq_vblank,
+    output wire        irq_line,
+    output wire        irq_viderr,
+
+    output wire [3:0]  pclkdiv,        // N, for the pixel clock generator
+    input  wire        pclk_locked,    // HDMI multiplier locked (PCLKLOCK)
+
+    input  wire        clk_pix,
+    output reg  [23:0] rgb,
+    output reg         hsync,
+    output reg         vsync,
+    output reg         de
+);
+    // ================================================================ registers (100 MHz)
+    wire [15:0] off      = {rb_addr[15:2], 2'b00};
+    wire in_custom = (rb_addr[23:16] == 8'hE0);
+    wire sel_reg   = in_custom && (off[15:9] == 7'd0);         // 0x000-0x1FF: global and layers
+    wire sel_pal   = in_custom && (off[15:12] == 4'h4);        // 0x4000-0x4FFF
+    wire sel_text  = (rb_addr[23:16] == 8'hE1) && (off[15:13] == 3'd0);   // 0xE10000-0xE11FFF
+    wire sel_font  = (rb_addr[23:16] == 8'hE1) && (off[15:12] == 4'h2);   // 0xE12000-0xE12FFF
+
+    reg  [2:0]  vidcon;                // BLANKALL, WIDE, EN
+    reg  [13:0] vidstat;               // sticky flags (bits 8 and 9 are live, below)
+    reg  [13:0] vidinten;
+    reg  [10:0] lc_v, lc_h;            // LINECMP
+    reg  [23:0] bgcolor;
+    reg  [7:0]  prio;
+    reg  [10:0] hvis, hss, hse, htot, vvis, vss, vse, vtot;
+    reg  [1:0]  syncpol;
+    reg  [3:0]  pdiv;
+    assign pclkdiv = pdiv;
+
+    // Layers
+    reg  [15:0] l_ctrl  [0:3];
+    reg  [22:0] l_ptr   [0:3];
+    reg  [15:0] l_stride[0:3];
+    reg  [10:0] l_xs [0:3], l_xe [0:3], l_ys [0:3], l_ye [0:3];
+    reg  [15:0] l_sx [0:3], l_sy [0:3], l_hstep [0:3], l_vstep [0:3];
+
+    // From the pixel domain
+    reg  [10:0] p_hc, p_vc;            // beam position
+    reg  [15:0] p_frames;
+    reg         p_vb_t, p_line_t;      // toggles: vertical blank started, line compare hit
+    wire        p_invblank;
+
+    function [31:0] merge(input [31:0] old, input [31:0] new, input [3:0] be);
+        merge = { be[3] ? new[31:24] : old[31:24], be[2] ? new[23:16] : old[23:16],
+                  be[1] ? new[15:8]  : old[15:8],  be[0] ? new[7:0]   : old[7:0] };
+    endfunction
+
+    // HTOTAL x N must be a multiple of 20, with N = 3..8 (section 3.2)
+    wire [14:0] line_master = htot * pdiv;
+    wire        timing_ok   = (pdiv >= 4'd3) && (pdiv <= 4'd8) && (line_master % 20 == 0) &&
+                              (hvis != 0) && (hvis < htot) && (vvis != 0) && (vvis < vtot);
+
+    reg  [1:0] vb_s, ln_s;
+    integer    i;
+    reg [31:0] reg_q;
+
+    always @(posedge clk) begin
+        if (rst) begin
+            vidcon   <= 3'd0;
+            vidstat  <= 14'd0;
+            vidinten <= 14'd0;
+            lc_v     <= 11'd0;  lc_h <= 11'd0;
+            bgcolor  <= 24'd0;
+            prio     <= 8'hE4;          // L0 in front, L3 at the back
+            // 640x480 at 59.5 Hz, N = 8 (section 3.5)
+            hvis <= 11'd640; hss <= 11'd656; hse <= 11'd752; htot <= 11'd800;
+            vvis <= 11'd480; vss <= 11'd490; vse <= 11'd492; vtot <= 11'd525;
+            syncpol <= 2'b00;
+            pdiv    <= 4'd8;
+            for (i = 0; i < 4; i = i + 1) begin
+                l_ctrl[i] <= 16'd0;  l_ptr[i] <= 23'd0;  l_stride[i] <= 16'd0;
+                l_xs[i] <= 11'd0;    l_xe[i] <= 11'd640; l_ys[i] <= 11'd0;   l_ye[i] <= 11'd480;
+                l_sx[i] <= 16'd0;    l_sy[i] <= 16'd0;
+                l_hstep[i] <= 16'h0100; l_vstep[i] <= 16'h0100;
+            end
+            vb_s <= 2'b00; ln_s <= 2'b00;
+        end else begin
+            // Events from the pixel domain
+            vb_s <= {vb_s[0], p_vb_t};
+            ln_s <= {ln_s[0], p_line_t};
+            if (vb_s[1] != vb_s[0]) vidstat[0] <= 1'b1;
+            if (ln_s[1] != ln_s[0]) vidstat[1] <= 1'b1;
+
+            if (rb_wr && sel_reg) begin
+                if (off[8]) begin : wlayer
+                    integer n;
+                    reg [31:0] v;
+                    n = off[7:6];
+                    case (off[5:0])
+                        6'h00: begin v = merge({16'd0, l_ctrl[n]}, rb_wdata, rb_be);   l_ctrl[n]   <= v[15:0]; end
+                        6'h04: begin v = merge({9'd0, l_ptr[n]}, rb_wdata, rb_be);     l_ptr[n]    <= v[22:0]; end
+                        6'h08: begin v = merge({16'd0, l_stride[n]}, rb_wdata, rb_be); l_stride[n] <= v[15:0]; end
+                        6'h0C: begin v = merge({5'd0, l_xs[n], 5'd0, l_xe[n]}, rb_wdata, rb_be);
+                                     l_xs[n] <= v[26:16]; l_xe[n] <= v[10:0]; end
+                        6'h10: begin v = merge({5'd0, l_ys[n], 5'd0, l_ye[n]}, rb_wdata, rb_be);
+                                     l_ys[n] <= v[26:16]; l_ye[n] <= v[10:0]; end
+                        6'h14: begin v = merge({16'd0, l_sx[n]}, rb_wdata, rb_be);     l_sx[n]     <= v[15:0]; end
+                        6'h18: begin v = merge({16'd0, l_sy[n]}, rb_wdata, rb_be);     l_sy[n]     <= v[15:0]; end
+                        6'h1C: begin v = merge({16'd0, l_hstep[n]}, rb_wdata, rb_be);  l_hstep[n]  <= v[15:0]; end
+                        6'h20: begin v = merge({16'd0, l_vstep[n]}, rb_wdata, rb_be);  l_vstep[n]  <= v[15:0]; end
+                        default: ;
+                    endcase
+                end else begin : wglobal
+                    reg [31:0] v;
+                    case (off)
+                        `RM_VIDCON: begin
+                            v = merge({29'd0, vidcon}, rb_wdata, rb_be);
+                            if (v[0] && !vidcon[0] && !timing_ok) begin
+                                vidstat[10] <= 1'b1;            // BADTIMING: stay off
+                                vidcon <= {v[2:1], 1'b0};
+                            end else
+                                vidcon <= v[2:0];
+                        end
+                        `RM_VIDSTAT:   if (rb_be[0] | rb_be[1]) vidstat <= vidstat & ~rb_wdata[13:0];
+                        `RM_VIDINTEN:  begin v = merge({18'd0, vidinten}, rb_wdata, rb_be); vidinten <= v[13:0]; end
+                        `RM_LINECMP:   begin v = merge({5'd0, lc_v, 5'd0, lc_h}, rb_wdata, rb_be);
+                                             lc_v <= v[26:16]; lc_h <= v[10:0]; end
+                        `RM_BGCOLOR:   begin v = merge({8'd0, bgcolor}, rb_wdata, rb_be); bgcolor <= v[23:0]; end
+                        `RM_PRIO:      begin v = merge({24'd0, prio}, rb_wdata, rb_be); prio <= v[7:0]; end
+                        default: if (!vidcon[0]) case (off)          // timing: video off only
+                            `RM_HVISIBLE:   begin v = merge({21'd0, hvis}, rb_wdata, rb_be); hvis <= v[10:0]; end
+                            `RM_HSYNCSTART: begin v = merge({21'd0, hss},  rb_wdata, rb_be); hss  <= v[10:0]; end
+                            `RM_HSYNCEND:   begin v = merge({21'd0, hse},  rb_wdata, rb_be); hse  <= v[10:0]; end
+                            `RM_HTOTAL:     begin v = merge({21'd0, htot}, rb_wdata, rb_be); htot <= v[10:0]; end
+                            `RM_VVISIBLE:   begin v = merge({21'd0, vvis}, rb_wdata, rb_be); vvis <= v[10:0]; end
+                            `RM_VSYNCSTART: begin v = merge({21'd0, vss},  rb_wdata, rb_be); vss  <= v[10:0]; end
+                            `RM_VSYNCEND:   begin v = merge({21'd0, vse},  rb_wdata, rb_be); vse  <= v[10:0]; end
+                            `RM_VTOTAL:     begin v = merge({21'd0, vtot}, rb_wdata, rb_be); vtot <= v[10:0]; end
+                            `RM_SYNCPOL:    begin v = merge({30'd0, syncpol}, rb_wdata, rb_be); syncpol <= v[1:0]; end
+                            `RM_PCLKDIV:    begin v = merge({28'd0, pdiv}, rb_wdata, rb_be); pdiv <= v[3:0]; end
+                            default: ;
+                        endcase
+                    endcase
+                end
+            end
+        end
+
+        reg_q <= 32'd0;
+        if (rb_rd && sel_reg) begin
+            if (off[8]) begin : rlayer
+                integer n;
+                n = off[7:6];
+                case (off[5:0])
+                    6'h00: reg_q <= {16'd0, l_ctrl[n]};
+                    6'h04: reg_q <= {9'd0, l_ptr[n]};
+                    6'h08: reg_q <= {16'd0, l_stride[n]};
+                    6'h0C: reg_q <= {5'd0, l_xs[n], 5'd0, l_xe[n]};
+                    6'h10: reg_q <= {5'd0, l_ys[n], 5'd0, l_ye[n]};
+                    6'h14: reg_q <= {16'd0, l_sx[n]};
+                    6'h18: reg_q <= {16'd0, l_sy[n]};
+                    6'h1C: reg_q <= {16'd0, l_hstep[n]};
+                    6'h20: reg_q <= {16'd0, l_vstep[n]};
+                    default: ;
+                endcase
+            end else case (off)
+                `RM_VIDCON:     reg_q <= {29'd0, vidcon};
+                `RM_VIDSTAT:    reg_q <= {18'd0, vidstat[13:10], pclk_locked, p_invblank, vidstat[7:0]};
+                `RM_VIDINTEN:   reg_q <= {18'd0, vidinten};
+                `RM_BEAMPOS:    reg_q <= {5'd0, p_vc, 5'd0, p_hc};
+                `RM_FRAMECOUNT: reg_q <= {16'd0, p_frames};
+                `RM_LINECMP:    reg_q <= {5'd0, lc_v, 5'd0, lc_h};
+                `RM_BGCOLOR:    reg_q <= {8'd0, bgcolor};
+                `RM_PRIO:       reg_q <= {24'd0, prio};
+                `RM_HVISIBLE:   reg_q <= {21'd0, hvis};
+                `RM_HSYNCSTART: reg_q <= {21'd0, hss};
+                `RM_HSYNCEND:   reg_q <= {21'd0, hse};
+                `RM_HTOTAL:     reg_q <= {21'd0, htot};
+                `RM_VVISIBLE:   reg_q <= {21'd0, vvis};
+                `RM_VSYNCSTART: reg_q <= {21'd0, vss};
+                `RM_VSYNCEND:   reg_q <= {21'd0, vse};
+                `RM_VTOTAL:     reg_q <= {21'd0, vtot};
+                `RM_SYNCPOL:    reg_q <= {30'd0, syncpol};
+                `RM_PCLKDIV:    reg_q <= {28'd0, pdiv};
+                default: ;      // SLOTPOS: with the display fetch
+            endcase
+        end
+    end
+
+    wire [13:0] irqflags = vidstat & vidinten;
+    assign irq_vblank = irqflags[0];
+    assign irq_line   = irqflags[1];
+    assign irq_viderr = |irqflags[7:4] | irqflags[10] | irqflags[11] | irqflags[12];
+
+    // ================================================================ block RAMs
+    // Port A: CPU side (100 MHz), 32-bit with byte enables. Port B: pixel side.
+    reg [31:0] pal  [0:1023];          // 0x00RRGGBB
+    reg [31:0] text [0:2047];          // two 16-bit cells per word, even cell in bits 31-16
+    reg [31:0] font [0:1023];          // 4 font rows per word, first row in bits 31-24
+    initial $readmemh(FONT_INIT, font);
+    integer k;
+    initial for (k = 0; k < 2048; k = k + 1) text[k] = 32'd0;
+    initial for (k = 0; k < 1024; k = k + 1) pal[k]  = 32'd0;
+
+    reg [31:0] pal_qa, text_qa, font_qa;
+    reg [1:0]  rd_area;                // which memory the last read came from
+    localparam A_REG = 2'd0, A_PAL = 2'd1, A_TEXT = 2'd2, A_FONT = 2'd3;
+
+    always @(posedge clk) begin
+        if (rb_wr && sel_pal) begin
+            if (rb_be[3]) pal[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
+            if (rb_be[2]) pal[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
+            if (rb_be[1]) pal[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
+            if (rb_be[0]) pal[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
+        end
+        pal_qa <= pal[rb_addr[11:2]];
+    end
+    always @(posedge clk) begin
+        if (rb_wr && sel_text) begin
+            if (rb_be[3]) text[rb_addr[12:2]][31:24] <= rb_wdata[31:24];
+            if (rb_be[2]) text[rb_addr[12:2]][23:16] <= rb_wdata[23:16];
+            if (rb_be[1]) text[rb_addr[12:2]][15:8]  <= rb_wdata[15:8];
+            if (rb_be[0]) text[rb_addr[12:2]][7:0]   <= rb_wdata[7:0];
+        end
+        text_qa <= text[rb_addr[12:2]];
+    end
+    always @(posedge clk) begin
+        if (rb_wr && sel_font) begin
+            if (rb_be[3]) font[rb_addr[11:2]][31:24] <= rb_wdata[31:24];
+            if (rb_be[2]) font[rb_addr[11:2]][23:16] <= rb_wdata[23:16];
+            if (rb_be[1]) font[rb_addr[11:2]][15:8]  <= rb_wdata[15:8];
+            if (rb_be[0]) font[rb_addr[11:2]][7:0]   <= rb_wdata[7:0];
+        end
+        font_qa <= font[rb_addr[11:2]];
+    end
+    reg rd_hit;
+    always @(posedge clk) begin
+        rd_hit  <= rb_rd && (sel_pal || sel_text || sel_font);
+        rd_area <= sel_pal ? A_PAL : sel_text ? A_TEXT : sel_font ? A_FONT : A_REG;
+    end
+    assign rb_rdata = reg_q | (!rd_hit ? 32'd0 :
+                               rd_area == A_PAL  ? {8'd0, pal_qa[23:0]} :
+                               rd_area == A_TEXT ? text_qa :
+                               rd_area == A_FONT ? font_qa : 32'd0);
+
+    // ================================================================ pixel domain
+    reg [1:0] rst_p;
+    always @(posedge clk_pix) rst_p <= {rst_p[0], rst};
+    wire prst = rst_p[1];
+
+    reg en_p;
+    always @(posedge clk_pix) en_p <= !prst && vidcon[0];
+
+    // ---- beam
+    reg [10:0] hc, vc;
+    wire hlast = (hc == htot - 1'b1);
+    wire vlast = (vc == vtot - 1'b1);
+    wire [10:0] hn = hlast ? 11'd0 : hc + 1'b1;
+    wire [10:0] vn = hlast ? (vlast ? 11'd0 : vc + 1'b1) : vc;
+    assign p_invblank = (p_vc >= vvis);
+
+    always @(posedge clk_pix) begin
+        if (!en_p) begin
+            hc <= 11'd0;
+            vc <= 11'd0;
+        end else begin
+            hc <= hn;
+            vc <= vn;
+        end
+        p_hc <= hc;
+        p_vc <= vc;
+        if (prst) begin
+            p_vb_t   <= 1'b0;
+            p_line_t <= 1'b0;
+            p_frames <= 16'd0;
+        end else if (en_p) begin
+            if (hc == 11'd0 && vc == vvis) begin
+                p_vb_t   <= ~p_vb_t;
+                p_frames <= p_frames + 1'b1;
+            end
+            if (hc == lc_h && vc == lc_v) p_line_t <= ~p_line_t;
+        end
+    end
+
+    // ---- text layer: the lowest-numbered layer with EN and TYPE = text
+    reg [1:0] tsel;
+    reg       tfound;
+    always @(*) begin
+        tfound = 1'b0;
+        tsel   = 2'd0;
+        for (i = 3; i >= 0; i = i - 1)
+            if (l_ctrl[i][0] && l_ctrl[i][1]) begin tfound = 1'b1; tsel = i; end
+    end
+
+    // Copied at the start of each horizontal blank (section 5.6)
+    reg        t_on, t_transp;
+    reg [9:0]  t_palofs;
+    reg [11:0] t_ptr;
+    reg [10:0] t_xs, t_xe, t_ys, t_ye;
+    reg [15:0] t_sx, t_sy, t_hstep, t_vstep;
+    always @(posedge clk_pix) if (!en_p || hc == hvis) begin
+        t_on     <= tfound;
+        t_transp <= l_ctrl[tsel][4];
+        t_palofs <= l_ctrl[tsel][15:6];
+        t_ptr    <= l_ptr[tsel][11:0];
+        t_xs     <= l_xs[tsel];  t_xe <= l_xe[tsel];
+        t_ys     <= l_ys[tsel];  t_ye <= l_ye[tsel];
+        t_sx     <= l_sx[tsel];  t_sy <= l_sy[tsel];
+        t_hstep  <= l_hstep[tsel];
+        t_vstep  <= l_vstep[tsel];
+    end
+
+    // Source position, 16.8 fixed point (section 4.5)
+    reg [23:0] hacc, vacc;
+    always @(posedge clk_pix) begin
+        if (!en_p) begin
+            hacc <= {t_sx, 8'd0};
+            vacc <= {t_sy, 8'd0};
+        end else begin
+            hacc <= (hn == t_xs) ? {t_sx, 8'd0} : hacc + t_hstep;
+            if (hlast) vacc <= (vn == t_ys) ? {t_sy, 8'd0} : vacc + t_vstep;
+        end
+    end
+
+    // ---- stage 0: where the beam is
+    wire [15:0] sx = hacc[23:8];
+    wire [15:0] sy = vacc[23:8];
+    wire        vis0 = en_p && (hc < hvis) && (vc < vvis);
+    wire        win0 = t_on && (hc >= t_xs) && (hc < t_xe) && (vc >= t_ys) && (vc < t_ye);
+    wire [11:0] cell0 = t_ptr + {sy[8:4], sx[9:3]};          // wraps round the 128 x 32 buffer
+    wire        hs0 = en_p && (hc >= hss) && (hc < hse);
+    wire        vs0 = en_p && (vc >= vss) && (vc < vse);
+
+    // ---- pipeline: 1 text read, 2 font read, 3 pixel, 4 palette read, 5 out
+    reg [10:0] text_a1;   reg half1;   reg [2:0] px1, px2, px3;   reg [3:0] row1, row2;
+    reg [31:0] text_q2, font_q3, pal_q5;
+    reg [4:0]  vis_d, win_d, hs_d, vs_d;
+    reg [7:0]  attr3;     reg [1:0] rsel3;
+    reg [9:0]  pidx4;     reg opaque4, opaque5;
+
+    reg         half2;
+    wire [15:0] cell2 = half2 ? text_q2[15:0] : text_q2[31:16];
+
+    always @(posedge clk_pix) begin
+        // 1
+        text_a1 <= cell0[11:1];
+        half1   <= cell0[0];
+        px1     <= sx[2:0];
+        row1    <= sy[3:0];
+        vis_d   <= {vis_d[3:0], vis0};
+        win_d   <= {win_d[3:0], win0};
+        hs_d    <= {hs_d[3:0], hs0};
+        vs_d    <= {vs_d[3:0], vs0};
+        // 2
+        text_q2 <= text[text_a1];
+        half2   <= half1;
+        px2     <= px1;
+        row2    <= row1;
+        // 3
+        font_q3 <= font[{cell2[7:0], row2[3:2]}];
+        attr3   <= cell2[15:8];
+        rsel3   <= row2[1:0];
+        px3     <= px2;
+        // 4
+        begin : pix
+            reg [7:0] fbyte;
+            reg       bit_on;
+            reg [3:0] colour;
+            fbyte   = font_q3 >> (8 * (3 - rsel3));
+            bit_on  = fbyte[7 - px3];
+            colour  = bit_on ? attr3[3:0] : attr3[7:4];
+            pidx4   <= {t_palofs, 4'd0} + colour;
+            opaque4 <= win_d[2] && (bit_on || !(t_transp && attr3[7:4] == 4'd0));
+        end
+        // 5
+        pal_q5  <= pal[pidx4];
+        opaque5 <= opaque4 && !vidcon[2];
+        // out
+        de    <= vis_d[4];
+        hsync <= hs_d[4] ^ !syncpol[0];
+        vsync <= vs_d[4] ^ !syncpol[1];
+        rgb   <= !vis_d[4] ? 24'd0 : opaque5 ? pal_q5[23:0] : bgcolor;
+    end
+endmodule

@@ -127,6 +127,8 @@ module bus_if #(
     wire        in_custom = (a24[23:16] == 8'hE0) ||
                             (a24[23:14] == 10'b1110_0001_00);            // E00000-E13FFF
     wire        in_system = (a24[23:16] == 8'hF0);
+    // The text screen and font are plain memory: no halves rule (spec 3, section 2)
+    wire        in_plain  = (a24[23:14] == 10'b1110_0001_00);
     wire        hw_area   = (a24[23:21] == 3'b111);                      // E00000-FFFFFF
 
     reg [2:0] target;
@@ -160,6 +162,7 @@ module bus_if #(
     reg [2:0]  state;
     reg [2:0]  tgt;            // target of the current cycle
     reg        rd_half_hi;     // register read: high half
+    reg        plain;          // text screen or font
 
     wire       lanes  = !q_uds_n || !q_lds_n;
     wire [1:0] be     = {!q_uds_n, !q_lds_n};
@@ -236,9 +239,10 @@ module bus_if #(
                     end
                     T_REG: begin
                         rb_addr <= q_addr[23:2];
+                        plain   <= in_plain;
                         if (q_rw) begin
                             rd_half_hi <= !q_addr[1];
-                            if (q_addr[1] && rh_valid && rh_tag == q_addr[23:2]) begin
+                            if (!in_plain && q_addr[1] && rh_valid && rh_tag == q_addr[23:2]) begin
                                 // Low half after a high-half read: the captured value
                                 dout_hold  <= rh_data[15:0];
                                 rh_valid   <= 1'b0;
@@ -284,7 +288,7 @@ module bus_if #(
 
             S_REG_RD: begin
                 dout_hold <= rd_half_hi ? rb_rdata[31:16] : rb_rdata[15:0];
-                if (rd_half_hi) begin
+                if (rd_half_hi && !plain) begin
                     rh_valid <= 1'b1;
                     rh_tag   <= rb_addr;
                     rh_data  <= rb_rdata;
@@ -310,7 +314,12 @@ module bus_if #(
                         wp      <= 1'b1;
                     end
                     T_REG: begin
-                        if (!q_addr[1]) begin
+                        if (plain) begin
+                            // Plain memory: write this half now
+                            rb_wr    <= 1'b1;
+                            rb_wdata <= {q_dout, q_dout};
+                            rb_be    <= q_addr[1] ? {2'b00, be} : {be, 2'b00};
+                        end else if (!q_addr[1]) begin
                             wh_valid <= 1'b1;
                             wh_tag   <= q_addr[23:2];
                             wh_data  <= q_dout;

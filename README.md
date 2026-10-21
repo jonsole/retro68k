@@ -31,6 +31,12 @@ A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA ha
                       keyboards       (accelerator port)
 ```
 
+## Status
+
+The computer runs in simulation (`make -C sim`): fx68k boots the ROM, checks memory, interrupts and video, and prints to the USB serial link and the screen:
+
+![Simulated screen after the boot ROM's checks](docs/images/phase2-boot.png)
+
 ## Design plan
 
 Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Each block has a spec in [`docs/spec/`](docs/spec/).
@@ -56,7 +62,7 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 ## Roadmap
 
 1. [ ] FPGA bring-up: HDMI/VGA test pattern, USB serial echo
-2. [ ] Whole computer in simulation: prints "hello" (serial done, screen next)
+2. [x] Whole computer in simulation: boot ROM checks on the serial link and the screen
 3. [ ] Computer on the board: "hello" on a monitor, RAM test, boot monitor
 4. [ ] Video: bitmap layers, palette, scrolling, sprites, copper
 5. [ ] Audio: sample channels and stream
