@@ -5,12 +5,12 @@ A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA ha
 ## Goals
 
 - **CPU:** 68000 at 20 MHz, the fx68k core inside the FPGA
-- **Memory:** 4 MB of Amiga-style Chip RAM in fast SRAM, shared with DMA in fixed memory cycles; the CPU has its own cycle in every slot, so it never waits for the display or sound
+- **Memory:** 4 MB of Amiga-style Chip RAM in fast SRAM, shared with DMA in fixed memory cycles; the CPU has its own cycle in every slot, so it never waits for Chip RAM
 - **ROM:** boot ROM with a monitor, held in FPGA block RAM
-- **Video:** HDMI and VGA, programmable modes from 640×480 to 1280×720, 4 layers, 64 sprites, a copper
-- **Audio:** 16 sample channels with sinc resampling, plus a stereo stream
-- **DMA engine:** copies, fills and blits, and feeds the SD card and USB serial
-- **I/O:** USB serial (FT232H module), SD card, PS/2 and Spectrum keyboards, real-time clock, timers, interrupts
+- **Video:** HDMI and VGA in one mode fixed at build time (640×480 or 800×600 at 60 Hz); 3 bitmap layers, planar or chunky, with Amiga-style bitplane pointers; scaling 1–8×; 256-colour palette or direct colour; a copper (MOVE, WAIT, SKIP)
+- **Audio:** 4 Paula-style channels of 8-bit samples, sigma-delta output
+- **DMA engine:** one channel for copies and fills in Chip RAM, in 1D or 2D
+- **I/O:** USB serial (FT232H module), SD card (SPI), PS/2 keyboard, timers, interrupts
 
 ## Block diagram
 
@@ -24,16 +24,16 @@ A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA ha
  |  +--------+   +-----------+     ^      ^      ^      ^        |
  |                    |           video  audio  copper DMA engine|---> HDMI, VGA
  |                    v                                          |---> audio jack
- |         timers, interrupts, SD, keyboard, serial, I2C         |
+ |         timers, interrupts, SD, keyboard, serial              |
  +---------------------------------------------------------------+
-            |            |              |              |
-         SD card    PS/2 + Spectrum   FT232H USB    RTC (I2C)
-                      keyboards       (accelerator port)
+            |            |              |
+         SD card     PS/2 keyboard   FT232H USB
+                                     (accelerator port)
 ```
 
 ## Status
 
-The computer runs in simulation (`make -C sim`): fx68k boots the ROM, checks memory, interrupts and video, and prints to the USB serial link and the screen. The picture at the bottom right is a bitmap layer, 64 × 32 at 8 bits per pixel, fetched from Chip RAM as the beam scans and shown 2× in front of the text layer:
+The computer runs in simulation (`make -C sim`): fx68k boots the ROM, checks memory, interrupts and video, and prints to the USB serial link and the screen. The boot ROM draws its console text into a 1-plane bitmap layer with a font in ROM; the picture at the bottom right is a second bitmap layer, fetched from Chip RAM as the beam scans:
 
 ![Simulated screen after the boot ROM's checks](docs/images/phase2-boot.png)
 
@@ -64,10 +64,10 @@ Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](
 1. [ ] FPGA bring-up: HDMI/VGA test pattern, USB serial echo
 2. [x] Whole computer in simulation: boot ROM checks on the serial link and the screen
 3. [ ] Computer on the board: "hello" on a monitor, RAM test, boot monitor (build script ready: `fpga/ks3/build.sh`)
-4. [ ] Video: bitmap layers, palette, scrolling, sprites (done in simulation), copper
-5. [ ] Audio: sample channels and stream
-6. [ ] DMA engine
-7. [ ] Home computer: SD card, keyboards, real-time clock, BASIC
+4. [ ] Video: bitmap layers, palette, scrolling (version 1 done in simulation), copper. Sprites were built and then removed from version 1 to save logic
+5. [ ] Audio: 4 sample channels
+6. [ ] DMA engine: copies and fills
+7. [ ] Home computer: SD card, PS/2 keyboard, BASIC
 8. [ ] Installed as a Next core
 
 ## License

@@ -40,7 +40,7 @@ reg 0x01C PRIO       RW   4/4.8  FRONT=1:0 MIDDLE=3:2 BACK=5:4
 reg 0x020 VIDSIZE    R    4/6.1  VVISIBLE=26:16 HVISIBLE=10:0
 
 # DMA control (spec 5); its 16-bit value sits in the low half at 0x096, as on the Amiga
-reg 0x094 DMACON     SC   5/8    AUDEN=3 STREN=4 DMXEN=6 COPEN=7 VIDEN=8 DMAEN=9 SETCLR=15
+reg 0x094 DMACON     SC   5/8    AUDEN=3 DMXEN=6 COPEN=7 VIDEN=8 DMAEN=9 SETCLR=15
 
 # Layers 0-2 (spec 4): bitmaps with Amiga-style plane pointers, modulo and data registers
 array L 3 0x100 0x80 4/6.2

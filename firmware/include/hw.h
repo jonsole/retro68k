@@ -94,8 +94,6 @@
 #define DMACON                             HW_REG32(CUSTOM_BASE + DMACON_OFS)
 #define DMACON_AUDEN_SHIFT                 3
 #define DMACON_AUDEN_MASK                  0x8u
-#define DMACON_STREN_SHIFT                 4
-#define DMACON_STREN_MASK                  0x10u
 #define DMACON_DMXEN_SHIFT                 6
 #define DMACON_DMXEN_MASK                  0x40u
 #define DMACON_COPEN_SHIFT                 7

@@ -14,7 +14,7 @@ On the ZX Spectrum Next KS3 board the CPU is always fx68k inside the FPGA. The e
 | CPU speed | 20 MHz: fx68k clocked at 40 MHz with alternating phase enables |
 | Clock crossing | 40 MHz and 100 MHz come from the same MMCM and line up every 50 ns. Signals cross at fixed points with at least 15 ns to settle, so no synchronisers and no uncertainty |
 | Bus | 68000 asynchronous bus: /AS, /UDS, /LDS, R/W, /DTACK, /BERR, FC0–2, IPL0–2. /VPA, E, bus arbitration and /HALT input are not used |
-| Wait states | None for ROM, block RAM, registers and Chip RAM. The only exception: a HIGH DMA job or an urgent sprite or copper fetch taking the CPU's memory cycle costs 2 clocks (spec 5) |
+| Wait states | None for ROM, block RAM, registers and Chip RAM: no DMA ever takes the CPU's memory cycle (spec 5) |
 | Bus errors | Unmapped addresses, writes to ROM, and (optionally) user-mode accesses to hardware |
 | Interrupts | Vectored; the interrupt controller answers the acknowledge cycle with no wait states |
 | Reset | fx68k reset from the system reset (spec 7); its RESET instruction resets the devices; a halted CPU (double bus fault) is detected |
@@ -90,12 +90,11 @@ For block RAM, registers and ROM, the data is ready well before 160 ns. So all t
 
 | Target | Wait |
 |--------|------|
-| Chip RAM | 0 |
-| Chip RAM, when a HIGH DMA job or an urgent sprite or copper fetch takes the CPU's memory cycle | 2 clocks (/DTACK held to the next slot's cycle 0) |
+| Chip RAM | 0, always: cycle 0 of every slot is the CPU's and no DMA takes it |
 | Boot ROM, block RAM areas, custom registers, system registers | 0 |
 | Interrupt acknowledge | 0 |
 
-Waits are always whole slots, 2 CPU clocks each. Since every slot has a CPU cycle, there is no alignment to keep: the next access simply uses the next slot's cycle 0.
+Since every slot has a CPU cycle, there is no alignment to keep: each access simply uses the cycle 0 of its slot.
 
 **Off the grid:** 68000 bus cycles start on even CPU clocks, so they normally start on a slot boundary. If one ever starts 50 ns into a slot, the early /DTACK simply arrives one 68000 clock later: one wait state, after which the bus cycles are back in step with the slots.
 
@@ -106,8 +105,7 @@ Waits are always whole slots, 2 CPU clocks each. Since every slot has a CPU cycl
 | `0x000000`–`0x007FFF` | Boot ROM for reads while the overlay is on; Chip RAM otherwise | Writes always go to Chip RAM (spec 7, section 3.2) |
 | `0x000000`–`0x3FFFFF` | Chip RAM (4 MB SRAM) | Through the slot controller. On boards with 2 MB, Chip RAM ends at `0x1FFFFF` and the rest is a bus error |
 | `0x400000`–`0xDFFFFF` | Reserved | Bus error |
-| `0xE00000`–`0xE0FFFF` | Custom registers, palette, sprite table, descriptor RAM | Internal register bus |
-| `0xE10000`–`0xE13FFF` | Text screen and font | Internal register bus |
+| `0xE00000`–`0xE0FFFF` | Custom registers and palette | Internal register bus |
 | `0xF00000`–`0xF0FFFF` | System registers | Internal register bus |
 | `0xF80000`–`0xF87FFF` | Boot ROM | Writes are a bus error unless SYSCON.ROMWE (spec 7, section 3.3) |
 | Everything else | Unmapped | Bus error |
@@ -173,7 +171,7 @@ Added to the system control registers (spec 7, section 9):
 
 - **Clock crossing:** in simulation and in a Vivado timing report, every 40 ↔ 100 MHz path meets 15 ns, and captures happen only on the edges in section 3.
 - **Bus cycles:** reads and writes of bytes and words to every target, with the timing of section 4.1; zero wait states except where section 4.2 says.
-- **Wait states:** with all DMA busy, Chip RAM accesses still have no waits; with HIGH DMA jobs or urgent sprites, every wait is exactly 2 clocks.
+- **Wait states:** with all DMA busy (display, audio, copper and the DMA engine), Chip RAM accesses still have no waits.
 - **Bus errors:** each cause raises vector 2 and records BUSERRADDR and BUSERRWHY; PROTECT blocks user mode only.
 - **Interrupt acknowledge:** each level returns the right vector with no wait.
 - **Reset and halt:** reset at every source; the RESET instruction resets the devices only; a double bus fault sets HALTED and, with HALTRESET, resets with RESETWHY.HALTED.

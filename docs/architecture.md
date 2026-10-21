@@ -33,12 +33,14 @@ Glue logic duties:
 - Video RAM: dedicated SRAM on the FPGA side so video fetches never steal CPU cycles. The CPU writes VRAM through the FPGA, which arbitrates.
 - Output: VGA through a resistor DAC to start, then DVI/HDMI (TMDS from the FPGA).
 - Modes to aim for: 80×30 text, 320×240×8bpp, 640×480×4bpp, hardware sprites, scrolling, a blitter.
+- **Version 1 (decided, spec 4):** one fixed mode chosen when the FPGA is built (640×480 or 800×600 at 60 Hz), three bitmap layers (planar or chunky) with Amiga-style plane pointers, whole-number scaling, a 256-entry palette and direct colour. No text mode (the boot ROM draws its text into a bitmap) and no sprites. A simple copper (MOVE, WAIT, SKIP) and a one-channel DMA engine for copies and fills.
 
 ## FPGA: audio
 
 - Output through I2S DAC (e.g. PCM5102) or sigma-delta PWM with an RC filter.
 - Ideas: 4–8 PCM channels with DMA from VRAM, or an FM / wavetable synth in logic.
 - Raise a vertical-blank or audio-buffer interrupt on the CPU.
+- **Version 1 (decided, spec 6):** 4 Paula-style channels of 8-bit samples from Chip RAM, nearest-sample playback, sigma-delta output.
 
 ## Interrupts
 

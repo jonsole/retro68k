@@ -48,7 +48,6 @@
 `define RM_VIDSIZE_HVISIBLE                 10:0
 `define RM_DMACON                           16'h0094
 `define RM_DMACON_AUDEN                     3
-`define RM_DMACON_STREN                     4
 `define RM_DMACON_DMXEN                     6
 `define RM_DMACON_COPEN                     7
 `define RM_DMACON_VIDEN                     8

@@ -1,6 +1,6 @@
 # Spec 9: Sprites
 
-Status: **draft for review**
+Status: **on hold, not in version 1.** Sprites were removed from v1 to save logic. The last implementation is in git history at commit 7df97fd. The rest of this spec is kept as it was for a later version.
 
 Sprites are small images drawn over (or between) the layers at any position, without changing the layers' memory. This spec defines what a sprite can be and how the hardware shows it. How sprite data is fetched from memory is set by the video spec (spec 4, section 5.4) and the slot rules in spec 5. This spec extends both.
 

@@ -17,10 +17,11 @@ A build takes about 10–20 minutes. The script stops with an error if timing is
 
 ## What to expect on the board (version 1)
 
-- HDMI and VGA at 640×480, 60 Hz: the boot ROM's checks on a blue text screen, with a small test picture at the bottom right. On real hardware the RAM test covers all 4 MB, which takes a few seconds.
+- HDMI and VGA at 640×480, 60 Hz (or 800×600 with `--pix-n 5`): the boot ROM's checks on a blue console, drawn into a 1-plane bitmap layer, with a small 4-plane test picture at the bottom right. On real hardware the RAM test covers all 4 MB, which takes a few seconds.
 - The reset button restarts it; the Multiface button is the NMI (the boot ROM prints "NMI").
 - With an FT232H module on the accelerator port, the same text appears on a PC terminal, and the PC can send BREAK, RESET and UPLOAD (spec 14). Without one, nothing waits for it.
-- Not in yet: SD card, keyboards, sound, sprites, copper, DMA engine.
+- In the build: fx68k, bus interface, SRAM controller, boot ROM, system registers, USB serial, interrupts, timers, and video version 1 (three bitmap layers, palette, direct colour).
+- Not in yet: SD card, PS/2 keyboard, sound, copper, DMA engine. Sprites are not in version 1.
 
 ## Files
 
@@ -37,20 +38,17 @@ The top level is `fpga/rtl/top_ks3.v`; the board-specific parts are in `fpga/rtl
 ## Things to check on the first build
 
 - **Timing:** that fx68k meets 40 MHz (spec 1, B1) and the 40/100 MHz crossings meet their 15 ns limits.
-- **Clocks:** all clocks come from one MMCM (VCO 1000 MHz), including the pixel clock, so the pixel clock divider N is fixed when the FPGA is built (`--pix-n`, default 8 for 640×480). PCLKDIV changes at run time come later.
+- **Clocks:** all clocks come from one MMCM (VCO 1000 MHz), including the pixel clock. The video mode is fixed when the FPGA is built (`--pix-n`: 8 for 640×480, the default, or 5 for 800×600); there are no timing registers.
 - **FT232H pins** on the accelerator port are provisional (spec 14, U6): `accel_io[7:0]` = D7–D0, `[8]` RXF#, `[9]` TXE#, `[10]` RD#, `[11]` WR#, `[12]` SIWU#.
 - **SRAM:** the 20 ns memory cycles on the real board (spec 5, M2); the boot ROM's RAM test shows the result.
 
 ## Resource use
 
-Yosys (`yosys_check.sh`) puts the design, with 16 sprites per line, at about 14,700 LUTs (71%), 10,100 flip-flops (24%), 19.5 of 50 block RAMs and 19 of 90 DSP slices. Vivado's figures will differ a little.
+The figures below were measured with Yosys (`yosys_check.sh`) before the cut to version 1, with the sprites taken out of the table. They will be re-measured for the version 1 design. Vivado's figures will differ a little.
 
 | Part | LUTs (Yosys) |
 |------|------|
-| Sprites (16 per line) | about 5,800 |
-| Video (layers, text, palette, timing) | about 3,300 |
+| Video (old design: 4 layers, text, palette, timing) | about 3,300 |
 | fx68k | about 3,300 |
 | Timers | about 950 |
 | The rest | about 1,350 |
-
-With 8 sprites per line (`UNITS = 8` in `sprites.v`) the sprites take about 2,700 LUTs less.

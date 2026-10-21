@@ -47,13 +47,11 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 |--------|------------------|------|------|---------------|
 | 0 | 64 | VBLANK | Video: start of vertical blanking (VIDSTAT.VBLANK) | 5 |
 | 1 | 65 | LINE | Video: line compare (VIDSTAT.LINE) | 5 |
-| 2 | 66 | COPPER | Copper IRQ instruction or error (VIDSTAT.COPIRQ) | 5 |
-| 3 | 67 | VIDERR | Video problems: OVERRUN, SPRMISS, SPROVF, BADTIMING | 5 |
-| 4 | 68 | DMA0 | DMA engine channel 0 (DMXINT bit 0) | 4 |
-| 5 | 69 | DMA1 | DMA engine channel 1 | 4 |
-| 6 | 70 | DMA2 | DMA engine channel 2 | 4 |
-| 7 | 71 | DMA3 | DMA engine channel 3 | 4 |
-| 8 | 72 | AUDSTR | Audio stream: half-way or end (AUDSTAT.STRHALF, STREND) | 4 |
+| 2 | 66 | – | Not used in version 1 (was COPPER; the v1 copper has no IRQ instruction and no errors) | 0 (off) |
+| 3 | 67 | VIDERR | Video: a layer ran short (VIDSTAT.OVERRUN, spec 4, section 5.3) | 5 |
+| 4 | 68 | DMA0 | DMA engine: job done (spec 11; version 1 has one channel) | 4 |
+| 5–7 | 69–71 | – | Not used in version 1 (were DMA1–DMA3) | 0 (off) |
+| 8 | 72 | – | Not used in version 1 (was AUDSTR; there is no audio stream) | 0 (off) |
 | 9 | 73 | AUDCH | Audio channel ended or looped (AUDCHEND) | 4 |
 | 10 | 74 | AUDERR | Audio STARVED | 4 |
 | 11 | 75 | TIMER0 | Timer 0 underflow | 6 |
@@ -61,12 +59,12 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 | 13 | 77 | TIMER2 | Timer 2 underflow | 6 |
 | 14 | 78 | TIMER3 | Timer 3 underflow | 6 |
 | 15 | 79 | SERIAL | USB serial: data received, timeout, room to send, overflow (spec 14) | 3 |
-| 16 | 80 | SD | SD card: command or data done, error, card inserted/removed (spec 15) | 2 |
-| 17 | 81 | KEYB | Keyboard: key event, keyboard reply, error (spec 16) | 2 |
+| 16 | 80 | – | Not used in version 1 (was SD; the v1 SD card is a plain SPI byte master that software polls, spec 15) | 0 (off) |
+| 17 | 81 | KEYB | PS/2 keyboard: byte received (spec 16) | 2 |
 | 18 | 82 | SOFT | Software interrupt (SOFTINT) | 1 |
 | 19–23 | 83–87 | – | Reserved (e.g. mouse, joysticks, accelerator-port pins) | 0 (off) |
 
-The video flags that share one source (VIDERR) and the audio flags (AUDSTR, AUDCH) are told apart by reading the unit's status register in the handler.
+The audio channel flags that share one source (AUDCH) are told apart by reading the unit's status register in the handler. Unused sources keep their numbers, so later versions can bring them back without moving the others.
 
 **Choosing levels:** the defaults put timers highest (an operating system tick should not be held up by graphics), then video (VBLANK and LINE handlers have to run on time for smooth animation), then audio and DMA, serial, and the slow devices. Software can change any of them, for example raising LINE to level 6 for precise raster effects.
 

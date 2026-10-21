@@ -84,8 +84,6 @@ VIDSIZE_HVISIBLE_M           equ $7FF
 DMACON                       equ $94         ; SC, spec 5/8
 DMACON_AUDEN_B               equ $3
 DMACON_AUDEN_M               equ $8
-DMACON_STREN_B               equ $4
-DMACON_STREN_M               equ $10
 DMACON_DMXEN_B               equ $6
 DMACON_DMXEN_M               equ $40
 DMACON_COPEN_B               equ $7

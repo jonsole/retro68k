@@ -24,8 +24,8 @@ Only the Python standard library is needed (Python 3.8 or newer).
 | block `CUSTOM` | `CUSTOM` (base), `CUSTOM_SIZE` | `CUSTOM_BASE`, `CUSTOM_SIZE` | `` `RM_CUSTOM_BASE `` |
 | reg `VIDCON` | `VIDCON` (offset in block) | `VIDCON` (the register), `VIDCON_OFS` | `` `RM_VIDCON `` (offset) |
 | field `VIDCON.EN` | `VIDCON_EN_B` (bit), `VIDCON_EN_M` (mask); multi-bit fields add `_W` (width) | `VIDCON_EN_SHIFT`, `VIDCON_EN_MASK` | `` `RM_VIDCON_EN `` (bit or `hi:lo`) |
-| array `L` of 4 | `L_NUM`, `L_SPAN`, `L0`…`L3`, `L_CTRL` (offset in an element), `L2_CTRL` | `L_NUM`, `L_SPAN`, `L_AT(n)`, `L_CTRL(n)` | `` `RM_L_BASE ``, `` `RM_L_SPAN ``, `` `RM_L_CTRL `` |
-| struct `SPR` | `SPR_SIZEOF`, `SPR_POS` … | `spr_t`, `SPR_POS_OFS` … | `` `RM_SPR_POS `` … |
+| array `L` of 3 | `L_NUM`, `L_SPAN`, `L0`…`L2`, `L_CTRL` (offset in an element), `L2_CTRL` | `L_NUM`, `L_SPAN`, `L_AT(n)`, `L_CTRL(n)` | `` `RM_L_BASE ``, `` `RM_L_SPAN ``, `` `RM_L_CTRL `` |
+| struct `S` with field `F` | `S_SIZEOF`, `S_F` … | `s_t`, `S_F_OFS` … | `` `RM_S_F `` … |
 | const `INT_VBLANK` | `INT_VBLANK` | `INT_VBLANK` | `` `RM_INT_VBLANK `` |
 
 Example (assembler):
@@ -34,7 +34,7 @@ Example (assembler):
         include "hw.inc"
         lea     CUSTOM,a6
         move.l  #VIDCON_EN_M,VIDCON(a6)        ; video on
-        move.l  #picture,L0_PTR(a6)            ; layer 0 source
+        move.l  #picture,L0_BPL0PT(a6)         ; layer 0, plane 0 pointer
 ```
 
 Example (C):
@@ -42,7 +42,7 @@ Example (C):
 ```c
 #include "hw.h"
 VIDCON = VIDCON_EN_MASK;
-L_PTR(0) = (uint32_t)picture;
+L_BPL0PT(0) = (uint32_t)picture;
 ```
 
 ## bin2hex.py
@@ -51,4 +51,4 @@ Turns the assembled boot ROM (`boot.bin`) into a `$readmemh` file of 16-bit word
 
 ## bdf2font.py
 
-Turns an 8×16 BDF bitmap font into the text layer's font RAM contents: `bdf2font.py third_party/spleen/spleen-8x16-ibm-437.bdf fpga/rtl/font8x16.hex`.
+Turns an 8×16 BDF bitmap font into the boot ROM's console font: `bdf2font.py third_party/spleen/spleen-8x16-ibm-437.bdf firmware/boot/font8x16.bin`. The output is a 4096-byte binary: 256 characters × 16 bytes, one byte per pixel row, leftmost pixel in bit 7. The boot ROM includes it and draws its console with it.
