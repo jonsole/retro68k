@@ -8,7 +8,7 @@ The copper is a small coprocessor that follows the beam, as on the Amiga: it run
 
 | Item | Value |
 |------|-------|
-| Program | A list of 32-bit instructions in Chip RAM, restarted from COP1LC at the start of every vertical blank |
+| Program | A list of 32-bit instructions in Chip RAM, restarted from COP1LC at the start of every frame (beam line 0: the start of the vertical blank) |
 | Instructions | MOVE, WAIT, SKIP (as the Amiga), plus JUMP and STOP; MOVE through X and Y; ADD, SUB, AND, OR, CMP, LD, ST; SKIP on a condition; CALL and RET |
 | Registers | X and Y (16 bits), the flags (Z, N, C), 8 storage registers COPR0–7, a return stack 8 deep. The CPU can read and write all but the stack contents |
 | Can write | The custom register block only (`0xE00000`–`0xE07FFF`, the reach of a MOVE's 15-bit offset): every register there and the palette. Not the system block |
@@ -34,12 +34,11 @@ The copper is a small coprocessor that follows the beam, as on the Amiga: it run
 | Protection | CDANG guards the low registers | The copper can't reach the system block at all |
 | Speed | One instruction per 8 low-resolution pixels or so | Waits are pixel exact; a MOVE after a WAIT is prefetched |
 
-## 3. Frame order
+## 3. Beam positions
 
-The list restarts from COP1LC at the start of each **vertical blank**, line 576, so its writes for the coming picture (plane pointers, colours) land before that picture's first line is fetched. Beam positions in WAIT and SKIP therefore count in **frame order**: lines 576–624 (the vertical blank) come first, then lines 0–575 of the picture.
+WAIT and SKIP positions are in **beam coordinates** (spec 4, section 3.3): line 0 is the start of the vertical blank and the picture is lines 49–624; pixel 0 is the start of a line's horizontal blank and the picture is pixels 144–863. The list restarts from COP1LC at the start of each frame, beam line 0, pixel 0, so its writes for the coming picture (plane pointers, colours) land in the 49 blank lines before the picture's first line is fetched. Positions only go up through a frame.
 
-- A WAIT for a picture line (0–575) waits for that line of the coming picture.
-- A WAIT for a blanking line (576–624) waits in the blank before it.
+- A WAIT for line n, pixel 0 ends at the start of line n's horizontal blank: the place for changes that must be in place before line n's picture (on line n, from pixel 144).
 - A position the beam has already passed in this frame satisfies a WAIT at once and makes a SKIP skip.
 
 ## 4. Instructions
@@ -61,7 +60,7 @@ Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kin
 | Instruction | Does |
 |-------------|------|
 | **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. The copper follows the halves rule (spec 3, section 2) with its own latch, separate from the CPU's: a high-half write is held until a low-half write to the same register, which writes both halves at once, so a 32-bit register is written whole. Other instructions (other MOVEs, WAITs) may come in between; a high-half write to another register replaces the held one. A low-half write on its own keeps the register's current high half. 16-bit registers (BPLxDAT, BPLSTRIDE, DMACON, the strobes) need one MOVE, to their low half |
-| **WAIT** | Waits until the beam has reached the position (frame order, section 3): it ends on the position itself. A position the beam never reaches (pixel 864 or more, line 625 or more) waits until the next frame. With **P** set (pixel only), the line is ignored: it waits until the pixel position is reached on the current line, or on the next line if it has already passed. With **B** set, it also waits until the DMA engine (spec 11) is idle: no job running or waiting to start, including one a MOVE just before started |
+| **WAIT** | Waits until the beam has reached the position (section 3): it ends on the position itself. A position the beam never reaches (pixel 864 or more, line 625 or more) waits until the next frame. With **P** set (pixel only), the line is ignored: it waits until the pixel position is reached on the current line, or on the next line if it has already passed. With **B** set, it also waits until the DMA engine (spec 11) is idle: no job running or waiting to start, including one a MOVE just before started |
 | **SKIP** | If the beam has reached the position, skips the next instruction. With P set, compares the pixel position only |
 | **JUMP** | Continues at the address |
 | **STOP** | Stops until the next frame (or a COPJMP strobe). A WAIT for line 2047 does the same, as on the Amiga |
@@ -211,7 +210,7 @@ Without RESUME (the default), COP2LC is never changed by the hardware, as on the
 
 Rules for a background list:
 
-- Its WAITs should be pixel-only, BLT-only (WAITB for a position already passed, such as line 576, pixel 0) or none: a beam WAIT counts in frame order, so after a resume it would wait for that position in the new frame.
+- Its WAITs should be pixel-only, BLT-only (WAITB for a position already passed, such as line 0, pixel 0) or none: after a resume, a beam WAIT would wait for its position in the new frame.
 - Some MOVEs may run twice: if the cut-off comes between the two halves of a pair, everything from the high-half MOVE on runs again. Keep the pairs together, and never put a strobe (such as one that starts a DMA engine job) between the halves of a pair, so that a strobe never runs twice.
 - When it is done, it should set COP2LC to an idle list (`CMOVEL COP2LC,idle` then `CSTOP`, where `idle` is a STOP), so that the next frame's COPJMP2 does not run it again from the last saved place.
 - While RESUME is set and a background list is running, the CPU's writes to COP2LC may be replaced at the next vertical blank. To queue new work, the CPU writes COP2LC only while the copper runs the idle list (COPPC tells it where the copper is), or it adds the work to a queue that the background list reads.
@@ -270,7 +269,7 @@ The assembler macros for these (`CMOVE`, `CWAIT`, `CSKIP`, `CJUMP`, `CSTOP`) are
 ## 10. Tests
 
 - **Golden images:** copper lists that change colours mid-line and per line, reset plane pointers, and open a split screen (new BPLxPT at a line), compared with the Python video model extended with a copper model.
-- **Frame order:** WAITs on blanking lines and picture lines; SKIP and JUMP loops ending at a line.
+- **Beam positions:** WAITs on blanking lines and picture lines; SKIP and JUMP loops ending at a line.
 - **Halves:** a 32-bit register written by two MOVEs is never seen half-written; the CPU's own halves are not disturbed.
 - **Strobes and lists:** COPJMP1/2 and COP1LC double buffering.
 - **COPINT:** raises the interrupt once per write.

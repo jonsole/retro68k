@@ -60,7 +60,7 @@ In simulation the pixel clock is a free-running 27 MHz clock with an odd phase a
 | Sync | Both active low |
 | Pixels | Not square: on a 4:3 screen each pixel is 16/15 as wide as it is tall, about the Amiga PAL shape |
 
-`hpixel` counts from 0 at the first visible pixel, `vline` from 0 at the first visible line. Blanking (front porch, sync, back porch) follows the visible part. Lines 576 to 624 are the vertical retrace. VIDSIZE reads 720 × 576.
+Positions are in beam coordinates (section 3.3): `hpixel` counts from 0 at the start of the horizontal blank (front porch, sync, back porch: 144 pixels), so the visible pixels are 144–863; `vline` counts from 0 at the start of the vertical blank (49 lines), so the visible lines are 49–624. VIDSIZE reads 720 × 576.
 
 **Normal screens and overscan.** HDMI sends exactly the visible pixels: there is no border beyond them, and a computer monitor shows all of them. A TV may crop a few percent off each edge (open point V2). So the whole 720 × 576 is the overscan area. A normal screen is a centred window, with the background colour round it as the border:
 
@@ -72,10 +72,21 @@ In simulation the pixel clock is a free-running 27 MHz clock with an odd phase a
 
 ### 3.3 Beam position
 
+Every position the hardware uses (BEAMPOS, LINECMP, the copper's WAIT and SKIP, layer windows, sprite windows) is in **beam coordinates**, which count the blanking too:
+
+| | Beam pixels (across) | Beam lines (down) |
+|--|--|--|
+| 0 | The start of the horizontal blank | The start of the vertical blank |
+| Blank | 0–143 | 0–48 |
+| The picture | 144–863 (720 pixels) | 49–624 (576 lines) |
+| Total | 864 per line | 625 per frame |
+
+So a beam line starts with its horizontal blank and then shows its 720 pixels, and a frame starts with its vertical blank (at line 0, pixel 0) and then shows its 576 lines. Positions only go up through a frame: there is no wrap from the end of the picture to the blank. Something can be placed partly off the left or top of the picture (a sprite, a layer's window start) with ordinary unsigned numbers. `hw.inc` gives the picture's corner as VID_X0 = 144 and VID_Y0 = 49, and its size as VID_W = 720 and VID_H = 576.
+
 | Register | Contents |
 |----------|----------|
-| BEAMPOS (read) | `vline` (bits 26–16) and `hpixel` (bits 10–0), as one 32-bit read so they always match |
-| FRAMECOUNT (read) | Frame counter, 16 bits, counts up at the start of vertical blanking |
+| BEAMPOS (read) | `vline` (bits 26–16) and `hpixel` (bits 10–0), in beam coordinates, as one 32-bit read so they always match |
+| FRAMECOUNT (read) | Frame counter, 16 bits, counts up at the start of each frame (beam 0, 0) |
 
 ### 3.4 Video interrupts
 
@@ -83,8 +94,8 @@ These reach the CPU through the interrupt controller (spec 13), as the sources V
 
 | Flag | When |
 |------|------|
-| VBLANK | Start of vertical blanking (`vline` = VVISIBLE, `hpixel` = 0) |
-| LINE | Start of line `vline` = LINECMP (`hpixel` = 0), for raster effects without the copper |
+| VBLANK | The start of the frame: beam line 0, pixel 0 (the start of the vertical blank) |
+| LINE | The start of beam line LINECMP (pixel 0, the start of its horizontal blank: 144 pixels before the line's picture), for raster effects without the copper |
 | OVERRUN | A layer's next group was not ready when its shifters needed it (section 5.3); goes to VIDERR |
 
 Each flag has an enable bit in VIDINTEN and a sticky flag in VIDSTAT, which is cleared by writing 1.
@@ -113,7 +124,9 @@ Each layer runs on its own: its own pointers, data registers, shifters, window, 
 
 ### 4.3 Display window
 
-Each layer has a rectangle `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND` (WINX, WINY) in screen pixels and lines: the layer's display start and stop. Outside it the layer is transparent. Windows can overlap or sit side by side, so status bars and split screens need no copper. A full-screen layer is simply 0, 0, HVISIBLE, VVISIBLE.
+Each layer has a rectangle `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND` (WINX, WINY) in beam coordinates (section 3.3): the layer's display start and stop. Outside it the layer is transparent. Windows can overlap or sit side by side, so status bars and split screens need no copper. A full-screen layer is 144, 49, 864, 625 (VID_X0, VID_Y0, VID_X0 + VID_W, VID_Y0 + VID_H), which is also the value after reset.
+
+A window is clamped to the picture: a start in the blank counts as the picture's edge, where the layer's first pixel then shows (layers are not clipped as sprites are), and an end past the last pixel or line counts as the picture's end.
 
 ### 4.4 Plane pointers, stride and scroll
 

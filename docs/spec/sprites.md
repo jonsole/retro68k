@@ -47,18 +47,18 @@ Each sprite has three registers (section 6):
 - **SPRxPT** points at the sprite's image in Chip RAM: its lines one after another, top line first, each in whole words (section 3, below). As a plane pointer does, it moves through the image as it is fetched, so the hardware does not reset it: the copper (or the CPU) writes the eight pointers in every vertical blank.
 - **SPRxH** and **SPRxV** give the sprite's window, and **SPRxCTL** its settings. They are plain registers: the CPU or copper writes them, and they stay as written until written again. The image in memory is pixels only.
 
-**The window** (SPRxH, SPRxV), as a layer's (spec 4, section 4.3):
+**The window** (SPRxH, SPRxV), as a layer's (spec 4, section 4.3), in beam coordinates (spec 4, section 3.3: the picture is pixels 144–863, lines 49–624):
 
 | Register | Bits | Field | Meaning |
 |----------|------|-------|---------|
-| SPRxH | 11–0 | HSTART | First screen pixel of the sprite, signed, −144 or more (a lower value counts as −144). Pixels left of the screen are clipped |
-| SPRxH | 27–16 | HSTOP | Screen pixel just after the sprite, signed. Past the right edge clips |
-| SPRxV | 10–0 | VSTART | First picture line of the sprite (0–575; 576 or more: not shown this frame) |
-| SPRxV | 26–16 | VSTOP | Picture line just after the sprite. Past the bottom clips |
+| SPRxH | 10–0 | HSTART | First beam pixel of the sprite (0–863; 864 or more: not shown). Pixels before 144 are in the horizontal blank: fetched, not shown |
+| SPRxH | 26–16 | HSTOP | Beam pixel just after the sprite (no higher than 864 counts) |
+| SPRxV | 10–0 | VSTART | First beam line of the sprite (0–624; 625 or more: not shown). Lines before 49 are in the vertical blank: fetched, not shown |
+| SPRxV | 26–16 | VSTOP | Beam line just after the sprite (no higher than 625 counts) |
 
 The image's size follows from the window: **source width** = (HSTOP − HSTART) ÷ HMAG pixels and **source height** = (VSTOP − VSTART) ÷ VMAG lines, each rounded up. A source line is stored in whole words, ⌈source width × BPP ÷ 16⌉ of them. There is no size limit: lines of any length stream through the FIFO (section 4); only the memory budget (section 5) limits how big and how many sprites can be.
 
-**Clipping:** at the left, right and bottom the hardware clips: pixels outside the screen are not shown (those left of it are still fetched and dropped). A sprite's line starts in the horizontal blank, 144 pixels before the screen's left edge (pixel 720 of the line before), so a sprite can start at most 144 pixels left of the screen. At the top, VSTART cannot be above line 0: to show a sprite partly above the screen, point SPRxPT at its first visible line and set VSTART to 0.
+**Clipping:** the hardware clips at all four edges. A sprite's line is a beam line, and its frame the beam's frame, so a sprite can start up to 144 pixels left of the picture (HSTART 0) and up to 49 lines above it (VSTART 0): those pixels and lines are fetched and used up, but not shown. Pixels past the right edge and lines past the bottom are neither fetched nor shown. The DMA needs a little time after the frame starts (and after the copper writes SPRxPT) to fetch a sprite's first words, so a sprite should not start on beam lines 0–1; such lines are in the blank anyway.
 
 **SPRxCTL:**
 
@@ -70,11 +70,11 @@ The image's size follows from the window: **source width** = (HSTOP − HSTART) 
 | 21–20 | DEPTH | 0 = in front of all layers; 1 = behind the front layer; 2 = behind the middle layer; 3 = behind all layers (in PRIO order) |
 | 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the sprite palette (colour = PAL × 16 + value). Not used at 8 bpp |
 
-A sprite shows inside its window once per frame. A sprite whose DMA is on (SPRDMA) shows every frame where its registers say; to hide it, turn its DMA off, or set VSTART to 576 or more.
+A sprite shows inside its window once per frame. A sprite whose DMA is on (SPRDMA) shows every frame where its registers say; to hide it, turn its DMA off, or set VSTART to 625 or more.
 
-**Fetching:** as long as the sprite's window still has lines to come in this frame, the DMA keeps its FIFO filled: from the start of the frame (the vertical blank) until the window's last line has been fetched. So a sprite's first line is fetched ahead too, before VSTART.
+**Fetching:** as long as the sprite's window still has lines to come in this frame, the DMA keeps its FIFO filled: from the start of the frame (beam line 0, the start of the vertical blank) until the window's last line has been fetched. So a sprite's first line is fetched ahead too, before VSTART.
 
-**Starting.** At the start of each vertical blank, and whenever SPRxPT, SPRxH, SPRxV or SPRxCTL is written, the sprite starts again: its FIFO is emptied, and it will fetch its image from SPRxPT and show it from VSTART. (It is the copper's job to point SPRxPT at the image's first line, as for bitplanes.)
+**Starting.** At the start of each frame (beam line 0, pixel 0), and whenever SPRxPT, SPRxH, SPRxV or SPRxCTL is written, the sprite starts again: its FIFO is emptied, and it will fetch its image from SPRxPT and show it from VSTART. (It is the copper's job to point SPRxPT at the image's first line, as for bitplanes.)
 
 **Reusing a sprite further down the screen**, as Amiga programs do with their control words: after the sprite's last line, the copper WAITs, then writes the sprite's PT, window and CTL for its next use. The new use must start on a later line than the old one ends, and the writes must come after the old use's last line has been shown.
 
@@ -152,11 +152,11 @@ DMACON bit 5, **SPREN**: sprite DMA on (spec 5, section 8).
 
 ## 7. Examples
 
-A 32 × 24 sprite at 4 bpp, in colours 32–47, behind the front layer, on sprite 0 at line 100, pixel 200. The image is 24 lines of 8 words in Chip RAM at `ship`. Once, from the CPU:
+A 32 × 24 sprite at 4 bpp, in colours 32–47, behind the front layer, on sprite 0 at picture line 100, pixel 200 (beam coordinates add VID_X0 = 144 and VID_Y0 = 49). The image is 24 lines of 8 words in Chip RAM at `ship`. Once, from the CPU:
 
 ```
-    move.l  #((200+32)<<16)|200,SPR0+SPR_H(a4)      ; pixels 200-231
-    move.l  #((100+24)<<16)|100,SPR0+SPR_V(a4)      ; lines 100-123
+    move.l  #((VID_X0+200+32)<<16)|(VID_X0+200),SPR0+SPR_H(a4)  ; picture pixels 200-231
+    move.l  #((VID_Y0+100+24)<<16)|(VID_Y0+100),SPR0+SPR_V(a4)  ; picture lines 100-123
     move.l  #(1<<SPR_CTL_BPP_B)|(1<<SPR_CTL_DEPTH_B)|(2<<SPR_CTL_PAL_B),SPR0+SPR_CTL(a4)
 ```
 
@@ -171,9 +171,9 @@ To move the ship, write SPR0H and SPR0V and then SPR0PT (from the CPU, or with c
 Reusing sprite 0 for a second ship lower down, from line 300: after the first ship's last line (123), the copper writes sprite 0 again:
 
 ```
-    CWAIT   200,0
-    CMOVEL  SPR0+SPR_H,((400+32)<<16)|400
-    CMOVEL  SPR0+SPR_V,((300+24)<<16)|300
+    CWAIT   VID_Y0+200,0
+    CMOVEL  SPR0+SPR_H,((VID_X0+400+32)<<16)|(VID_X0+400)
+    CMOVEL  SPR0+SPR_V,((VID_Y0+300+24)<<16)|(VID_Y0+300)
     CMOVEL  SPR0+SPR_PT,ship2
 ```
 
