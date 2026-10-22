@@ -2,6 +2,7 @@
 
 | Tool | What it does |
 |------|--------------|
+| `vasm/vasm.tar.gz` | The vasm assembler's source archive, unmodified, as released by Volker Barthelmann (http://sun.hasenbraten.de/vasm/). CI builds the assembler from it, so it does not depend on that site being up. Its licence allows the unmodified archive to be redistributed for non-commercial use |
 | `regmap.py` | Reads `fpga/regmap.def` (every hardware register and field), checks it, checks it against `docs/spec/registers.md`, and writes `firmware/include/hw.inc` (vasm), `firmware/include/hw.h` (C) and `fpga/rtl/regmap.vh` (Verilog) |
 
 ## Register map
