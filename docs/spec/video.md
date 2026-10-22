@@ -7,7 +7,7 @@ Status: **v1 scope**
 - DVI output over the HDMI connector and, at the same time, 24-bit VGA through the KS3's ADV7125 video DAC.
 - **One video mode: 576p**, 720×576 at 50 Hz, exactly as CEA-861 defines it (27 MHz), so every HDMI TV and monitor takes it. It is the digital form of PAL: a normal Amiga-style screen (for example 640×512, PAL 320×256 doubled) sits in a centred window, and overscan uses the whole 720×576. There are no timing registers.
 - **Three bitmap layers**, each with its own display window, scroll, scale and palette block. Each layer is **planar** (1 to 8 Amiga-style bitplanes) or **chunky** (1, 2, 4 or 8 bits per pixel).
-- **Amiga-style bitplane DMA:** each plane has a pointer (BPLxPT) that moves through memory as the picture is shown, a modulo (BPLMOD) added at the end of each line, and a data register (BPLxDAT). The copper (or the CPU) resets the pointers every frame.
+- **Amiga-style bitplane DMA:** each plane has a pointer (BPLxPT) that moves through memory as the picture is shown, a stride (BPLSTRIDE) from each line's start to the next, and a data register (BPLxDAT). The copper (or the CPU) resets the pointers every frame.
 - **No hidden buffers.** Each plane has just its data register and its shift register, as on the Amiga. The DMA loads the data registers just in time; the copper or CPU can load them too.
 - **Fetch is automatic:** the hardware works out when and what to fetch from each layer's window, so there are no fetch start and stop registers (the Amiga's DDFSTRT/DDFSTOP).
 - **Direct colour:** the three layers can be joined into one direct-colour picture, one layer per channel (red, green, blue), up to 24 bits per pixel.
@@ -20,7 +20,7 @@ Status: **v1 scope**
 | Playfields | 1, or 2 in dual-playfield mode | 3 layers, in any order |
 | Pixel layout | Planar, 1–6 planes | Per layer: planar with 1–8 planes, or chunky with 1, 2, 4 or 8 bits per pixel |
 | Colours | 32 from 4096 (EHB, HAM) | 256-entry palette of 24-bit colours; each layer of up to 4 bits picks a 16-colour block. Direct colour up to 24 bits |
-| Plane pointers | BPLxPT, moved on by the fetch and BPLxMOD; rewritten by the copper each frame | The same, per layer: BPL0PT–BPL7PT and BPLMOD |
+| Plane pointers | BPLxPT, moved on by the fetch and BPLxMOD; rewritten by the copper each frame | The same, per layer: BPL0PT–BPL7PT. In place of the modulo, BPLSTRIDE: bytes from one line's start to the next, whatever is fetched (no fix-ups for fine scroll) |
 | Data registers | BPLxDAT, loaded by DMA; writing BPL1DAT starts the shifters | The same: BPL0DAT–BPL7DAT; writing BPL0DAT completes a group |
 | Display window | One per screen (DIWSTRT/DIWSTOP) | One per layer (WINX/WINY) |
 | Fetch window | DDFSTRT/DDFSTOP, set by hand | Worked out from each layer's window and scroll |
@@ -115,31 +115,33 @@ Each layer runs on its own: its own pointers, data registers, shifters, window, 
 
 Each layer has a rectangle `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND` (WINX, WINY) in screen pixels and lines: the layer's display start and stop. Outside it the layer is transparent. Windows can overlap or sit side by side, so status bars and split screens need no copper. A full-screen layer is simply 0, 0, HVISIBLE, VVISIBLE.
 
-### 4.4 Plane pointers, modulo and scroll
+### 4.4 Plane pointers, stride and scroll
 
 **Each plane has its own pointer, BPLxPT, which counts up through memory as the plane's words are fetched**, as on the Amiga.
 
 | Register | Bits | Meaning |
 |----------|------|---------|
 | BPL0PT–BPL7PT | 23 (even) | Byte address in Chip RAM of the plane's next word |
-| BPLMOD | 16, signed (even) | Bytes added to every pointer of the layer at the end of each line, as the Amiga's BPL1MOD/BPL2MOD |
+| BPLSTRIDE | 16, signed (even) | Bytes from the start of one line to the start of the next (the row stride), for every pointer of the layer. Unlike the Amiga's BPL1MOD/BPL2MOD, it does not depend on how many words are fetched |
 | SCROLLX | 4 | Fine scroll: pixels (0–15) skipped at the start of each line, as the Amiga's BPLCON1 delay |
 
-- **At the end of each line** inside the layer's window, each pointer the layer uses ends up at the line's start plus **the line's length plus BPLMOD**. The line's length is the window width in source pixels × bits per pixel ÷ 8, rounded up to whole words (for planar layers, one plane's worth, so 1 bit per pixel). Fine scroll does not change it. The DMA fetches whole groups, so it may read a few words past the line's end (more with fine scroll); that does not change where the pointers end up.
+- **How the pointers move.** Each word fetched moves its pointer on by 2. The line's first word from a pointer saves the pointer: the line's start. The line's last word from it sets the pointer to **that start + BPLSTRIDE**. So at the end of each line inside the layer's window, each pointer the layer uses is at its line's start + BPLSTRIDE, however many words were fetched: whole groups, the extra group of fine scroll and the window width make no difference, and software never adjusts for them.
+- **One path for every move.** A pointer changes only when a word is fetched from it, or when the CPU or copper writes it. A write wins over the display's own change in the same clock, and also sets the pointer's saved line start. A pointer written between the layer's last fetch on line L and the start of the horizontal blank is line L + 1's start, as written (split screens).
+- **When BPLSTRIDE is read:** with the line's last fetch, about two groups (32 source pixels) before the layer's window ends (the line's last group is fetched as the shifters start on the group before it). A value written at the start of a line, or in the horizontal blank before it, applies at the end of that line.
 - **The pointers are not reset by the hardware.** As on the Amiga, the copper (spec 10) writes them at the start of every frame, normally in the vertical blank (or the CPU does it in its VBLANK interrupt). If nothing rewrites them, the next frame carries on through memory.
 - Vertical scrolling and coarse horizontal scrolling are done by changing the pointers. Split screens are done by writing new pointers mid-frame.
-- BPLMOD = 0 shows a picture whose lines follow each other. A 320-pixel window into a 640-pixel-wide 4bpp chunky picture has a line length of 160 bytes, so BPLMOD = 160. A negative BPLMOD shows lines again or flips the picture: −(row bytes + line length) steps back one row.
-- With vertical scaling, the pointers return to the line's start after each copy of a source line except the last.
+- BPLSTRIDE = the row's bytes shows a picture whose lines follow each other, at any window width: a 640-pixel-wide 4bpp chunky picture has 320-byte rows, so BPLSTRIDE = 320 whether the window shows all of it or 320 pixels of it. BPLSTRIDE = 0 shows the same line on every screen line; −(row bytes) steps back one row, showing the picture upside down.
+- With vertical scaling, on each copy of a source line except the last, the last fetch sets the pointers back to the line's start (no stride added).
 
 **Pointer wrap (CTRL.WRAP).** A layer can keep its pointers inside a block of 2^(WRAP + 9) bytes (WRAP 1 = 1 KB, 7 = 64 KB, 13 = 4 MB; 0 = no wrap). Every pointer move, word by word and at the end of each line, changes only the address bits inside the block, so a pointer that runs off the end of the block carries on from its start. The block is the aligned one the pointer is in: a pointer at `0x10000` with a 64 KB wrap stays within `0x10000`–`0x1FFFF`. It applies to every pointer of the layer (each plane can have its own block), and not to the pointer values the CPU or copper write.
 
 This makes **endless vertical scrolling** easy: keep the picture as a ring of lines in a block, add new lines just ahead of the visible ones, and move the pointers on (or back) a line at a time; at the end of the block the display carries on from its start, with no copying and no split screen. (Horizontal wrap within each line is not provided: the end-of-line step wraps too.)
 
-| Layout | Pointers | BPLMOD |
-|--------|----------|--------|
-| Chunky 320×240 at 8bpp | BPL0PT = base | 0 |
-| Planar 320×256, 5 planes, separate as on the Amiga | BPLpPT = base + p × 10240 | 0 |
-| Planar 320×256, 5 planes, interleaved (plane lines next to each other) | BPLpPT = base + p × 40 | 4 × 40 = 160 |
+| Layout | Pointers | BPLSTRIDE |
+|--------|----------|-----------|
+| Chunky 320×240 at 8bpp | BPL0PT = base | 320 |
+| Planar 320×256, 5 planes, separate as on the Amiga | BPLpPT = base + p × 10240 | 40 |
+| Planar 320×256, 5 planes, interleaved (plane lines next to each other) | BPLpPT = base + p × 40 | 5 × 40 = 200 |
 
 ### 4.5 Scaling
 
@@ -227,7 +229,7 @@ If a layer's next group is not complete when its shifters need it, the layer sho
 | Registers | Take effect |
 |-----------|-------------|
 | CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line. **To change line L, write during the visible part of line L − 1 or earlier** |
-| BPLxPT, BPLMOD | At once: they are live. The next word fetched uses the new value. A CPU or copper write wins over the DMA's own change in the same clock |
+| BPLxPT, BPLSTRIDE | At once: they are live. The next word fetched uses a new pointer, which also becomes the pointer's saved line start; a CPU or copper write wins over the DMA's own change in the same clock. BPLSTRIDE is used with the line's last fetch |
 | BPLxDAT | At once; for a layer with no DMA, a write of BPL0DAT completes the group (write it last). For a plane with DMA off, from the next group |
 | BPLDMA | At once: the next group fetched uses the new enables |
 | PRIO, BGCOLOR | At the start of each line |
@@ -300,7 +302,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 | `+0x04` | WINX | XSTART 26–16, XEND 10–0 | Window, pixels |
 | `+0x08` | WINY | YSTART 26–16, YEND 10–0 | Window, lines |
 | `+0x0C` | SCROLLX | 3–0 | Fine scroll, pixels |
-| `+0x10` | BPLMOD | 15–0, signed, even | Added to the pointers at the end of each line |
+| `+0x10` | BPLSTRIDE | 15–0, signed, even | Bytes from one line's start to the next (section 4.4) |
 | `+0x14` | BPLDMA | SETCLR (15), PLANES (7–0) | DMA enable per plane (chunky: bit 0 for the layer). Set/clear. All on after reset |
 | `+0x20`–`+0x3C` | BPL0PT–BPL7PT | 22–0, even | Plane pointers (chunky: BPL0PT only) |
 | `+0x40`–`+0x5C` | BPL0DAT–BPL7DAT | 15–0 | Data registers: the next group (chunky with b bits per pixel: BPL0DAT–BPL(b−1)DAT) |
@@ -330,7 +332,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 ## 9. Tests
 
 - **Timing:** sync positions, totals and frame rate for both modes in simulation; real monitors lock on to both, on HDMI and VGA.
-- **Golden images** (`make vtest` in `sim/`): random pictures in every layer format (chunky and planar, scaling, fine scroll, modulo, a flipped layer, transparency, priority, and direct colour), compared pixel by pixel with a Python model of this spec (`sim/vtest/vmodel.py`). No OVERRUN.
+- **Golden images** (`make vtest` in `sim/`): random pictures in every layer format (chunky and planar, scaling, fine scroll, stride, a flipped layer, transparency, priority, and direct colour), compared pixel by pixel with a Python model of this spec (`sim/vtest/vmodel.py`). No OVERRUN.
 - **Boot ROM:** the console and a 4-plane interleaved picture, checked pixel by pixel.
 - **Fetch budget:** for every example in 5.2 that fits, no OVERRUN. For one that does not fit, OVERRUN is set on the right layer only.
 - **Register timing:** a CTRL write during line L − 1's visible part changes line L.

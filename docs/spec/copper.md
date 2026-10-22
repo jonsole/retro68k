@@ -60,7 +60,7 @@ Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kin
 
 | Instruction | Does |
 |-------------|------|
-| **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. The copper follows the halves rule (spec 3, section 2) with its own latch, separate from the CPU's: a high-half write is held until a low-half write to the same register, which writes both halves at once, so a 32-bit register is written whole. Other instructions (other MOVEs, WAITs) may come in between; a high-half write to another register replaces the held one. A low-half write on its own keeps the register's current high half. 16-bit registers (BPLxDAT, BPLMOD, DMACON, the strobes) need one MOVE, to their low half |
+| **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. The copper follows the halves rule (spec 3, section 2) with its own latch, separate from the CPU's: a high-half write is held until a low-half write to the same register, which writes both halves at once, so a 32-bit register is written whole. Other instructions (other MOVEs, WAITs) may come in between; a high-half write to another register replaces the held one. A low-half write on its own keeps the register's current high half. 16-bit registers (BPLxDAT, BPLSTRIDE, DMACON, the strobes) need one MOVE, to their low half |
 | **WAIT** | Waits until the beam has reached the position (frame order, section 3): it ends on the position itself. A position the beam never reaches (pixel 864 or more, line 625 or more) waits until the next frame. With **P** set (pixel only), the line is ignored: it waits until the pixel position is reached on the current line, or on the next line if it has already passed. With **B** set, it also waits until the DMA engine (spec 11) is idle: no job running or waiting to start, including one a MOVE just before started |
 | **SKIP** | If the beam has reached the position, skips the next instruction. With P set, compares the pixel position only |
 | **JUMP** | Continues at the address |
@@ -160,7 +160,7 @@ Macros `CCALL address`, `CRET`.
   | 2, nasty | As 1, and it may also take the CPU's cycle 0, like the Amiga's blitter-nasty mode; the CPU's access then waits one slot |
 
   An urgent display fetch (spec 4, section 5.6) still comes first at every level, so raising the copper never spoils the picture. PRI matters only while the copper has an instruction to fetch: while it waits, it takes nothing.
-- **When writes take effect:** as for the CPU (spec 4, section 5.4): the palette at once (a colour change shows within about 1–2 pixels of the WAIT position), layer settings from the next line, BPLxPT, BPLMOD and BPLxDAT at once.
+- **When writes take effect:** as for the CPU (spec 4, section 5.4): the palette at once (a colour change shows within about 1–2 pixels of the WAIT position), layer settings from the next line, BPLxPT, BPLSTRIDE and BPLxDAT at once.
 - **Register bus:** the copper and the CPU share the register bus; a CPU access already on the bus goes first, so a copper write may wait one clock (10 ns).
 
 ## 6. Registers

@@ -413,7 +413,7 @@ screen_init:
             move.l  #$202020,BGCOLOR(a4)
             lea     L0(a4),a0
             move.l  #CON,L_BPL0PT(a0)
-            move.l  #0,L_BPLMOD(a0)
+            move.l  #CON_LINE,L_BPLSTRIDE(a0)   ; 80 bytes from one line to the next
             move.l  #(CON_X<<16)|(CON_X+640),L_WINX(a0)
             move.l  #(CON_Y<<16)|(CON_Y+480),L_WINY(a0)
             move.l  #L_CTRL_EN_M,L_CTRL(a0)     ; chunky, 1 bit per pixel, colours 0-1
@@ -527,7 +527,7 @@ bitmap_init:
             bne.s   .row
             lea     L1(a4),a0
             bsr     bm_ptrs
-            move.l  #(BM_PL-1)*BM_LINE,L_BPLMOD(a0)
+            move.l  #BM_PL*BM_LINE,L_BPLSTRIDE(a0)  ; 32: the planes of a line, interleaved
             move.l  #(BM_X<<16)|(BM_X+2*BM_W),L_WINX(a0)
             move.l  #(BM_Y<<16)|(BM_Y+2*BM_H),L_WINY(a0)
             move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|((BM_PL-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(1<<L_CTRL_PALOFS_B),L_CTRL(a0)

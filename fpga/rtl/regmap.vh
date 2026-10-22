@@ -125,8 +125,8 @@
 `define RM_L_WINY_YEND                      10:0
 `define RM_L_SCROLLX                        16'h000C
 `define RM_L_SCROLLX_FINE                   3:0
-`define RM_L_BPLMOD                         16'h0010
-`define RM_L_BPLMOD_BYTES                   15:0
+`define RM_L_BPLSTRIDE                      16'h0010
+`define RM_L_BPLSTRIDE_BYTES                15:0
 `define RM_L_BPLDMA                         16'h0014
 `define RM_L_BPLDMA_PLANES                  7:0
 `define RM_L_BPLDMA_SETCLR                  15

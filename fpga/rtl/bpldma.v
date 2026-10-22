@@ -22,10 +22,13 @@
 // horizontal scale). Layers with equal countdowns take turns.
 //
 // Line by line: at line_go (start of horizontal blank, from the pixel
-// domain) the line just shown is finished off: each plane pointer it used
-// moves on to the line's start + its length + BPLMOD (or back to the line's
-// start while a vertically scaled line is repeated). Then the next line's
-// fetch starts.
+// domain) the next line's fetch starts. Each word fetched moves its pointer
+// on by 2. The line's first word from a pointer saves the pointer (the
+// line's start); its last word sets the pointer to that start + BPLSTRIDE,
+// or back to the start on a repeated line of a vertically scaled layer. So
+// how many words are fetched (whole groups, fine scroll) never matters, and
+// every pointer move goes through the one fetch path: a CPU or copper write
+// in the same clock wins, and also sets the saved start.
 `include "regmap.vh"
 
 module bpldma (
@@ -49,7 +52,6 @@ module bpldma (
     input  wire [5:0]   hscale,        // 3 x 2 bits: log2 of the horizontal scale (for the deadlines)
     input  wire [11:0]  wrap,          // 3 x 4 bits: CTRL.WRAP: 0 off, n = pointers wrap in 2^(n+9) bytes
     input  wire [35:0]  ngroups,       // 3 x 12: groups to fetch
-    input  wire [35:0]  len,           // 3 x 12: line length in words per plane
     output wire         line_go,       // 1 clock: a new line started here
     output wire         line_gen,      // toggles with line_go
 
@@ -79,9 +81,9 @@ module bpldma (
     wire        sel_dat = sel && off[6:5] == 2'b10;
     wire [4:0]  ri      = {rn, off[4:2]};                  // layer x 8 + plane
 
-    wire [22:0] pt  [0:23];            // BPLxPT: one register each, below
+    reg  [22:0] pt  [0:23];            // BPLxPT (a small RAM, below)
     reg  [15:0] dr  [0:23];
-    reg  [15:0] mod [0:2];
+    reg  [15:0] mod [0:2];             // BPLSTRIDE
     reg  [7:0]  pm  [0:2];             // BPLDMA: DMA enable per plane (chunky: bit 0 for the layer)
 
     // Pointer wrap (spec 4, section 4.4): only the bits below the region size
@@ -108,14 +110,12 @@ module bpldma (
     wire [2:0]  full = fill_t ^ take_s2;
 
     reg  [11:0] left   [0:2];          // groups still to start
-    reg  [11:0] issued [0:2];          // groups started on this line
+    reg  [11:0] ngr    [0:2];          // groups to fetch on this line
+    reg  [2:0]  firstg, lastg;         // the group being fetched is the line's first, last
     reg  [7:0]  rem    [0:2];          // data registers of the current group still to ask for
     reg  [2:0]  busy;                  // a group is on its way (until its last word arrives)
-    // The line being fetched, for finishing it off at the next line_go
-    reg  [2:0]  pv_act, pv_adv, pv_chunky;
-    reg  [2:0]  pv_planes [0:2];
-    reg  [7:0]  pv_mask [0:2];
-    reg  [11:0] pv_len [0:2];
+    // The line being fetched
+    reg  [2:0]  pv_adv;                // its pointers move on after it (else back to its start)
 
     // Reads on the way: layer, data register, last word of its group, generation
     reg  [1:0]  q_layer [0:3];
@@ -198,42 +198,40 @@ module bpldma (
     wire [4:0]  di      = {pick, pl_n};                            // data register
     wire [4:0]  pi      = {pick, chunky[pick] ? 3'd0 : pl_n};      // pointer
 
-    // Finishing a line: what each plane pointer of layer n gets added:
-    // back to the line's start, then on by its length and BPLMOD
-    wire [22:0] step [0:2];
-    generate for (g = 0; g < 3; g = g + 1) begin : steps
-        // pointer moves per group: 1, or b words for a chunky layer of b bits per pixel
-        wire [1:0] k = !pv_chunky[g] ? 2'd0 : pv_planes[g][2] ? 2'd3 : pv_planes[g][1] ? 2'd2 : pv_planes[g][0] ? 2'd1 : 2'd0;
-        assign step[g] = (pv_adv[g] ? {10'd0, pv_len[g], 1'b0} + {{7{mod[g][15]}}, mod[g]} : 23'd0)
-                         - ({10'd0, issued[g], 1'b0} << k);
-    end endgenerate
+    // The line's first and last words from each pointer (a chunky layer
+    // fetches all its words from BPL0PT: its first word of the first group,
+    // its last of the last group)
+    wire        first_g = gstart ? (left[pick] == ngr[pick]) : firstg[pick];
+    wire        last_g  = gstart ? (left[pick] == 12'd1)     : lastg[pick];
+    wire        first_w = first_g && (!chunky[pick] || gstart);
+    wire        last_w  = last_g  && (!chunky[pick] || rem_n == 8'd0);
 
-    // The plane pointers. Each changes in one of three ways: at line_go, on
-    // to the next line; when the DMA asks for a word from it, by 2 (one
-    // shared adder); or when the CPU or copper writes it (that wins).
-    wire        fetch_go = !rst && !line_go && (!req || ack) && |want;
+    // The plane pointers and their saved line starts, in two small RAMs
+    // (distributed RAM: one write port, reads any time). A pointer changes
+    // only when the DMA asks for a word from it, or when the CPU or copper
+    // writes it: a write has the RAMs to itself for that clock (the fetch
+    // waits one clock), wins, and sets the saved start too.
+    reg  [22:0] svm [0:23];
+    integer k;
+    initial for (k = 0; k < 24; k = k + 1) begin pt[k] = 23'd0; svm[k] = 23'd0; end
+    wire        cpu_pw   = rb_wr && sel_pt;
+    wire [22:0] cpu_old  = pt[ri];
+    wire [22:0] cpu_new  = {rb_be[2] ? rb_wdata[22:16] : cpu_old[22:16], rb_be[1] ? rb_wdata[15:8] : cpu_old[15:8],
+                            rb_be[0] ? rb_wdata[7:1] : cpu_old[7:1], 1'b0};
+    wire        fetch_go = !rst && !line_go && !cpu_pw && (!req || ack) && |want;
     wire [22:0] pt_cur   = pt[pi];
-    wire [22:0] pt_inc   = wadd(pt_cur, 23'd2, wmask[pick]);
-    generate for (g = 0; g < 24; g = g + 1) begin : ptrs
-        reg  [22:0] p;
-        assign pt[g] = p;
-        wire le = pv_act[g / 8] && (pv_chunky[g / 8] ? (g % 8 == 0 && pv_mask[g / 8] != 8'd0)
-                                                      : pv_mask[g / 8][g % 8]);
-        always @(posedge clk) begin
-            if (rst) p <= 23'd0;
-            else begin
-                if (line_go) begin
-                    if (le) p <= wadd(p, step[g / 8], wmask[g / 8]);
-                end else if (fetch_go && pi == g) p <= pt_inc;
-                if (rb_wr && sel_pt && ri == g) begin
-                    if (rb_be[2]) p[22:16] <= rb_wdata[22:16];
-                    if (rb_be[1]) p[15:8]  <= rb_wdata[15:8];
-                    if (rb_be[0]) p[7:1]   <= rb_wdata[7:1];
-                    p[0] <= 1'b0;
-                end
-            end
+    wire [22:0] start    = first_w ? pt_cur : svm[pi];       // this line's start
+    wire [22:0] stride   = pv_adv[pick] ? {{7{mod[pick][15]}}, mod[pick]} : 23'd0;
+    wire [22:0] pt_next  = last_w ? wadd(start, stride, wmask[pick]) : wadd(pt_cur, 23'd2, wmask[pick]);
+    always @(posedge clk) begin
+        if (cpu_pw) begin
+            pt[ri]  <= cpu_new;
+            svm[ri] <= cpu_new;
+        end else if (fetch_go) begin
+            pt[pi] <= pt_next;
+            if (first_w) svm[pi] <= pt_cur;
         end
-    end endgenerate
+    end
 
     integer i;
     always @(posedge clk) begin
@@ -254,16 +252,15 @@ module bpldma (
             gen    <= 3'd0;
             fill_t <= 3'd0;
             busy   <= 3'd0;
-            pv_act <= 3'd0;
             pv_adv <= 3'd0;
-            pv_chunky <= 3'd0;
+            firstg <= 3'd0;
+            lastg  <= 3'd0;
             first_take <= 3'd0;
             req_layer <= 2'd0;
             for (n = 0; n < 3; n = n + 1) begin
-                left[n] <= 12'd0;  issued[n] <= 12'd0;  rem[n] <= 8'd0;  dl[n] <= 10'h3FF;
+                left[n] <= 12'd0;  ngr[n] <= 12'd0;  rem[n] <= 8'd0;  dl[n] <= 10'h3FF;
                 mod[n]  <= 16'd0;
                 pm[n]   <= 8'hFF;              // every plane's DMA on
-                pv_planes[n] <= 3'd0;  pv_len[n] <= 12'd0;  pv_mask[n] <= 8'd0;
             end
             for (i = 0; i < 24; i = i + 1) dr[i] <= 16'd0;
         end else begin
@@ -286,25 +283,20 @@ module bpldma (
             end
 
             if (line_go) begin
-                // Finish off the line just shown (the pointers: above), then start the next one
+                // Start the next line
                 for (n = 0; n < 3; n = n + 1) begin
                     left[n]   <= (has_dma[n] && act[n]) ? ngroups[12*n +: 12] : 12'd0;
-                    issued[n] <= 12'd0;
+                    ngr[n]    <= (has_dma[n] && act[n]) ? ngroups[12*n +: 12] : 12'd0;
                     rem[n]    <= 8'd0;
                     dl[n]     <= 10'h3FF;                     // no deadline until the first in-window take
                     first_take[n] <= 1'b1;
-                    pv_planes[n] <= planes[3*n +: 3];
-                    pv_mask[n]   <= emask[n];
-                    pv_len[n]    <= len[12*n +: 12];
                     fill_t[n] <= take_s2[n];                 // empty: last line's spare group is dropped
                 end
-                pv_act <= enable ? act : 3'd0;
                 pv_adv <= adv;
-                pv_chunky <= chunky;
                 busy   <= 3'd0;
                 gen    <= ~gen;
                 req    <= 1'b0;
-            end else if ((!req || ack) && |want) begin
+            end else if (fetch_go) begin
                 // Ask for the next word
                 req        <= 1'b1;
                 req_layer  <= pick;
@@ -313,7 +305,8 @@ module bpldma (
                 rem[pick]  <= rem_n;
                 if (gstart) begin
                     left[pick]   <= left[pick] - 1'b1;
-                    issued[pick] <= issued[pick] + 1'b1;
+                    firstg[pick] <= (left[pick] == ngr[pick]);
+                    lastg[pick]  <= (left[pick] == 12'd1);
                     busy[pick]   <= 1'b1;
                 end
                 q_layer[q_t + (ack ? 1'b1 : 1'b0)] <= pick;

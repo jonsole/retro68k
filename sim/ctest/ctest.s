@@ -15,7 +15,7 @@
 ;   Without RESUME it would start again every frame and never finish a pass.
 ;
 ; Layer 0 is on, chunky 1 bpp, fetching one line of zeros over and over
-; (BPLMOD = -90): the whole screen shows colour 0.
+; (BPLSTRIDE = 0): the whole screen shows colour 0.
 
             include "hw.inc"
             include "copper.inc"
@@ -49,7 +49,7 @@ start:      move.w  #$2700,sr
 .zero:      clr.w   (a0)+
             dbra    d0,.zero
             move.l  #ZEROS,L0+L_BPL0PT(a4)
-            move.l  #-90,L0+L_BPLMOD(a4)
+            move.l  #0,L0+L_BPLSTRIDE(a4)
             move.w  #L_BPLDMA_SETCLR_M|1,L0+L_BPLDMA+2(a4)
             move.l  #(0<<16)|720,L0+L_WINX(a4)
             move.l  #(0<<16)|576,L0+L_WINY(a4)

@@ -92,7 +92,7 @@ L1_DATA     equ $140000
 L1_ROW      equ 48
 L1_PLANE    equ L1_ROW*300
 ; L2: chunky 8 bpp, 4x by 8x, window 300-620 x 200-460 (80 x 33 source),
-; fine scroll 1, transparent, shown upside down (negative modulo); rows of 96 bytes
+; fine scroll 1, transparent, shown upside down (negative stride); rows of 96 bytes
 L2_DATA     equ $1A0000
 L2_ROW      equ 96
 
@@ -100,19 +100,19 @@ setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|(2<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE
             dc.l    L0+L_WINX,   (0<<16)|640
             dc.l    L0+L_WINY,   (16<<16)|464
             dc.l    L0+L_SCROLLX, 5
-            dc.l    L0+L_BPLMOD, L0_ROW-160
+            dc.l    L0+L_BPLSTRIDE, L0_ROW
             dc.l    L1+L_CTRL,   L_CTRL_EN_M|L_CTRL_PLANAR_M|(4<<L_CTRL_PLANES_B)|L_CTRL_TRANSP_M
             dc.l    L1+L_WINX,   (100<<16)|420
             dc.l    L1+L_WINY,   (50<<16)|350
             dc.l    L1+L_SCROLLX, 7
-            dc.l    L1+L_BPLMOD, L1_ROW-40
+            dc.l    L1+L_BPLSTRIDE, L1_ROW
             dc.l    L1+L_BPLDMA, 1<<4           ; plane 4: DMA off (SET/CLR clear) ...
             dc.l    L1+L_BPL4DAT, $F0F0         ; ... it shows this word in every group
             dc.l    L2+L_CTRL,   L_CTRL_EN_M|(3<<L_CTRL_BPP_B)|(2<<L_CTRL_HSCALE_B)|(3<<L_CTRL_VSCALE_B)|L_CTRL_TRANSP_M
             dc.l    L2+L_WINX,   (300<<16)|620
             dc.l    L2+L_WINY,   (200<<16)|460
             dc.l    L2+L_SCROLLX, 1
-            dc.l    L2+L_BPLMOD, -L2_ROW-80     ; back one row: -(row) - (line length)
+            dc.l    L2+L_BPLSTRIDE, -L2_ROW    ; back one row
             dc.l    PRIO,        (0<<4)|(2<<2)|1 ; L1 in front, then L2, then L0
             dc.l    -1
 

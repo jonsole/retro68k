@@ -289,9 +289,9 @@ module video (
     reg  [2:0]  b_vsub [0:2];          // screen lines shown of this source line
     reg  [2:0]  b_act, b_adv;
     reg  [3:0]  n_pos0 [0:2];
-    reg  [11:0] n_groups [0:2], n_len [0:2];
+    reg  [11:0] n_groups [0:2];
     reg  [2:0]  f_act, f_adv, f_chunky;
-    reg  [11:0] f_groups [0:2], f_len [0:2];
+    reg  [11:0] f_groups [0:2];
     reg  [2:0]  f_planes [0:2];
     reg  [1:0]  f_hs [0:2];
     reg         line_t;
@@ -306,7 +306,6 @@ module video (
         integer n;
         reg [2:0]  vmax, vs_n;
         reg [10:0] w, srcpix;
-        reg [13:0] bits;
         reg [3:0]  fine;
         if (prst) begin
             line_t <= 1'b0;
@@ -325,16 +324,14 @@ module video (
                 if (next_line >= l_ys[n] && next_line < l_ye[n]) b_vsub[n] <= vs_n;
             end
         end else if (hc == HVIS + 1'b1) begin
-            // 2: first pixel, groups to fetch, line length
+            // 2: first pixel, groups to fetch
             for (n = 0; n < 3; n = n + 1) begin
                 w      = l_xe[n] - l_xs[n];
                 srcpix = (w + (3'd7 >> (2'd3 - l_ctrl[n][7:6]))) >> l_ctrl[n][7:6];
                 // a group is 16 source pixels in either format
-                bits = l_ctrl[n][1] ? {3'd0, srcpix} : {3'd0, srcpix} << l_ctrl[n][3:2];   // per plane line
                 fine = l_sx[n];
                 n_pos0[n]   <= fine;
                 n_groups[n] <= ({10'd0, fine} + {3'd0, srcpix} + 14'd15) >> 4;
-                n_len[n]    <= (bits + 14'd15) >> 4;
             end
         end else if (hc == HVIS + 2'd2) begin
             // 3: hand over
@@ -344,7 +341,6 @@ module video (
             c_act  <= b_act;
             for (n = 0; n < 3; n = n + 1) begin
                 f_groups[n] <= n_groups[n];
-                f_len[n]    <= n_len[n];
                 f_planes[n] <= l_ctrl[n][1] ? l_ctrl[n][18:16] : (3'd1 << l_ctrl[n][3:2]) - 1'b1;
                 f_chunky[n] <= !l_ctrl[n][1];
                 f_hs[n]     <= l_ctrl[n][7:6];
@@ -373,7 +369,6 @@ module video (
         .planes({f_planes[2], f_planes[1], f_planes[0]}), .chunky(f_chunky), .hscale({f_hs[2], f_hs[1], f_hs[0]}),
         .wrap({l_ctrl[2][23:20], l_ctrl[1][23:20], l_ctrl[0][23:20]}),
         .ngroups({f_groups[2], f_groups[1], f_groups[0]}),
-        .len({f_len[2], f_len[1], f_len[0]}),
         .line_go(line_go), .line_gen(line_gen),
         .dat(dat), .fill_t(fill_t), .take_t(take_t),
         .req(disp_req), .urgent(disp_urgent), .deadline(disp_deadline), .addr(disp_addr), .ack(disp_ack), .rvalid(disp_rvalid), .rdata(disp_rdata)

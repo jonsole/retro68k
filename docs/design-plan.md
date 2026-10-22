@@ -103,7 +103,7 @@ Defined in [spec 4: video](spec/video.md). In short:
 
 - DVI over HDMI and VGA at the same time. **One mode, 576p:** 720×576 at 50 Hz with a 27 MHz pixel clock, as CEA-861 defines it, so every HDMI TV and monitor takes it; the digital form of PAL. No timing registers. The whole 720×576 is the overscan area; a normal screen is a centred window (for example a PAL Amiga 320×256 at 2× is 640×512 at (40, 32)), with the background colour as the border. Every line is exactly 320 slots
 - **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and palette block. No text layer and no sprites (spec 9 is on hold); the boot ROM draws its 80×30 console into a 1-plane 640×480 layer, centred at (40, 48)
-- Each layer is **planar** (1–8 Amiga-style bitplanes) or **chunky** (1/2/4/8 bits per pixel), with Amiga-style plane pointers (BPLxPT), modulo (BPLMOD) and data registers (BPLxDAT), and no hidden buffers. The copper resets the pointers each frame
+- Each layer is **planar** (1–8 Amiga-style bitplanes) or **chunky** (1/2/4/8 bits per pixel), with Amiga-style plane pointers (BPLxPT), row stride (BPLSTRIDE) and data registers (BPLxDAT), and no hidden buffers. The copper resets the pointers each frame
 - Whole-number scaling: 1×, 2×, 4× or 8×, across and down separately
 - Video memory is fetched on demand by DMA as the beam scans, in memory cycles 1 and 3 of each slot only (no wide fetch). The budget is a rate: 4 bytes per 100 ns slot, 1.48 bytes per pixel. Layers never use the CPU's cycle
 - 256-entry palette of 24-bit colours, or direct colour (L0 red, L1 green, L2 blue); beam position registers; vertical-blank and line interrupts; a copper (spec 10)

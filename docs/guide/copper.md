@@ -140,10 +140,10 @@ The copper has **its own** holding latch, separate from the CPU's, so a high hal
 
 This gives three kinds of write:
 
-- **A 16-bit register** (BPLMOD, BPLxDAT, SCROLLX, DMACON, the strobes) lives in the low half. One MOVE, to the register's offset + 2, writes it:
+- **A 16-bit register** (BPLSTRIDE, BPLxDAT, SCROLLX, DMACON, the strobes) lives in the low half. One MOVE, to the register's offset + 2, writes it:
 
   ```asm
-          CMOVE   L0+L_BPLMOD+2,-80       ; layer 0's modulo = -80
+          CMOVE   L0+L_BPLSTRIDE+2,-40    ; layer 0's stride = -40: step back a line
   ```
 
 - **A 32-bit register** (a plane pointer, CTRL, WINX, a palette entry, BGCOLOR, COP1LC) takes two MOVEs, the high half first. `CMOVEL` makes the pair for you, and the register changes all at once when the second MOVE is done, so it is never seen half-written:
@@ -528,7 +528,7 @@ start:      move.w  #$2700,sr           ; no interrupts
             move.l  #(WIN_X<<16)|(WIN_X+2*WIDTH),L_WINX(a0)
             move.l  #(WIN_Y<<16)|(WIN_Y+2*HEIGHT),L_WINY(a0)
             move.l  #0,L_SCROLLX(a0)
-            move.l  #0,L_BPLMOD(a0)
+            move.l  #ROWBYTES,L_BPLSTRIDE(a0)   ; 40 bytes per plane line
             lea     colours(pc),a1
             lea     PALETTE(a4),a2
             moveq   #16-1,d0
@@ -901,7 +901,7 @@ The timing comes from "Writing new pointers partway down" in the playfield chapt
 
 - **CTRL** for line L + 1 must be written during the visible part of line L (before pixel 720).
 - **The pointers** for line L + 1 must be written after the layer's last fetch on line L, and before the horizontal blank starts at pixel 720. The layer stops fetching about 32 source pixels (here 64 screen pixels) before its window's right edge, at 680, so the gap is from about pixel 616 to 720.
-- The hardware adds BPLMOD to the pointers at the end of the line, so write the address you want minus BPLMOD. Here BPLMOD is 0.
+- A pointer written in that gap is used as written: it is the start of line L + 1, and nothing is added to it. BPLSTRIDE stays 40, which suits the panel too, since its planes are also 40 bytes per line.
 - With vertical scaling, the split must come after the **last** copy of a source line. At 2× down, starting at line 32, the copies are lines 32 and 33, 34 and 35, and so on; line 415 is a last copy.
 
 So the list waits for pixel 648 on line 415 and writes three registers: six MOVEs, which must all be done by pixel 720. The first is already fetched; at normal priority each of the others may take about 200 ns, so the last lands near pixel 675. That fits, but on a busy screen other DMA could hold the copper up. Setting COPCON.PRI to 1 makes sure it is not (see "Copper Timing").
@@ -926,7 +926,7 @@ copper_list:
             CMOVEL  L0+L_BPL3PT,SCREEN+3*PLANESIZE
             CWAIT   SPLIT-1,WIN_X+2*WIDTH-32    ; line 415, pixel 648: last fetch done
             CMOVEL  L0+L_CTRL,CTRL_PANEL        ; from line 416: 2 planes, colours 16-19
-            CMOVEL  L0+L_BPL0PT,PANEL           ; (minus BPLMOD, which is 0)
+            CMOVEL  L0+L_BPL0PT,PANEL           ; used as written for line 416
             CMOVEL  L0+L_BPL1PT,PANEL+PANELPLANE
             CSTOP
 ```
@@ -1381,7 +1381,7 @@ The copper's writes take effect exactly as the CPU's do:
 | Registers | Take effect |
 |-----------|-------------|
 | Palette, VIDCON.DIRECT, VIDCON.BLANKALL | At once, from the next pixel |
-| BPLxPT, BPLMOD | At once: they are live. A copper write wins over the display's own change in the same clock |
+| BPLxPT, BPLSTRIDE | At once: they are live. BPLSTRIDE is used when the line's last word is fetched. A copper write to a pointer wins over the display's own change in the same clock, and also sets the pointer's saved line start |
 | BPLxDAT | At once; a write of BPL0DAT completes a group for a layer with no DMA |
 | CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line: to change line L, write during the visible part of line L − 1 |
 | PRIO, BGCOLOR | At the start of each line: write during line L − 1 to change line L |

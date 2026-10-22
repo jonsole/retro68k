@@ -246,10 +246,10 @@ L_SCROLLX                    equ $C          ; RW, spec 4/4.4 (add to Ln)
 L_SCROLLX_FINE_B             equ $0
 L_SCROLLX_FINE_W             equ $4
 L_SCROLLX_FINE_M             equ $F
-L_BPLMOD                     equ $10         ; RW, spec 4/4.4 (add to Ln)
-L_BPLMOD_BYTES_B             equ $0
-L_BPLMOD_BYTES_W             equ $10
-L_BPLMOD_BYTES_M             equ $FFFF
+L_BPLSTRIDE                  equ $10         ; RW, spec 4/4.4 (add to Ln)
+L_BPLSTRIDE_BYTES_B          equ $0
+L_BPLSTRIDE_BYTES_W          equ $10
+L_BPLSTRIDE_BYTES_M          equ $FFFF
 L_BPLDMA                     equ $14         ; SC, spec 4/5.5 (add to Ln)
 L_BPLDMA_PLANES_B            equ $0
 L_BPLDMA_PLANES_W            equ $8
@@ -324,7 +324,7 @@ L0_CTRL                      equ $100
 L0_WINX                      equ $104
 L0_WINY                      equ $108
 L0_SCROLLX                   equ $10C
-L0_BPLMOD                    equ $110
+L0_BPLSTRIDE                 equ $110
 L0_BPLDMA                    equ $114
 L0_BPL0PT                    equ $120
 L0_BPL1PT                    equ $124
@@ -346,7 +346,7 @@ L1_CTRL                      equ $180
 L1_WINX                      equ $184
 L1_WINY                      equ $188
 L1_SCROLLX                   equ $18C
-L1_BPLMOD                    equ $190
+L1_BPLSTRIDE                 equ $190
 L1_BPLDMA                    equ $194
 L1_BPL0PT                    equ $1A0
 L1_BPL1PT                    equ $1A4
@@ -368,7 +368,7 @@ L2_CTRL                      equ $200
 L2_WINX                      equ $204
 L2_WINY                      equ $208
 L2_SCROLLX                   equ $20C
-L2_BPLMOD                    equ $210
+L2_BPLSTRIDE                 equ $210
 L2_BPLDMA                    equ $214
 L2_BPL0PT                    equ $220
 L2_BPL1PT                    equ $224

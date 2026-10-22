@@ -264,10 +264,10 @@
 #define L_SCROLLX(n)                       HW_REG32(CUSTOM_BASE + L_AT(n) + L_SCROLLX_OFS)
 #define L_SCROLLX_FINE_SHIFT               0
 #define L_SCROLLX_FINE_MASK                0xFu
-#define L_BPLMOD_OFS                       0x10u
-#define L_BPLMOD(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPLMOD_OFS)
-#define L_BPLMOD_BYTES_SHIFT               0
-#define L_BPLMOD_BYTES_MASK                0xFFFFu
+#define L_BPLSTRIDE_OFS                    0x10u
+#define L_BPLSTRIDE(n)                     HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPLSTRIDE_OFS)
+#define L_BPLSTRIDE_BYTES_SHIFT            0
+#define L_BPLSTRIDE_BYTES_MASK             0xFFFFu
 #define L_BPLDMA_OFS                       0x14u
 #define L_BPLDMA(n)                        HW_REG32(CUSTOM_BASE + L_AT(n) + L_BPLDMA_OFS)
 #define L_BPLDMA_PLANES_SHIFT              0

@@ -90,7 +90,6 @@ def render(regs, layers, bpt, pal, ram):
         const = [None if (pm >> p) & 1 else regs["dat"][8 * n + p] for p in range(8)]
         w = xe - xs
         srcpix = (w + (1 << hs) - 1) >> hs
-        length = (srcpix * bpp + 15) // 16 * 2          # bytes per plane line
         vmax = (1 << vs) - 1
         vsub = 0
         for y in range(H):
@@ -114,7 +113,7 @@ def render(regs, layers, bpt, pal, ram):
                     row[x] = (not (transp and v == 0), idx, v)
                 if vsub == vmax:
                     for p in range(nplanes):
-                        ptr[p] = wadd(ptr[p], length + mod)
+                        ptr[p] = wadd(ptr[p], mod)          # BPLSTRIDE: from the line's start
             out[y][n] = (row, depth)
 
     img = []

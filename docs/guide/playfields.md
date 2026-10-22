@@ -10,7 +10,7 @@ The chapter covers:
 - forming a basic playfield, step by step;
 - bitplanes, interleaved bitplanes and chunky pixels, and how each is laid out in memory;
 - the display window, and scaling for low-resolution looks;
-- the modulo, and scrolling, both fine and coarse, across and down;
+- the stride, and scrolling, both fine and coarse, across and down;
 - resetting the plane pointers every frame;
 - split screens;
 - priority and transparency, including a dual-playfield screen;
@@ -22,7 +22,7 @@ The chapter covers:
 
 You should know 68000 assembly language, and you should have read "Working with the Hardware Registers" in the Introduction and System Control Hardware chapter, because every register in this chapter follows those rules. Interrupt handlers are explained in full in the Interrupts and Timers chapter; this chapter uses them without repeating the details.
 
-If you have programmed the Amiga's playfields, you already know most of what follows. The plane pointers (BPLxPT), the modulo (BPLxMOD), the data registers (BPLxDAT) and the way the copper or CPU resets the pointers each frame all work as they do on the Amiga. What is new is that there are three playfields instead of one or two, that each can be planar or chunky, that the hardware works out the fetch from the display window by itself, and that each layer can be scaled up by a whole number.
+If you have programmed the Amiga's playfields, you already know most of what follows. The plane pointers (BPLxPT), the data registers (BPLxDAT) and the way the copper or CPU resets the pointers each frame all work as they do on the Amiga. What is new is that there are three playfields instead of one or two, that each can be planar or chunky, that the hardware works out the fetch from the display window by itself, and that each layer can be scaled up by a whole number. The Amiga's modulo is replaced by a **stride** (BPLSTRIDE): the number of bytes from the start of one line to the start of the next.
 
 ### Comparison with the Amiga
 
@@ -32,7 +32,7 @@ If you have programmed the Amiga's playfields, you already know most of what fol
 | Pixel layout | Planar, 1–6 planes | Per layer: planar with 1–8 planes, or chunky with 1, 2, 4 or 8 bits per pixel |
 | Colours | 32 colour registers of 12 bits; EHB and HAM | 256-entry palette of 24-bit colours; a layer of up to 4 bits picks a 16-colour block of it. Direct colour up to 24 bits |
 | Plane pointers | BPL1PT–BPL6PT | BPL0PT–BPL7PT, per layer |
-| Modulo | BPL1MOD (odd planes), BPL2MOD (even planes) | One BPLMOD per layer |
+| Line to line | BPL1MOD (odd planes), BPL2MOD (even planes): bytes skipped after the fetch, so they depend on how many words are fetched and must be adjusted for fine scroll | One BPLSTRIDE per layer: bytes from the start of one line to the start of the next, whatever is fetched |
 | Data registers | BPL1DAT–BPL6DAT; writing BPL1DAT starts the shifters | BPL0DAT–BPL7DAT; writing BPL0DAT completes a group |
 | Display window | DIWSTRT/DIWSTOP, one for the screen | WINX/WINY, one per layer |
 | Data fetch | DDFSTRT/DDFSTOP, set by hand | Worked out by the hardware from each layer's window |
@@ -51,15 +51,15 @@ Note that the planes are numbered from 0 here, not from 1. Plane 0 gives bit 0 o
 
   ```asm
           lea     L1(a4),a0               ; a0 = layer 1
-          move.l  #0,L_BPLMOD(a0)         ; layer 1's BPLMOD
+          move.l  #40,L_BPLSTRIDE(a0)     ; layer 1's BPLSTRIDE
   ```
 
-- Write zero to a register with `MOVE.L #0`, never `CLR.L`. The 16-bit registers (BPLMOD, BPLxDAT, SCROLLX, DMACON) sit in the low half of their long word: write them with `MOVE.L`, or with `MOVE.W` to the register's address + 2.
+- Write zero to a register with `MOVE.L #0`, never `CLR.L`. The 16-bit registers (BPLSTRIDE, BPLxDAT, SCROLLX, DMACON) sit in the low half of their long word: write them with `MOVE.L`, or with `MOVE.W` to the register's address + 2.
 - The complete examples run in supervisor mode with the vector table in Chip RAM at address 0, as the boot ROM leaves it. They take over the display, so they first turn off whatever the boot ROM left on the screen.
 
 ### About this chapter
 
-The first sections build a working screen as quickly as possible: "The Screen" describes the one video mode, and "Forming a Basic Playfield" goes through the registers in the order you set them, ending with a complete program. The sections after that explain each part in more depth, in roughly the order you will need them: the pixel formats and how they sit in memory, the display window, scaling, the modulo, scrolling, resetting the pointers each frame, and split screens. Then come the parts that concern more than one layer: priority and transparency, the palette, and direct colour. "The Fetch Budget" tells you how much the display can read, so that you can check a screen design before you build it. The chapter ends with the data registers, the video interrupts and the beam position, and a summary of every register.
+The first sections build a working screen as quickly as possible: "The Screen" describes the one video mode, and "Forming a Basic Playfield" goes through the registers in the order you set them, ending with a complete program. The sections after that explain each part in more depth, in roughly the order you will need them: the pixel formats and how they sit in memory, the display window, scaling, the stride, scrolling, resetting the pointers each frame, and split screens. Then come the parts that concern more than one layer: priority and transparency, the palette, and direct colour. "The Fetch Budget" tells you how much the display can read, so that you can check a screen design before you build it. The chapter ends with the data registers, the video interrupts and the beam position, and a summary of every register.
 
 ---
 
@@ -120,7 +120,7 @@ VIDSIZE holds the screen size, 720 × 576. To read it:
 
 ## Forming a Basic Playfield
 
-To show a picture you need: the picture in Chip RAM, a display window, a plane pointer for each bitplane, a modulo, some colours, and the layer, DMA and display turned on. This section goes through the steps for the most common case, one layer showing a 320 × 256 picture in 16 colours at 2 × 2, as a 640 × 512 window in the middle of the screen: the Amiga's PAL lores screen. Each step is explained in more detail later in the chapter.
+To show a picture you need: the picture in Chip RAM, a display window, a plane pointer for each bitplane, a stride, some colours, and the layer, DMA and display turned on. This section goes through the steps for the most common case, one layer showing a 320 × 256 picture in 16 colours at 2 × 2, as a 640 × 512 window in the middle of the screen: the Amiga's PAL lores screen. Each step is explained in more detail later in the chapter.
 
 ### Step 1: Choose the format and allocate memory
 
@@ -168,12 +168,12 @@ setptrs: move.l #SCREEN+0*PLANESIZE,L_BPL0PT(a0)
          rts
 ```
 
-### Step 4: Set the modulo
+### Step 4: Set the stride
 
-At the end of each line, the hardware adds the modulo, BPLMOD, to every plane pointer of the layer. When the lines of the picture follow each other in memory and the window shows the full width of the picture, as here, the modulo is 0.
+At the end of each line, the hardware moves every plane pointer of the layer to the start of the next line: the start of the line just shown plus the stride, BPLSTRIDE. The stride is the number of bytes from the start of one line to the start of the next. Here the planes are separate and each plane line is 40 bytes, so the stride is 40.
 
 ```asm
-        move.l  #0,L_BPLMOD(a0)
+        move.l  #ROWBYTES,L_BPLSTRIDE(a0)       ; 40
 ```
 
 ### Step 5: Set the colours
@@ -274,8 +274,8 @@ start:      move.w  #$2700,sr           ; no interrupts while we set up
             move.l  #0,L_SCROLLX(a0)
             ; step 3: the plane pointers
             bsr     setptrs
-            ; step 4: the modulo: lines follow each other
-            move.l  #0,L_BPLMOD(a0)
+            ; step 4: the stride: 40 bytes from one plane line to the next
+            move.l  #ROWBYTES,L_BPLSTRIDE(a0)
             ; step 5: the colours
             lea     colours(pc),a1
             lea     PALETTE(a4),a2
@@ -355,7 +355,7 @@ To turn a layer off, write 0 to its CTRL. To stop all bitplane DMA, clear BPLEN 
 
 ## Bitplanes and Chunky Pixels
 
-Each layer is planar or chunky, set by CTRL.PLANAR. The two formats differ only in how a pixel's colour number is stored; everything else in this chapter (window, scale, scroll, modulo, priority) works the same way for both.
+Each layer is planar or chunky, set by CTRL.PLANAR. The two formats differ only in how a pixel's colour number is stored; everything else in this chapter (window, scale, scroll, stride, priority) works the same way for both.
 
 ### Planar layers
 
@@ -412,7 +412,7 @@ You decide where the planes are in memory. The hardware only follows the pointer
      Figure 3-3: Separate Bitplanes, 320 x 256, 4 Planes
 ```
 
-The pointers start one plane apart, and the modulo is 0.
+The pointers start one plane apart, and the stride is one plane line: 40.
 
 **Interleaved planes**: the lines of all the planes are kept together, so one picture line is plane 0's line, then plane 1's, plane 2's and plane 3's.
 
@@ -428,16 +428,16 @@ The pointers start one plane apart, and the modulo is 0.
      Figure 3-4: Interleaved Bitplanes, 320 x 256, 4 Planes
 ```
 
-The pointers start one plane line apart. After each line, each pointer must skip over the other three planes' lines, so the modulo is (planes − 1) × the plane line: 3 × 40 = 120. Interleaved planes keep a whole picture line in one place, which makes it easy to scroll vertically and to copy or clear lines.
+The pointers start one plane line apart. Each plane's next line starts one whole picture line later, after all four planes' lines, so the stride is planes × the plane line: 4 × 40 = 160. Interleaved planes keep a whole picture line in one place, which makes it easy to scroll vertically and to copy or clear lines.
 
-| Layout | Pointers | BPLMOD |
-|--------|----------|--------|
-| 320 × 256, 4 planes, separate | BPLpPT = SCREEN + p × 10240 | 0 |
-| 320 × 256, 4 planes, interleaved | BPLpPT = SCREEN + p × 40 | 3 × 40 = 120 |
-| 320 × 256, 5 planes, separate | BPLpPT = SCREEN + p × 10240 | 0 |
-| 320 × 256, 5 planes, interleaved | BPLpPT = SCREEN + p × 40 | 4 × 40 = 160 |
+| Layout | Pointers | BPLSTRIDE |
+|--------|----------|-----------|
+| 320 × 256, 4 planes, separate | BPLpPT = SCREEN + p × 10240 | 40 |
+| 320 × 256, 4 planes, interleaved | BPLpPT = SCREEN + p × 40 | 4 × 40 = 160 |
+| 320 × 256, 5 planes, separate | BPLpPT = SCREEN + p × 10240 | 40 |
+| 320 × 256, 5 planes, interleaved | BPLpPT = SCREEN + p × 40 | 5 × 40 = 200 |
 
-The boot ROM shows a small 4-plane interleaved picture: 64 × 32 pixels, so each plane line is 8 bytes and the modulo is 3 × 8 = 24. It is shown 2 × 2 at (400, 300), in front of the console, in colours 16–31:
+The boot ROM shows a small 4-plane interleaved picture: 64 × 32 pixels, so each plane line is 8 bytes and the stride is 4 × 8 = 32. It is shown 2 × 2 at (400, 300), in front of the console, in colours 16–31:
 
 ```asm
 ; Example 3-2: a 64 x 32 picture in 4 interleaved planes, from the boot ROM
@@ -454,7 +454,7 @@ BM_Y        equ     300
             move.l  #BITMAP+1*BM_LINE,L_BPL1PT(a0)
             move.l  #BITMAP+2*BM_LINE,L_BPL2PT(a0)
             move.l  #BITMAP+3*BM_LINE,L_BPL3PT(a0)
-            move.l  #(BM_PL-1)*BM_LINE,L_BPLMOD(a0)
+            move.l  #BM_PL*BM_LINE,L_BPLSTRIDE(a0)      ; 32
             move.l  #(BM_X<<16)|(BM_X+2*BM_W),L_WINX(a0)
             move.l  #(BM_Y<<16)|(BM_Y+2*BM_H),L_WINY(a0)
             move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|((BM_PL-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(1<<L_CTRL_PALOFS_B),L_CTRL(a0)
@@ -496,7 +496,7 @@ CON_Y       equ     (576-480)/2         ; 48
 
             lea     L0(a4),a0
             move.l  #CON,L_BPL0PT(a0)
-            move.l  #0,L_BPLMOD(a0)
+            move.l  #640/8,L_BPLSTRIDE(a0)      ; 80 bytes per line
             move.l  #(CON_X<<16)|(CON_X+640),L_WINX(a0)
             move.l  #(CON_Y<<16)|(CON_Y+480),L_WINY(a0)
             move.l  #L_CTRL_EN_M,L_CTRL(a0)     ; chunky, 1 bit per pixel, colours 0-1
@@ -578,17 +578,17 @@ WIN_Y       equ     (576-WIN_H)/2       ; 32
 
 The hardware reads CTRL, WINX, WINY and SCROLLX for each line at the start of the horizontal blank before it. **To change line L, write during the visible part of line L − 1 or earlier.** This lets you move a window or change a layer's format partway down the screen.
 
-### The line length
+### How much is fetched
 
-The window also decides how much the hardware fetches for each line, which matters for the modulo. The **line length** is the number of bytes fetched for one line of one plane:
+The window also decides how much the hardware fetches for each line. For one line of one plane it fetches:
 
 ```
    source pixels  =  window width ÷ horizontal scale   (rounded up)
-   line length    =  source pixels × bits per pixel ÷ 8, rounded up to a whole word
+   bytes fetched  =  source pixels × bits per pixel ÷ 8, rounded up to a whole word
                      (planar: 1 bit per pixel, since each plane is fetched separately)
 ```
 
-| Window width | Scale | Format | Source pixels | Line length |
+| Window width | Scale | Format | Source pixels | Bytes fetched |
 |--------------|-------|--------|---------------|-------------|
 | 640 | 2× | 4 planes | 320 | 40 bytes per plane |
 | 640 | 2× | chunky 8 bpp | 320 | 320 bytes |
@@ -597,7 +597,7 @@ The window also decides how much the hardware fetches for each line, which matte
 | 128 | 2× | 4 planes | 64 | 8 bytes per plane |
 | 100 | 1× | 2 planes | 100 | 14 bytes per plane (100 bits, rounded up to 7 words) |
 
-Fine scroll does not change the line length, as "Scrolling" explains.
+The hardware fetches whole groups of 16 source pixels, so with fine scroll it may fetch one group more (one word more per plane; for a chunky layer, one group's words), as "Scrolling" explains. The picture must have this much data on each line. How much is fetched plays no part in where the next line starts: the stride alone decides that (see "The Stride").
 
 ### Summary: window registers
 
@@ -637,65 +637,63 @@ Scaling is free in memory and, across the screen, in bandwidth: a layer at 2× a
 
 If the window width is not a whole multiple of the scale, the last source pixel is cut short. With vertical scaling, the first screen line of the window shows the first copy of the first source line; if the height is not a whole multiple of the scale, the last source line is cut short.
 
-With vertical scaling, the pointers return to the start of the source line after each copy except the last, and move on (by the line length plus BPLMOD) only after the last copy. You do not need to do anything about this; just set the modulo for the source picture.
+With vertical scaling, the pointers go back to the start of the source line after each copy except the last, and move on to the next source line (the line's start plus BPLSTRIDE) only after the last copy. You do not need to do anything about this; just set the stride for the source picture.
 
 ---
 
-## The Modulo
+## The Stride
 
-As on the Amiga, the modulo is the number of bytes the hardware adds to the plane pointers at the end of each line, so that the next line starts where you want it to.
+The stride, BPLSTRIDE, is the number of bytes from the start of one line of a plane to the start of the next. It takes the place of the Amiga's modulo, and it is simpler: it does not depend on how much the hardware fetches.
 
-Here is what happens to each plane pointer during one line. At the start of the line, the pointer holds the address of the line's first word. The hardware fetches the line, word by word, and the pointer moves on by 2 bytes for each word. When the line is finished, the pointer has moved on by the line length. The hardware then adds BPLMOD. So:
-
-```
-   next line's start  =  this line's start  +  line length  +  BPLMOD
-```
-
-If the picture in memory is exactly as wide as the window, its next line starts right after the end of this one, and BPLMOD is 0. If the picture is wider than the window, BPLMOD must skip over the part of the picture line that is not shown:
+Here is what happens to each plane pointer during one line. At the start of the line, the pointer holds the address of the line's first word. The hardware fetches the line, word by word, and the pointer moves on by 2 bytes for each word. When it fetches the line's **first** word, the hardware also saves the pointer's value: the line's start. When it fetches the line's **last** word, it sets the pointer to that saved start plus BPLSTRIDE. So:
 
 ```
-               picture line in memory: 80 bytes (640 pixels, 1 plane)
-   +---------------+----------------------------+----------------------+
-   | not shown     | shown: line length 40      | not shown            |
-   +---------------+----------------------------+----------------------+
-                   ^ pointer at the              ^ pointer after
-                     start of the line             the line
-                                                  <-- BPLMOD = 80 - 40 = 40 -->
-   +---------------+----------------------------+
-   | next line ... | ^ the next line starts here
-                     (start + 40 + 40)
-
-     Figure 3-7: The Modulo for a Window Narrower Than the Picture
+   next line's start  =  this line's start  +  BPLSTRIDE
 ```
 
-In general, if one plane line of the picture starts **row stride** bytes after the previous one:
+The number of words fetched makes no difference. The window width, the scale and the fine scroll do not change the stride, and you never adjust it for them. If the lines of the picture follow each other in memory, BPLSTRIDE is the number of bytes in one line of the picture (one plane's line, for separate planes), whatever part of the line the window shows:
 
 ```
-   BPLMOD  =  row stride  −  line length
+               picture lines in memory: 80 bytes each (640 pixels, 1 plane)
+
+     line y's start                                   line y+1's start
+           v                                                 v
+   ...-----+--------------------+----------------------------+--------------
+           | shown: 40 bytes    | not shown: 40 bytes        | shown ...
+   ...-----+--------------------+----------------------------+--------------
+           <------------------ BPLSTRIDE = 80 ---------------->
+
+   The stride is 80 whether the window shows all 640 pixels, 320 of them,
+   or any other part, and whatever the fine scroll.
+
+     Figure 3-7: The Stride for a Window Narrower Than the Picture
 ```
 
-| Picture | Window shows | Row stride | Line length | BPLMOD |
-|---------|--------------|------------|-------------|--------|
-| 320 × 256, 4 planes, separate | all, 2× | 40 | 40 | 0 |
-| 320 × 256, 4 planes, interleaved | all, 2× | 4 × 40 = 160 | 40 | 120 |
-| 640 × 256, 4 planes, interleaved | 320 source pixels | 4 × 80 = 320 | 40 | 280 |
-| 640 × 480, chunky 4 bpp | 320 source pixels | 320 | 160 | 160 |
-| 640 × 480, chunky 8 bpp | 320 source pixels | 640 | 320 | 320 |
+In general, BPLSTRIDE is the picture's **row stride**: the number of bytes from the start of one of its plane lines to the start of the next.
 
-BPLMOD is a signed 16-bit number of bytes, and it must be even (bit 0 always reads 0). There is one BPLMOD per layer, used for all of its planes. Unlike the Amiga, there are no separate modulos for odd and even planes.
+| Picture | Window shows | BPLSTRIDE |
+|---------|--------------|-----------|
+| 320 × 256, 4 planes, separate | all, 2× | 40 |
+| 320 × 256, 4 planes, interleaved | all, 2× | 4 × 40 = 160 |
+| 640 × 256, 4 planes, interleaved | 320 source pixels | 4 × 80 = 320 |
+| 320 × 256, chunky 8 bpp | all, 2× | 320 |
+| 640 × 480, chunky 4 bpp | 320 source pixels | 320 |
+| 640 × 480, chunky 8 bpp | 320 source pixels | 640 |
 
-A **negative modulo** shows the picture differently:
+BPLSTRIDE is a signed 16-bit number of bytes, and it must be even (bit 0 always reads 0). It sits in the low half of its long word: write it with `MOVE.L`, or with `MOVE.W` to its address + 2. There is one BPLSTRIDE per layer, used for all of its planes. Unlike the Amiga, there are no separate values for odd and even planes.
 
-- BPLMOD = −(line length) shows the same source line on every screen line, since each line starts where the last one did.
-- BPLMOD = −(row stride + line length) steps **back** one row each line, so the picture is shown upside down. Point the pointers at the picture's last line and the picture appears flipped top to bottom. For a 320-byte-wide 8 bpp picture shown in full, that is BPLMOD = −640.
+Other strides show the picture differently:
 
-The modulo is live: the hardware uses its value at the end of each line. Changing it partway down the screen is a simple way to make effects, as Example 3-6 below shows.
+- BPLSTRIDE = 0 shows the same source line on every screen line, since each line starts where the last one did.
+- BPLSTRIDE = −(row stride) steps **back** one row each line, so the picture is shown upside down. Point the pointers at the picture's last line and the picture appears flipped top to bottom. For a 320-byte-wide 8 bpp picture, that is BPLSTRIDE = −320.
 
-### Summary: the modulo
+The stride is live. The hardware reads it when it fetches the line's last word, which is a little before the layer's window ends: about two groups (32 source pixels) before its right edge. So a value written at the start of a line, or in the horizontal blank before it, applies at the end of that line. Changing it partway down the screen is a simple way to make effects, as Example 3-6 below shows.
+
+### Summary: the stride
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| BPLMOD | Ln + `$10` | RW | Signed, even: bytes added to all the layer's plane pointers at the end of each line. 16 bits, in the low half |
+| BPLSTRIDE | Ln + `$10` | RW | Signed, even: bytes from the start of one line to the start of the next, for all the layer's plane pointers. 16 bits, in the low half |
 
 ---
 
@@ -709,7 +707,7 @@ To scroll a picture up and down, change the address of the first line you give t
    BPLpPT  =  plane p's first line  +  y × row stride
 ```
 
-The modulo stays the same. To scroll smoothly, add or subtract one row stride per line scrolled, in each frame's vertical blank. The picture in memory must be tall enough for the window. To scroll endlessly, without copying, use pointer wrap (see "Endless scrolling: pointer wrap" below).
+The stride stays the same. To scroll smoothly, add or subtract one row stride per line scrolled, in each frame's vertical blank. The picture in memory must be tall enough for the window. To scroll endlessly, without copying, use pointer wrap (see "Endless scrolling: pointer wrap" below).
 
 ### Horizontal scrolling
 
@@ -736,7 +734,7 @@ For a chunky layer, a word holds fewer pixels, so the fine scroll is smaller:
 
 The hardware takes SCROLLX modulo the number of pixels in a word, so at 8 bpp a SCROLLX of 5 scrolls by 1 pixel.
 
-**The modulo does not change with fine scroll.** When SCROLLX is not 0, the hardware fetches one extra word on each line to supply the pixels that slide in from the right, but it does not count that word in the line length: the pointers still move on by exactly the line length plus BPLMOD at the end of the line. On the Amiga you had to start the fetch a word early and subtract 2 from the modulo; here you do neither. The picture must have a word to spare on the right of the part you show, which it always has if x + source width ≤ picture width.
+**The stride never depends on scroll.** When SCROLLX is not 0, the hardware fetches one extra group on each line to supply the pixels that slide in from the right, but the next line still starts at this line's start plus BPLSTRIDE. On the Amiga you had to start the fetch a word early and subtract 2 from the modulo; here you do neither. Coarse scrolling does not change the stride either: it moves the line's start, and the stride counts from there. The picture must have a word to spare on the right of the part you show, which it always has if x + source width ≤ picture width.
 
 Note that SCROLLX works the opposite way to the Amiga's BPLCON1. BPLCON1 delays the picture, moving it to the right; SCROLLX skips pixels, moving the picture to the **left** and showing more of its right-hand side. With the formulas above, increasing x always moves the view to the right through the picture, so the picture slides left on the screen.
 
@@ -744,7 +742,7 @@ The scroll registers take effect at different times: the pointers are used at on
 
 ### Example 3-3: A scrolling routine
 
-This routine points a layer at a 640 × 256 picture in 4 interleaved planes, from any position (x, y). The layer's window shows 320 source pixels (640 screen pixels at 2×), so the line length is 40 bytes and BPLMOD = 4 × 80 − 40 = 280.
+This routine points a layer at a 640 × 256 picture in 4 interleaved planes, from any position (x, y). The layer's window shows 320 source pixels (640 screen pixels at 2×), but the stride is still the picture's row stride: BPLSTRIDE = 4 × 80 = 320.
 
 ```asm
 BACK        equ     $040000             ; the picture
@@ -753,9 +751,8 @@ BK_PL       equ     4
 BK_ROW      equ     BK_W/8              ; 80 bytes per plane line
 BK_STRIDE   equ     BK_ROW*BK_PL        ; 320 bytes from one line to the next
 VIEW_W      equ     320                 ; source pixels in the window
-LINELEN     equ     VIEW_W/8            ; 40 bytes fetched per plane per line
 
-; once:     move.l  #BK_STRIDE-LINELEN,L_BPLMOD(a0)    ; 280
+; once:     move.l  #BK_STRIDE,L_BPLSTRIDE(a0)      ; 320
 
 ; Point the layer at a0 at the picture from (d0.w, d1.w), in source
 ; pixels; 0 <= d0 <= BK_W - VIEW_W. Call it in the vertical blank.
@@ -795,12 +792,12 @@ CTRL.WRAP (bits 23–20) sets the size of the block, 2^(WRAP + 9) bytes:
 | 2 | 2 KB | 9 | 256 KB |
 | ... | ... | 13 | 4 MB |
 
-Each pointer then stays inside the block it is in. The block must be **aligned**: it starts at a multiple of its own size. When the display moves a pointer on, a word at a time and by the line length plus BPLMOD at the end of a line, only the address bits inside the block change, so a pointer that runs off the end of the block carries on from its start. With a 64 KB wrap, a pointer at `$10000` stays between `$10000` and `$1FFFF`.
+Each pointer then stays inside the block it is in. The block must be **aligned**: it starts at a multiple of its own size. When the display moves a pointer on, a word at a time and to the line's start plus BPLSTRIDE at the end of a line, only the address bits inside the block change, so a pointer that runs off the end of the block carries on from its start. With a 64 KB wrap, a pointer at `$10000` stays between `$10000` and `$1FFFF`.
 
 Two things to remember:
 
 - Wrap applies only to the moves the display makes. A pointer value **you** write is used as it is, so work out the address inside the block yourself (`AND` with the block size − 1, then add the block's start).
-- The wrap is on bytes, not lines. Lines are easiest to handle when the row stride divides the block size exactly, so that no line is split at the end of the block. Pad each line if you need to (the modulo skips the padding).
+- The wrap is on bytes, not lines. Lines are easiest to handle when the row stride divides the block size exactly, so that no line is split at the end of the block. Pad each line if you need to (the stride includes the padding).
 
 To scroll down through a map: the ring holds more lines than the window shows. Each frame you move the pointers on by one stride per line scrolled, and draw the map's new lines into the ring just below the visible ones, where the display has not reached yet. Scrolling up is the same the other way round.
 
@@ -815,10 +812,9 @@ RING_WRAP   equ     8                   ; 2^(8+9) = 128 KB
 RG_PL       equ     4
 RG_ROW      equ     64                  ; bytes per plane line (40 shown, 24 padding)
 RG_STRIDE   equ     RG_ROW*RG_PL        ; 256 bytes from one line to the next
-LINELEN     equ     40                  ; 320 source pixels per plane line
 
 ; once, with a0 = the layer:
-            move.l  #RG_STRIDE-LINELEN,L_BPLMOD(a0)     ; 216
+            move.l  #RG_STRIDE,L_BPLSTRIDE(a0)          ; 256
             move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|((RG_PL-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(RING_WRAP<<L_CTRL_WRAP_B),L_CTRL(a0)
 
 ; Each frame, in the vertical blank: show map line d1.l (any line of the
@@ -854,7 +850,7 @@ Wrap works for chunky layers too, and each plane of a separate-planes layer can 
 
 ## Resetting the Pointers Every Frame
 
-The plane pointers are not reset by the hardware. At the end of a frame each pointer has moved on by one line length plus BPLMOD for every source line shown, and if nothing rewrites it, the next frame carries on from there through memory. As on the Amiga, something must write the pointers at the start of every frame:
+The plane pointers are not reset by the hardware. At the end of a frame each pointer has moved on by BPLSTRIDE for every source line shown, and if nothing rewrites it, the next frame carries on from there through memory. As on the Amiga, something must write the pointers at the start of every frame:
 
 - **the copper**, which does it in the vertical blank with a few MOVE instructions in its list, as Amiga programs do (Chapter 5 has the list for Example 3-1). The boot ROM resets its own layers' pointers this way;
 - **the CPU**, in its vertical blank interrupt, which is what the examples in this chapter do.
@@ -905,7 +901,7 @@ A **split screen** shows different pictures, or different parts of one picture, 
 
 ### Different layers
 
-The simplest way is to use one layer for each band. Give each layer a window covering its band, and set each one up independently: its own pointers, modulo, scroll, scale and format. A layer is fetched only on the lines its window covers, so bands that do not overlap cost no extra bandwidth.
+The simplest way is to use one layer for each band. Give each layer a window covering its band, and set each one up independently: its own pointers, stride, scroll, scale and format. A layer is fetched only on the lines its window covers, so bands that do not overlap cost no extra bandwidth.
 
 ```
  line  32 +-----------------------------------------+
@@ -919,23 +915,22 @@ The simplest way is to use one layer for each band. Give each layer a window cov
             Figure 3-8: A Split Screen from Two Layers
 ```
 
-### Changing the modulo partway down
+### Changing the stride partway down
 
-Because the modulo is used at the end of each line, changing it during a line changes where the **next** line starts. Change BPLMOD during line L and line L + 1 starts at (line L's start + line length + new BPLMOD). This is a clean way to make a one-layer split: the write can land anywhere in line L, which is easy to hit from an interrupt.
+Because the stride is used at the end of each line, changing it during a line changes where the **next** line starts. Change BPLSTRIDE during line L and line L + 1 starts at (line L's start + new BPLSTRIDE). This is a clean way to make a one-layer split: the write can land anywhere in line L before its last fetch, which is easy to hit from an interrupt.
 
-- To jump to another part of memory at line L + 1, set BPLMOD during line L to (address wanted − line L's start − line length), then put the old value back during line L + 1. The jump applies to all of the layer's planes, so the new picture must have the same plane layout.
-- To repeat a line, set BPLMOD to −(line length) for as many lines as you want it repeated.
-- To show a reflection, set BPLMOD to −(row stride + line length) and leave it there: from then on each line steps back a row.
+- To jump to another part of memory at line L + 1, set BPLSTRIDE during line L to (address wanted − line L's start), then put the row stride back during line L + 1. The jump applies to all of the layer's planes, so the new picture must have the same plane layout.
+- To repeat a line, set BPLSTRIDE to 0 for as many lines as you want it repeated.
+- To show a reflection, set BPLSTRIDE to −(row stride) and leave it there: from then on each line steps back a row.
 
-The LINE interrupt (see "Video Interrupts") is made for this: it comes at the start of line LINECMP, and its handler writes BPLMOD while that line is being shown. With vertical scaling, the modulo is used only after the last copy of a source line, so the change takes effect at the end of the source line being shown.
+The LINE interrupt (see "Video Interrupts") is made for this: it comes at the start of line LINECMP, and its handler writes BPLSTRIDE while that line is being shown. With vertical scaling, the stride is used only after the last copy of a source line, so the change takes effect at the end of the source line being shown.
 
 ### Example 3-6: A reflection
 
-This example extends Example 3-1. From screen line 384 down (source line 176), the LINE interrupt sets the modulo to step back one row per source line, so the picture above the line is reflected below it. It also switches the layer to colours 16–31, a darker set, from the next line. The vertical blank handler puts the pointers, the modulo and the colours back for the next frame.
+This example extends Example 3-1. From screen line 384 down (source line 176), the LINE interrupt sets the stride to step back one row per source line, so the picture above the line is reflected below it. It also switches the layer to colours 16–31, a darker set, from the next line. The vertical blank handler puts the pointers, the stride and the colours back for the next frame.
 
 ```asm
 ; Example 3-6: a reflection, added to Example 3-1
-LINELEN     equ     ROWBYTES            ; bytes fetched per plane per line
 MIRROR      equ     384                 ; screen line where the reflection starts
 CTRL_TOP    equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|((PLANES-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
 
@@ -948,25 +943,25 @@ CTRL_TOP    equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|((PLANES-1)<<L_CTRL_PLANES_B)|(1
             move.w  #INTENA_SETCLRL_M|(1<<INTB_VBLANK)|(1<<INTB_LINE),INTENA+2(a5)
             move.l  #INTCON_MASTER_M,INTCON(a5)
 
-; Vertical blank: the pointers back to the top, the modulo and colours
+; Vertical blank: the pointers back to the top, the stride and colours
 ; back to normal
 vblank:     move.l  a0,-(sp)
             lea     CUSTOM,a0
             move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a0)
             lea     L0(a0),a0
             bsr     setptrs
-            move.l  #0,L_BPLMOD(a0)
+            move.l  #ROWBYTES,L_BPLSTRIDE(a0)
             move.l  #CTRL_TOP|(0<<L_CTRL_PALOFS_B),L_CTRL(a0)
             move.l  (sp)+,a0
             rte
 
 ; Line MIRROR: from the end of the current source line, each line steps
-; back one row instead of on: BPLMOD = -(row + line length). The new
+; back one row instead of on: BPLSTRIDE = -(row stride). The new
 ; PALOFS shows from the next screen line.
 mirror:     move.l  a0,-(sp)
             lea     CUSTOM,a0
             move.l  #VIDSTAT_LINE_M,VIDSTAT(a0)
-            move.l  #-(ROWBYTES+LINELEN),L0+L_BPLMOD(a0)
+            move.l  #-ROWBYTES,L0+L_BPLSTRIDE(a0)
             move.l  #CTRL_TOP|(1<<L_CTRL_PALOFS_B),L0+L_CTRL(a0)
             move.l  (sp)+,a0
             rte
@@ -976,10 +971,10 @@ mirror:     move.l  a0,-(sp)
 
 On the Amiga, the copper makes splits by writing new plane pointers in the horizontal blank. You can write the pointers at any time here too, since they are live, but you need to know exactly what the hardware does with them:
 
-- The next line's fetch begins at the **start of the horizontal blank**, straight after the hardware has moved the pointers on for the line just shown. During the line, the hardware keeps fetching until about 32 source pixels before the window's right edge.
-- The hardware moves the pointers on **relative to their current value**: it adds (line length − bytes it fetched this line) + BPLMOD. Normally the first part is 0, or −2 when fine scroll fetched an extra word.
+- The next line's fetch begins at the **start of the horizontal blank**. During the line, the hardware keeps fetching until about 32 source pixels before the window's right edge. When it fetches the line's last word, it sets each pointer to the line's start plus BPLSTRIDE.
+- A write to a pointer wins over the hardware's own change in the same clock, and it also sets that pointer's saved line start.
 
-So a pointer written during the short gap between the layer's last fetch on line L and the start of the horizontal blank is used for line L + 1, **with BPLMOD added** (and 2 taken off if fine scroll made the hardware fetch an extra word on that line). Write the address you want minus BPLMOD. A pointer written earlier in line L disturbs the end of line L; one written after the horizontal blank has started is too late for the start of line L + 1. With a full-width window the gap is under a microsecond, too short for the CPU to hit reliably; it is meant for the copper. With the CPU, use separate layers or the modulo method above.
+So a pointer written during the short gap between the layer's last fetch on line L and the start of the horizontal blank is used **as written** as the start of line L + 1: nothing is added and nothing taken off. A pointer written earlier in line L is used for the rest of line L, which disturbs it; one written after the horizontal blank has started is too late for the start of line L + 1. With a full-width window the gap is under a microsecond, too short for the CPU to hit reliably; it is meant for the copper. With the CPU, use separate layers or the stride method above.
 
 ---
 
@@ -1059,7 +1054,6 @@ BK_PL       equ     4
 BK_ROW      equ     BK_W/8              ; 80 bytes per plane line
 BK_STRIDE   equ     BK_ROW*BK_PL        ; 320 bytes from one line to the next
 VIEW_W      equ     320                 ; source pixels in the window
-LINELEN     equ     VIEW_W/8            ; 40 bytes fetched per plane per line
 WIN_X       equ     40                  ; both layers: 640 x 512 at (40, 32)
 WIN_Y       equ     32
 
@@ -1088,7 +1082,7 @@ start:      move.w  #$2700,sr
             lea     L1(a4),a0
             move.l  #(WIN_X<<16)|(WIN_X+640),L_WINX(a0)
             move.l  #(WIN_Y<<16)|(WIN_Y+512),L_WINY(a0)
-            move.l  #BK_STRIDE-LINELEN,L_BPLMOD(a0)    ; 280
+            move.l  #BK_STRIDE,L_BPLSTRIDE(a0)  ; 320
             moveq   #0,d0
             moveq   #0,d1
             bsr     scroll_back
@@ -1099,7 +1093,7 @@ start:      move.w  #$2700,sr
             move.l  #(WIN_X<<16)|(WIN_X+640),L_WINX(a0)
             move.l  #(WIN_Y<<16)|(WIN_Y+512),L_WINY(a0)
             move.l  #0,L_SCROLLX(a0)
-            move.l  #0,L_BPLMOD(a0)
+            move.l  #FG_ROW,L_BPLSTRIDE(a0)     ; 40
             bsr     front_ptrs
             move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|((FG_PL-1)<<L_CTRL_PLANES_B)|L_CTRL_TRANSP_M|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(1<<L_CTRL_PALOFS_B),L_CTRL(a0)
 
@@ -1358,7 +1352,7 @@ start:      move.w  #$2700,sr
 .layer:     move.l  #(WIN_X<<16)|(WIN_X+4*WIDTH),L_WINX(a0)
             move.l  #(WIN_Y<<16)|(WIN_Y+2*HEIGHT),L_WINY(a0)
             move.l  #0,L_SCROLLX(a0)
-            move.l  #0,L_BPLMOD(a0)
+            move.l  #WIDTH,L_BPLSTRIDE(a0)      ; 160 bytes per line
             move.l  #CTRL_8BPP,L_CTRL(a0)
             lea     L_SPAN(a0),a0       ; the next layer
             dbra    d0,.layer
@@ -1711,7 +1705,7 @@ You can also poll the flags with interrupts off, as the boot ROM's video test do
             move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)
 ```
 
-**LINE** comes once per frame, at the start of the line in LINECMP (bits 26–16). To have it on several lines, write the next line number into LINECMP in the handler. The 68000 takes from about 2 µs to about 10 µs to start a handler, depending on the instruction it is in the middle of, so a LINE handler runs during the line it was asked for (32 µs); that is enough to change CTRL, WINX, WINY, SCROLLX, PRIO or BGCOLOR for the **next** line, or BPLMOD for the end of this one.
+**LINE** comes once per frame, at the start of the line in LINECMP (bits 26–16). To have it on several lines, write the next line number into LINECMP in the handler. The 68000 takes from about 2 µs to about 10 µs to start a handler, depending on the instruction it is in the middle of, so a LINE handler runs during the line it was asked for (32 µs); that is enough to change CTRL, WINX, WINY, SCROLLX, PRIO or BGCOLOR for the **next** line, or BPLSTRIDE for the end of this one.
 
 ### Summary: interrupts and the beam
 
@@ -1730,7 +1724,7 @@ You can also poll the flags with interrupts off, as the boot ROM's video test do
 | Registers | Take effect |
 |-----------|-------------|
 | CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line. To change line L, write during the visible part of line L − 1 or earlier |
-| BPLxPT, BPLMOD | At once: they are live. The next word fetched uses the new pointer; BPLMOD is used at the end of each line. A CPU write wins over the DMA's own change in the same clock |
+| BPLxPT, BPLSTRIDE | At once: they are live. The next word fetched uses the new pointer; BPLSTRIDE is used when the line's last word is fetched. A CPU write to a pointer wins over the DMA's own change in the same clock, and also sets the pointer's saved line start |
 | BPLxDAT | At once; a write of BPL0DAT completes the group |
 | PRIO, BGCOLOR | At the start of each line |
 | VIDCON.DIRECT, VIDCON.BLANKALL, palette | At once (the next pixel) |
@@ -1765,7 +1759,7 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 | WINX | Ln + `$04` | RW | XSTART (26–16), XEND (10–0) |
 | WINY | Ln + `$08` | RW | YSTART (26–16), YEND (10–0) |
 | SCROLLX | Ln + `$0C` | RW | Fine scroll, 0–15 source pixels (3–0) |
-| BPLMOD | Ln + `$10` | RW | Modulo, signed, even (15–0) |
+| BPLSTRIDE | Ln + `$10` | RW | Stride: bytes from one line's start to the next, signed, even (15–0) |
 | BPLDMA | Ln + `$14` | Set/clear | SETCLR (15), PLANES (7–0): DMA on per plane; chunky: bit 0. All on after reset |
 | BPL0PT–BPL7PT | Ln + `$20`, `$24` … `$3C` | RW | Plane pointers (22–0), even; chunky layers use BPL0PT only |
 | BPL0DAT–BPL7DAT | Ln + `$40`, `$44` … `$5C` | RW | Plane data (15–0); writing BPL0DAT completes the group |

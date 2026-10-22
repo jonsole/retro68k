@@ -49,7 +49,7 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 7. **Unused bits** read as 0; write them as 0.
 8. **Unused addresses** inside the custom and system blocks read as 0 and ignore writes. Only the unmapped regions in section 1 give bus errors.
 9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layer settings before each line).
-10. **16-bit registers** (BPLxDAT, BPLMOD and others) sit in the low half: write them with `MOVE.W` to the register's address + 2, or with `MOVE.L`.
+10. **16-bit registers** (BPLxDAT, BPLSTRIDE and others) sit in the low half: write them with `MOVE.W` to the register's address + 2, or with `MOVE.L`.
 
 **Access column key:** R = read only, W = write only, RW = read and write, W1C = sticky flags cleared by writing 1.
 
@@ -95,7 +95,7 @@ Layer n (0–2) at `0x100 + n × 0x80`:
 | `+0x04` | WINX | RW | 4, 4.3 |
 | `+0x08` | WINY | RW | 4, 4.3 |
 | `+0x0C` | SCROLLX | RW | 4, 4.4 |
-| `+0x10` | BPLMOD | RW | 4, 4.4 |
+| `+0x10` | BPLSTRIDE | RW | 4, 4.4 |
 | `+0x14` | BPLDMA | Set/clear | 4, 5.5 |
 | `+0x20` | BPL0PT | RW | 4, 4.4 |
 | `+0x24` | BPL1PT | RW | 4, 4.4 |
