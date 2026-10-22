@@ -178,7 +178,7 @@ A palette entry is a 32-bit register, `$00RRGGBB`, at `PALETTE + 4 × n`. The hi
 
 Palette writes take effect at once, from the next pixel, so the copper can change a colour in the middle of a line. BGCOLOR is read at the start of each line, so a change shows from the next line. "Copper Timing" gives the details.
 
-**Tip:** Because the held high half waits for its low half, you can write the high half of a colour *before* a WAIT and the low half after it. The whole colour then changes with the one MOVE that follows the WAIT, which the copper has already fetched, so the change is exact to the pixel. Example 5-9 does this. Put nothing but the WAIT between the two MOVEs.
+**Tip:** Because the held high half waits for its low half, you can write the high half of a colour *before* a WAIT and the low half after it. The whole colour then changes with the one MOVE that follows the WAIT, which the copper has already fetched, so the change is exact to the pixel. Example 5-10 does this. Put nothing but the WAIT between the two MOVEs.
 
 ---
 
@@ -274,7 +274,7 @@ A pixel-only WAIT relies on the copper finishing the block before the beam comes
 
 ### Waiting for the DMA engine
 
-A WAIT with the **B** bit set, written `CWAITB line,pixel`, waits until the beam has reached the position **and** the DMA engine has nothing left to do. This is the Amiga's "wait for the blitter" (there, the BFD bit clear). It lets a list start a DMA engine job, wait for it to finish, and start the next. Example 5-11 shows it. The DMA engine is described in its own chapter, when it is built.
+A WAIT with the **B** bit set, written `CWAITB line,pixel`, waits until the beam has reached the position **and** the DMA engine has nothing left to do. This is the Amiga's "wait for the blitter" (there, the BFD bit clear). It lets a list start a DMA engine job, wait for it to finish, and start the next. Example 5-12 shows it. The DMA engine is described in its own chapter, when it is built.
 
 ---
 
@@ -342,7 +342,7 @@ A strobe from the CPU also wakes a copper that is waiting or stopped.
 
 ### The interrupt strobe: COPINT
 
-A write to **COPINT** sets COPSTAT.IRQ. With COPCON.IRQEN set, that raises the COPPER interrupt (source 2). It is meant to be written by the copper itself, as `CMOVE COPINT+2,0`; see Example 5-10.
+A write to **COPINT** sets COPSTAT.IRQ. With COPCON.IRQEN set, that raises the COPPER interrupt (source 2). It is meant to be written by the copper itself, as `CMOVE COPINT+2,0`; see Example 5-11.
 
 ---
 
@@ -358,7 +358,7 @@ A typical list has three parts:
 
 ### Example 5-1: Colour bars
 
-Example 3-9 in the playfield chapter made colour bars by having the CPU watch the beam. Here is the same picture as a copper list: the background colour changes every 8 lines, 72 bars in all. Each new colour is written in the horizontal blank before the bar's first line, because BGCOLOR is read at the start of each line. The assembler's `REPT` writes the 71 WAIT and MOVE pairs.
+Example 3-10 in the playfield chapter made colour bars by having the CPU watch the beam. Here is the same picture as a copper list: the background colour changes every 8 lines, 72 bars in all. Each new colour is written in the horizontal blank before the bar's first line, because BGCOLOR is read at the start of each line. The assembler's `REPT` writes the 71 WAIT and MOVE pairs.
 
 ```asm
 ; Example 5-1: colour bars. The background colour changes every 8 lines:
@@ -745,6 +745,64 @@ stripes_list:                           ; list 2: the scan lines of Example 5-5
 
 The copper can write COP1LC and COP2LC too, with `CMOVEL`. A list can set COP2LC and then strobe COPJMP2, or set COP1LC to choose the list for the next frame, so that the copper chains its own lists.
 
+### Background work: COPCON.RESUME
+
+Some copper work is not tied to the beam at all: a long queue of DMA engine jobs, say, each started when the one before it is done. Such a list may take several frames. On the Amiga it would be cut off at every vertical blank, when list 1 starts again. Here you can let it carry on, by setting **COPCON.RESUME**:
+
+- When the copper enters list 2 through COPJMP2, it remembers that it is "in list 2".
+- If it is still there when the vertical blank comes, the hardware writes its place in the list into **COP2LC**, and then starts list 1 as always.
+- List 1 does its set-up and ends with a MOVE to COPJMP2, as in Example 5-6. List 2 carries on where it was cut off.
+
+```
+ frame n     list 1 ... COPJMP2 -> list 2: job A, job B, WAITB ...  | cut off
+                                                                     | COP2LC <- the WAITB
+ frame n+1   list 1 ... COPJMP2 -> list 2: WAITB (again), job C, ... STOP
+
+          Figure 5-4: A Background List Carried Across Frames
+```
+
+The place saved is the instruction that was not finished: a WAIT that was still waiting runs again, whole. A STOP, a COPJMP1 strobe or the vertical blank itself ends "in list 2"; a JUMP does not, so the background list can loop.
+
+A background list has to follow a few rules:
+
+- **No beam WAITs.** A WAIT for a beam position counts in frame order, so after a resume it would wait for that position in the new frame. Use `CWAITB 576,0`: line 576, pixel 0 is the first position of every frame, so this waits for the DMA engine only.
+- **Keep MOVE pairs together, and no strobes between them.** If the cut-off comes between the two halves of a `CMOVEL`, the copper runs again from the high half, so the pair is always written whole. Anything between the halves would run twice too.
+- **End by pointing COP2LC at an idle list.** Otherwise the next COPJMP2 runs the list again from the last place saved.
+- **The CPU hands out work only when the copper is idle.** While a background list runs, the hardware may overwrite COP2LC at the next vertical blank. So the CPU writes COP2LC only when the copper is in the idle list: COPPC tells it where the copper is, or the idle list can raise a COPINT when it is reached.
+
+### Example 5-7: A background job queue
+
+```asm
+; Example 5-7: list 2 runs a queue of DMA engine jobs in the background,
+; across as many frames as it takes. List 1 is the one in Example 5-6.
+; JOB1-JOB3 are descriptor chains for DMA engine channel 0 (see Example 5-12).
+
+            cnop    0,4
+idle:       CSTOP                                   ; list 2 when there is no work
+
+jobs:       CMOVEL  DMX0+DMX_CHDESC,JOB1
+            CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M
+            CWAITB  576,0                           ; until the engine is idle
+            CMOVEL  DMX0+DMX_CHDESC,JOB2
+            CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M
+            CWAITB  576,0
+            CMOVEL  DMX0+DMX_CHDESC,JOB3
+            CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M
+            CWAITB  576,0
+            CMOVEL  COP2LC,idle                     ; done: back to the idle list
+            CMOVE   COPINT+2,0                      ; tell the CPU
+            CSTOP
+
+; In the start-up: RESUME on, list 2 idle
+            move.l  #idle,COP2LC(a4)
+            move.l  #COPCON_EN_M|COPCON_IRQEN_M|COPCON_RESUME_M,COPCON(a4)
+
+; Later, in the main program, when the copper is idle (after the last COPINT):
+            move.l  #jobs,COP2LC(a4)                ; starts at the next frame's COPJMP2
+```
+
+Each job's start strobe is a single MOVE after its `CMOVEL`, never inside it, so a resume never starts a job twice. If you need beam-timed effects as well, put them in list 1, before the COPJMP2: list 2 then gets the rest of each frame.
+
 ---
 
 ## Double-Buffered Lists
@@ -755,12 +813,12 @@ When the CPU builds a new list every frame (for a raster bar that moves, for exa
 2. Write its address to COP1LC. The copper is not disturbed: it finishes the current frame with the old list.
 3. At the next vertical blank the copper starts the new list. Wait for that (FRAMECOUNT goes up at the same moment), and then the old buffer is free to build in.
 
-### Example 5-7: A moving raster bar
+### Example 5-8: A moving raster bar
 
 The CPU builds a list with a 16-line bar of colours in the background, at a line that moves down the screen by 2 lines every frame.
 
 ```asm
-; Example 5-7: double-buffered copper lists. Every frame the CPU builds a
+; Example 5-8: double-buffered copper lists. Every frame the CPU builds a
 ; list with a 16-line raster bar at line d0, in the buffer the copper is
 ; not running, then makes it the next frame's list. Uses a4 = CUSTOM.
 
@@ -827,7 +885,7 @@ Each list is 8 + 17 × 12 + 4 = 216 bytes, so the two buffers of 1 KB each leave
 
 The examples in this section build on Example 5-3. Each gives a new `copper_list`, which starts by resetting the plane pointers as before.
 
-### Example 5-8: A split screen
+### Example 5-9: A split screen
 
 On the Amiga, a split screen is made by the copper writing new plane pointers partway down. This example shows the 4-plane picture of Example 5-3 on the top 384 lines of the window, and from line 416 down a status panel: a different picture, 320 × 64 in 2 planes, using colours 16–19. The layer's CTRL changes to 2 planes and palette block 1, and its pointers move to the panel.
 
@@ -841,7 +899,7 @@ The timing comes from "Writing new pointers partway down" in the playfield chapt
 So the list waits for pixel 648 on line 415 and writes three registers: six MOVEs, which must all be done by pixel 720. The first is already fetched; at normal priority each of the others may take about 200 ns, so the last lands near pixel 675. That fits, but on a busy screen other DMA could hold the copper up. Setting COPCON.PRI to 1 makes sure it is not (see "Copper Timing").
 
 ```asm
-; Example 5-8: a split screen. From line 416 the layer shows a 2-plane
+; Example 5-9: a split screen. From line 416 the layer shows a 2-plane
 ; status panel in colours 16-19. Replaces copper_list in Example 5-3; in
 ; its start-up, turn the copper on with high priority:
 ;           move.l  #COPCON_EN_M|(1<<COPCON_PRI_B),COPCON(a4)
@@ -869,7 +927,7 @@ The list puts CTRL back at the top of every frame, so the top part always starts
 
 The panel's picture runs down to the bottom of the window, line 543, which is 128 screen lines: the 64 source lines of the panel at 2×. Further splits work the same way: one WAIT and a few MOVEs each.
 
-### Example 5-9: Changing a colour in the middle of a line
+### Example 5-10: Changing a colour in the middle of a line
 
 Palette writes take effect at once, so the copper can change a colour partway across a line. This list changes two colours in the right half of the screen, from pixel 360, on lines 200 to 299, and puts them back in each horizontal blank. It shows the two ways to make a colour change exact:
 
@@ -877,7 +935,7 @@ Palette writes take effect at once, so the copper can change a colour partway ac
 - Colour 2 goes from red `$FF0000` to sky blue `$0080FF`, which changes both halves. The list writes the new high half **before** the WAIT, where it is held, and the low half after it. The MOVE straight after the WAIT is already fetched, so colour 2 changes exactly at pixel 360. Colour 1's MOVE needs its own fetch and lands a few pixels later.
 
 ```asm
-; Example 5-9: colours changed in the middle of a line. On lines 200-299,
+; Example 5-10: colours changed in the middle of a line. On lines 200-299,
 ; from pixel 360, colour 2 is sky blue and colour 1 yellow. Replaces
 ; copper_list in Example 5-3.
 
@@ -902,14 +960,14 @@ midline:    CMOVE   PALETTE+2*4,$0000       ; colour 2's new high half: held
 
 The changes back are made in the horizontal blank, where nothing is shown, so their exact timing does not matter. The colours change at the same place on every line and in every frame, without any work by the CPU.
 
-### Example 5-10: A copper interrupt
+### Example 5-11: A copper interrupt
 
 The copper cannot write the interrupt controller (it is in the system block), but it can interrupt the CPU with a MOVE to **COPINT**. That sets COPSTAT.IRQ, and with COPCON.IRQEN set, COPSTAT.IRQ raises the COPPER interrupt, source 2, with its own vector. The handler clears it by writing 1 to COPSTAT.IRQ.
 
 Unlike the LINE interrupt, which comes at one line set in LINECMP, the copper can interrupt at any position, as many times per frame as the list says. This example interrupts the CPU at line 544, when the beam has left the window: a good moment for the CPU to start changing the picture, because the display will not read it again until the next frame.
 
 ```asm
-; Example 5-10: a copper interrupt at line 544, the line after the window.
+; Example 5-11: a copper interrupt at line 544, the line after the window.
 ; Added to Example 5-3: a new list, and the interrupt set-up.
 
 VECTORS     equ     $000000             ; the vector table, in Chip RAM
@@ -949,12 +1007,12 @@ The example sets the source's level itself (5, the level of the other video inte
 
 A write to COPINT sets the flag once. If the flag is still set from an earlier write that the handler has not yet cleared, the two count as one, so leave the handler enough time between two COPINTs: the CPU takes at least 3 µs to start a handler.
 
-### Example 5-11: Waiting for the DMA engine (later)
+### Example 5-12: Waiting for the DMA engine (later)
 
 The DMA engine is not built yet, and its registers are not described in this guide yet. This example shows only the shape of a list that uses it: the copper starts a DMA engine job at line 0, then waits for line 300 **and** for the engine to finish before starting a second one. On the Amiga, lists do the same with the blitter: a copper-driven blit, then a WAIT with BFD clear before the next.
 
 ```asm
-; Example 5-11 (later): the copper starts DMA engine jobs. JOB1 and JOB2
+; Example 5-12 (later): the copper starts DMA engine jobs. JOB1 and JOB2
 ; are descriptor chains in Chip RAM, set up as the DMA engine chapter will
 ; describe. Uses DMA engine channel 0.
 
@@ -988,7 +1046,7 @@ While it waits, the copper has already fetched the next instruction. When the WA
 - The **first** MOVE after a WAIT is exact. Put the write that must be exact there.
 - The writes after it come one fetch apart each (see "How fast the copper runs" below).
 - A palette change shows within about 1–2 pixels of the WAIT position.
-- To change a whole palette entry exactly, write its high half before the WAIT (it is held) and its low half after it (Example 5-9).
+- To change a whole palette entry exactly, write its high half before the WAIT (it is held) and its low half after it (Example 5-10).
 
 The copper holds only one prefetched instruction. A SKIP that skips throws it away, and the copper fetches the instruction after it; a JUMP fetches its target.
 
@@ -1004,7 +1062,7 @@ The copper's writes take effect exactly as the CPU's do:
 | CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line: to change line L, write during the visible part of line L − 1 |
 | PRIO, BGCOLOR | At the start of each line: write during line L − 1 to change line L |
 
-A good rule: make changes for the next line in the horizontal blank (pixel 720 on), except CTRL, WINX, WINY and SCROLLX, which must be written before pixel 720 of the line before, and the plane pointers, which have their own window (Example 5-8).
+A good rule: make changes for the next line in the horizontal blank (pixel 720 on), except CTRL, WINX, WINY and SCROLLX, which must be written before pixel 720 of the line before, and the plane pointers, which have their own window (Example 5-9).
 
 ### How fast the copper runs
 
@@ -1042,7 +1100,7 @@ At every level, a display fetch that is about to be late still comes first, so r
 When to use them:
 
 - **PRI 0** for almost every list. Copper lists are short, and most of the copper's time is spent waiting.
-- **PRI 1** when a burst of writes must fit in a short gap: new plane pointers between a layer's last fetch and the horizontal blank (Example 5-8), many colour changes in one horizontal blank, or writes on a screen that is close to its fetch budget, where the display leaves few spare cycles. The cost is small: the DMA engine and audio wait a little.
+- **PRI 1** when a burst of writes must fit in a short gap: new plane pointers between a layer's last fetch and the horizontal blank (Example 5-9), many colour changes in one horizontal blank, or writes on a screen that is close to its fetch budget, where the display leaves few spare cycles. The cost is small: the DMA engine and audio wait a little.
 - **PRI 2** only when even that is not enough, for short bursts. It slows the CPU while the copper fetches.
 
 The copper can write COPCON itself, so a list can raise its priority just before a burst and lower it after:
@@ -1111,9 +1169,9 @@ All offsets are from CUSTOM (`$E00000`). Access: R read only, W write only, RW r
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| COPCON | `$700` | RW | EN (0): copper on. IRQEN (1): COPINT raises the interrupt. PRI (5–4): 0 normal, 1 high, 2 nasty |
+| COPCON | `$700` | RW | EN (0): copper on. IRQEN (1): COPINT raises the interrupt. RESUME (2): the vertical blank saves list 2's place in COP2LC. PRI (5–4): 0 normal, 1 high, 2 nasty |
 | COP1LC | `$704` | RW | List 1 address (22–2): restarted at every vertical blank |
-| COP2LC | `$708` | RW | List 2 address (22–2) |
+| COP2LC | `$708` | RW | List 2 address (22–2). Written by the hardware only with COPCON.RESUME |
 | COPJMP1 | `$70C` | W | Strobe: start again at COP1LC now |
 | COPJMP2 | `$710` | W | Strobe: continue at COP2LC now |
 | COPPC | `$714` | R | Address of the instruction being run (22–2) |
@@ -1136,7 +1194,7 @@ The copper interrupt is source 2, COPPER (vector 66 with the default VECBASE): C
 
 | Name | Value | Meaning |
 |------|-------|---------|
-| `COPCON_EN_M`, `COPCON_IRQEN_M` | `$1`, `$2` | COPCON bits |
+| `COPCON_EN_M`, `COPCON_IRQEN_M`, `COPCON_RESUME_M` | `$1`, `$2`, `$4` | COPCON bits |
 | `COPCON_PRI_B`, `COPCON_PRI_M` | 4, `$30` | COPCON.PRI field |
 | `COPSTAT_WAITING_M` ... `COPSTAT_IRQ_M` | `$1` ... `$8` | COPSTAT bits |
 | `DMACON_COPEN_M` | `$80` | DMACON's copper enable |

@@ -82,6 +82,9 @@ def render(regs, layers, bpt, pal, ram):
         depth = planes if planar else bpp
         deep = depth > 4
         ptr = [bpt[8 * n + p] for p in range(8)]
+        wr = (c >> 20) & 15
+        m = (1 << (wr + 9)) - 1 if wr else 0x7FFFFF       # CTRL.WRAP: only these bits move
+        wadd = lambda a, d: (a & ~m) | ((a + d) & m)
         pm = regs["pdma"].get(n, 0xFF)
         # a plane with its DMA off shows its data register in every group
         const = [None if (pm >> p) & 1 else regs["dat"][8 * n + p] for p in range(8)]
@@ -100,18 +103,18 @@ def render(regs, layers, bpt, pal, ram):
                         bi = (sx & 15) + k
                         v = 0
                         for p in range(nplanes):
-                            wv = const[p] if const[p] is not None else word(ptr[p] + 2 * (bi >> 4))
+                            wv = const[p] if const[p] is not None else word(wadd(ptr[p], 2 * (bi >> 4)))
                             if (wv >> (15 - (bi & 15))) & 1:
                                 v |= 1 << p
                     else:
                         fine = (sx & 15) << lb
                         bo = fine + k * bpp
-                        v = (word(ptr[0] + 2 * (bo >> 4)) >> (16 - bpp - (bo & 15))) & ((1 << bpp) - 1)
+                        v = (word(wadd(ptr[0], 2 * (bo >> 4))) >> (16 - bpp - (bo & 15))) & ((1 << bpp) - 1)
                     idx = v if deep else (palofs * 16 + (v & 15))
                     row[x] = (not (transp and v == 0), idx, v)
                 if vsub == vmax:
                     for p in range(nplanes):
-                        ptr[p] += length + mod
+                        ptr[p] = wadd(ptr[p], length + mod)
             out[y][n] = (row, depth)
 
     img = []

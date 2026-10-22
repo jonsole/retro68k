@@ -166,6 +166,8 @@ COPCON_EN_B                  equ $0
 COPCON_EN_M                  equ $1
 COPCON_IRQEN_B               equ $1
 COPCON_IRQEN_M               equ $2
+COPCON_RESUME_B              equ $2
+COPCON_RESUME_M              equ $4
 COPCON_PRI_B                 equ $4
 COPCON_PRI_W                 equ $2
 COPCON_PRI_M                 equ $30
@@ -221,6 +223,9 @@ L_CTRL_PALOFS_M              equ $F000
 L_CTRL_PLANES_B              equ $10
 L_CTRL_PLANES_W              equ $3
 L_CTRL_PLANES_M              equ $70000
+L_CTRL_WRAP_B                equ $14
+L_CTRL_WRAP_W                equ $4
+L_CTRL_WRAP_M                equ $F00000
 L_WINX                       equ $4          ; RW, spec 4/4.3 (add to Ln)
 L_WINX_XSTART_B              equ $10
 L_WINX_XSTART_W              equ $B

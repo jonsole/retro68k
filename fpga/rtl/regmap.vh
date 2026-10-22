@@ -91,6 +91,7 @@
 `define RM_COPCON                           16'h0700
 `define RM_COPCON_EN                        0
 `define RM_COPCON_IRQEN                     1
+`define RM_COPCON_RESUME                    2
 `define RM_COPCON_PRI                       5:4
 `define RM_COP1LC                           16'h0704
 `define RM_COP1LC_ADDR                      22:2
@@ -118,6 +119,7 @@
 `define RM_L_CTRL_VSCALE                    9:8
 `define RM_L_CTRL_PALOFS                    15:12
 `define RM_L_CTRL_PLANES                    18:16
+`define RM_L_CTRL_WRAP                      23:20
 `define RM_L_WINX                           16'h0004
 `define RM_L_WINX_XSTART                    26:16
 `define RM_L_WINX_XEND                      10:0

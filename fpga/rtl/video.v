@@ -79,7 +79,7 @@ module video (
     reg  [5:0]  prio;
 
     // Layers 0-2: CTRL, window, fine scroll (pointers, modulo and data are in bpldma.v)
-    reg  [18:0] l_ctrl [0:2];
+    reg  [23:0] l_ctrl [0:2];
     reg  [10:0] l_xs [0:2], l_xe [0:2], l_ys [0:2], l_ye [0:2];
     reg  [3:0]  l_sx [0:2];
 
@@ -119,7 +119,7 @@ module video (
             bgcolor  <= 24'd0;
             prio     <= 6'b10_01_00;    // L0 in front, then L1, then L2
             for (i = 0; i < 3; i = i + 1) begin
-                l_ctrl[i] <= 19'd0;
+                l_ctrl[i] <= 24'd0;
                 l_xs[i] <= 11'd0;  l_xe[i] <= HVIS;  l_ys[i] <= 11'd0;  l_ye[i] <= VVIS;
                 l_sx[i] <= 4'd0;
                 ov_s[i] <= 2'b00;
@@ -140,7 +140,7 @@ module video (
             if (rb_wr && sel_lay) begin : wlayer
                 reg [31:0] v;
                 case (off[4:0])
-                    5'h00: begin v = merge({13'd0, l_ctrl[ln]}, rb_wdata, rb_be); l_ctrl[ln] <= v[18:0]; end
+                    5'h00: begin v = merge({8'd0, l_ctrl[ln]}, rb_wdata, rb_be); l_ctrl[ln] <= v[23:0]; end
                     5'h04: begin v = merge({5'd0, l_xs[ln], 5'd0, l_xe[ln]}, rb_wdata, rb_be);
                                  l_xs[ln] <= v[26:16]; l_xe[ln] <= v[10:0]; end
                     5'h08: begin v = merge({5'd0, l_ys[ln], 5'd0, l_ye[ln]}, rb_wdata, rb_be);
@@ -169,7 +169,7 @@ module video (
 
         reg_q <= 32'd0;
         if (rb_rd && sel_lay) case (off[4:0])
-            5'h00: reg_q <= {13'd0, l_ctrl[ln]};
+            5'h00: reg_q <= {8'd0, l_ctrl[ln]};
             5'h04: reg_q <= {5'd0, l_xs[ln], 5'd0, l_xe[ln]};
             5'h08: reg_q <= {5'd0, l_ys[ln], 5'd0, l_ye[ln]};
             5'h0C: reg_q <= {28'd0, l_sx[ln]};
@@ -367,6 +367,7 @@ module video (
         .rb_rdata(dma_q),
         .line_t(line_t), .act(f_act), .adv(f_adv),
         .planes({f_planes[2], f_planes[1], f_planes[0]}), .chunky(f_chunky), .hscale({f_hs[2], f_hs[1], f_hs[0]}),
+        .wrap({l_ctrl[2][23:20], l_ctrl[1][23:20], l_ctrl[0][23:20]}),
         .ngroups({f_groups[2], f_groups[1], f_groups[0]}),
         .len({f_len[2], f_len[1], f_len[0]}),
         .line_go(line_go), .line_gen(line_gen),

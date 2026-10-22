@@ -5,7 +5,8 @@
 ;
 ;   default    palette screen: chunky and planar, scaling, fine scroll,
 ;              modulo, a vertically flipped layer, transparency, priority,
-;              and a plane with its DMA off (constant data from BPL4DAT)
+;              a plane with its DMA off (constant data from BPL4DAT), and
+;              pointer wrap (L0's pointer runs past the end of a 64 KB block)
 ;   -DDIRECT   direct colour: L0 red (5 planes), L1 green (chunky 8 bpp),
 ;              L2 blue (4 planes, narrower window: blue is 0 outside it;
 ;              plane 0's DMA off, constant data from BPL0DAT)
@@ -95,7 +96,7 @@ L1_PLANE    equ L1_ROW*300
 L2_DATA     equ $1A0000
 L2_ROW      equ 96
 
-setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|(2<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(2<<L_CTRL_PALOFS_B)
+setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|(2<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(2<<L_CTRL_PALOFS_B)|(7<<L_CTRL_WRAP_B)
             dc.l    L0+L_WINX,   (0<<16)|640
             dc.l    L0+L_WINY,   (16<<16)|464
             dc.l    L0+L_SCROLLX, 5
@@ -115,7 +116,7 @@ setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|(2<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE
             dc.l    PRIO,        (0<<4)|(2<<2)|1 ; L1 in front, then L2, then L0
             dc.l    -1
 
-pointers:   dc.l    L0+L_BPL0PT, L0_DATA
+pointers:   dc.l    L0+L_BPL0PT, L0_DATA+$C000     ; 48 KB into its 64 KB block: wraps to L0_DATA about row 82
             dc.l    L1+L_BPL0PT, L1_DATA+0*L1_PLANE
             dc.l    L1+L_BPL1PT, L1_DATA+1*L1_PLANE
             dc.l    L1+L_BPL2PT, L1_DATA+2*L1_PLANE

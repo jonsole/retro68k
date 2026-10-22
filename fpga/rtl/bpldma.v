@@ -47,6 +47,7 @@ module bpldma (
     input  wire [8:0]   planes,        // 3 x 3 bits: words per group - 1 (planes, or chunky bits per pixel)
     input  wire [2:0]   chunky,        // the layer's words all come from BPL0PT
     input  wire [5:0]   hscale,        // 3 x 2 bits: log2 of the horizontal scale (for the deadlines)
+    input  wire [11:0]  wrap,          // 3 x 4 bits: CTRL.WRAP: 0 off, n = pointers wrap in 2^(n+9) bytes
     input  wire [35:0]  ngroups,       // 3 x 12: groups to fetch
     input  wire [35:0]  len,           // 3 x 12: line length in words per plane
     output wire         line_go,       // 1 clock: a new line started here
@@ -83,7 +84,17 @@ module bpldma (
     reg  [15:0] mod [0:2];
     reg  [7:0]  pm  [0:2];             // BPLDMA: DMA enable per plane (chunky: bit 0 for the layer)
 
+    // Pointer wrap (spec 4, section 4.4): only the bits below the region size
+    // change; the region is aligned to its size
+    wire [22:0] wmask [0:2];
     genvar g;
+    generate for (g = 0; g < 3; g = g + 1) begin : wraps
+        assign wmask[g] = (wrap[4*g +: 4] == 4'd0) ? 23'h7FFFFF
+                        : ~(23'h7FFFFF << ({1'b0, wrap[4*g +: 4]} + 5'd9));
+    end endgenerate
+    function [22:0] wadd(input [22:0] p, input [22:0] d, input [22:0] m);
+        wadd = (p & ~m) | ((p + d) & m);
+    endfunction
     generate for (g = 0; g < 24; g = g + 1) begin : dout
         assign dat[16*g +: 16] = dr[g];
     end endgenerate
@@ -253,7 +264,7 @@ module bpldma (
                 // Finish off the line just shown, then start the next one
                 for (i = 0; i < 24; i = i + 1)
                     if (pv_act[i / 8] && (pv_chunky[i / 8] ? (i % 8 == 0 && pv_mask[i / 8] != 8'd0) : pv_mask[i / 8][i % 8]))
-                        pt[i] <= pt[i] + step[i / 8];
+                        pt[i] <= wadd(pt[i], step[i / 8], wmask[i / 8]);
                 for (n = 0; n < 3; n = n + 1) begin
                     left[n]   <= (has_dma[n] && act[n]) ? ngroups[12*n +: 12] : 12'd0;
                     issued[n] <= 12'd0;
@@ -277,7 +288,7 @@ module bpldma (
                 req_layer  <= pick;
                 last       <= pick;
                 addr       <= pt[pi][21:1];
-                pt[pi]     <= pt[pi] + 23'd2;
+                pt[pi]     <= wadd(pt[pi], 23'd2, wmask[pick]);
                 rem[pick]  <= rem_n;
                 if (gstart) begin
                     left[pick]   <= left[pick] - 1'b1;

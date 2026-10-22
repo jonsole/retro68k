@@ -131,6 +131,10 @@ Each layer has a rectangle `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND` (WINX, W
 - BPLMOD = 0 shows a picture whose lines follow each other. A 320-pixel window into a 640-pixel-wide 4bpp chunky picture has a line length of 160 bytes, so BPLMOD = 160. A negative BPLMOD shows lines again or flips the picture: −(row bytes + line length) steps back one row.
 - With vertical scaling, the pointers return to the line's start after each copy of a source line except the last.
 
+**Pointer wrap (CTRL.WRAP).** A layer can keep its pointers inside a block of 2^(WRAP + 9) bytes (WRAP 1 = 1 KB, 7 = 64 KB, 13 = 4 MB; 0 = no wrap). Every pointer move, word by word and at the end of each line, changes only the address bits inside the block, so a pointer that runs off the end of the block carries on from its start. The block is the aligned one the pointer is in: a pointer at `0x10000` with a 64 KB wrap stays within `0x10000`–`0x1FFFF`. It applies to every pointer of the layer (each plane can have its own block), and not to the pointer values the CPU or copper write.
+
+This makes **endless vertical scrolling** easy: keep the picture as a ring of lines in a block, add new lines just ahead of the visible ones, and move the pointers on (or back) a line at a time; at the end of the block the display carries on from its start, with no copying and no split screen. (Horizontal wrap within each line is not provided: the end-of-line step wraps too.)
+
 | Layout | Pointers | BPLMOD |
 |--------|----------|--------|
 | Chunky 320×240 at 8bpp | BPL0PT = base | 0 |
@@ -208,9 +212,11 @@ A layer needs `bits per pixel ÷ 8 ÷ HS` bytes per screen pixel (for planar, bi
 | Direct colour 24-bit at 2× across, full width | 1.5 | **No** (just over); 21-bit (7/7/7) at 1.31 fits |
 | Two 8bpp layers at 1× | 2.0 | **No** |
 
+The 1.48 is what the display's own cycles (1 and 3) guarantee. The DMA scheduler (spec 5, section 6) also gives it any cycle nobody else wants, and lets a fetch that is about to be late take the CPU's cycle 0, so a screen a little over the budget still shows correctly: in simulation, 1.5 bytes per pixel (8 + 8 + 8 planes at 2×, or 8 + 4 planes at 1×) fits with the CPU running. The extra comes out of the CPU's, audio's, the copper's and the DMA engine's time, so the table's "No" rows are best avoided, not impossible; how far beyond 1.5 a screen can go is not measured yet.
+
 Windows help: a status bar below a game area, not on top of it, adds nothing on the lines where the game area is shown.
 
-Each layer has one group of time in hand (its data registers). There is also a **turnaround limit** on deep layers at 1×; see section 5.6.
+Each layer has one group of time in hand (its data registers). Section 5.6 has the timing of each group's fetch and the measured limits.
 
 ### 5.3 When a layer runs short
 
@@ -252,21 +258,17 @@ The pixel side (27 MHz) and the memory side (100 MHz) are asynchronous (section 
 
 The next group must be complete before the current one is used up: 16 source pixels, which is 593 ns at 1×, 1185 ns at 2×. Two design choices keep the fixed part short: the "full" synchroniser runs at 135 MHz rather than at the 27 MHz pixel clock (two 27 MHz flip-flops would cost up to 111 ns), and the display's two memory cycles are spread out in the slot (cycles 1 and 3) rather than side by side, so a request never waits more than 60 ns for one.
 
-**Turnaround limit.** Layers whose windows start at the same place, with the same scroll and scale, use up their groups at the same pixel, so all their words are wanted at once. Measured in simulation at 576p, full width, every layer planar:
+**Turnaround limit.** Layers whose windows start at the same place, with the same scroll and scale, use up their groups at the same pixel, so all their words are wanted at once. The DMA scheduler (spec 5, section 6) serves the earliest deadline first, uses free cycles 2 and 4 when nobody else wants them, and lets an urgent fetch take the CPU's cycle 0. Measured in simulation at 576p, full width, every layer planar, all in step:
 
 | Layers | Planes in step | Bytes per pixel | Result |
 |--------|----------------|-----------------|--------|
-| 8 planes at 1×, alone | 8 | 1.0 | Fits |
-| 5 + 4, 5 + 5, 8 + 2 at 1× | 9–10 | 1.13–1.25 | Fits |
-| 8 + 3, 6 + 5 at 1× | 11 | 1.38 | Runs short |
-| 8 + 8 at 2× | 16 | 1.0 | Fits |
-| 8 + 8 + 4, 8 + 8 + 6 at 2× | 20–22 | 1.25–1.38 | Fits |
-| 8 + 8 + 7 at 2× | 23 | 1.44 | Runs short |
-| A 1× layer of 6–8 planes with a deep layer at 2× or 4× | – | – | Runs short (see below) |
+| 8 + 3, 8 + 4, 6 + 6 at 1× | 11–12 | 1.38–1.5 | Fits |
+| 8 at 1× + 4 or 8 at 2×; 6 or 7 at 1× + 8 at 2× | – | 1.25–1.5 | Fits |
+| 8 at 1× + 8 at 4× | – | 1.25 | Fits |
+| 6 at 1× + 8 at 2× + 8 at 4× | – | 1.5 | Fits |
+| 8 + 8 + 7, 8 + 8 + 8 at 2× | 23–24 | 1.44–1.5 | Fits |
 
-So: **at 1×, at most 10 planes (or chunky words) in step; at 2×, at most 22.** At 4× and more, the bandwidth budget (section 5.2) is the limit.
-
-The layers take turns one word each (section 5.1), so a deep layer at 2× gets as many turns as a layer at 1×, although its deadline is twice as far away. A deep 1× layer next to a deep 2× layer therefore runs short even though both fit the budget. Keep deep layers at 1× alone, or give the other layers few planes (open point V3). Planes with their DMA off (section 5.5) don't count. Layers whose groups start on different pixels (different fine scroll, or windows starting at different x) share the time better.
+Before the scheduler (display cycles 1 and 3 only, layers taking turns), the limits were 10 planes in step at 1× and 22 at 2×, and a deep 1× layer next to a deep 2× layer ran short. With the scheduler every tested case fits, up to 1.5 bytes per pixel. Beyond that the limit is bandwidth (section 5.2), shared with the CPU, audio, the copper and the DMA engine: an urgent display fetch always wins, so a screen near the limit slows the CPU and the other channels rather than the picture. Planes with their DMA off (section 5.5) don't count. Layers whose groups start on different pixels (different fine scroll, or windows starting at different x) share the time better still.
 
 ## 6. Registers
 
@@ -294,7 +296,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
-| `+0x00` | CTRL | EN (0), PLANAR (1), BPP (3–2: chunky 1/2/4/8), TRANSP (4), HSCALE (7–6), VSCALE (9–8), PALOFS (15–12), PLANES (18–16: planes − 1) | |
+| `+0x00` | CTRL | EN (0), PLANAR (1), BPP (3–2: chunky 1/2/4/8), TRANSP (4), HSCALE (7–6), VSCALE (9–8), PALOFS (15–12), PLANES (18–16: planes − 1), WRAP (23–20: pointer wrap, 0 off, n = 2^(n+9) bytes) | |
 | `+0x04` | WINX | XSTART 26–16, XEND 10–0 | Window, pixels |
 | `+0x08` | WINY | YSTART 26–16, YEND 10–0 | Window, lines |
 | `+0x0C` | SCROLLX | 3–0 | Fine scroll, pixels |
@@ -322,7 +324,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 | # | Item |
 |---|------|
 | V1 | Check in Vivado that the clock-domain crossings are all covered (asynchronous clock groups) and the pixel pipeline meets timing |
-| V3 | Order the layers' fetches by deadline (for example, layers at a smaller scale first) instead of taking turns, so that a deep 1× layer can share with deep 2× layers (section 5.6) |
+| V3 | Done: the DMA scheduler orders the layers' fetches by deadline (section 5.6) |
 | V2 | Plain DVI has no info packets. Add the HDMI AVI InfoFrame (576p, 4:3, "underscanned", IT content) so TVs neither crop the picture nor treat it as video; needs the HDMI data-island encoder (with HDMI audio, later) |
 
 ## 9. Tests
@@ -332,7 +334,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 - **Boot ROM:** the console and a 4-plane interleaved picture, checked pixel by pixel.
 - **Fetch budget:** for every example in 5.2 that fits, no OVERRUN. For one that does not fit, OVERRUN is set on the right layer only.
 - **Register timing:** a CTRL write during line L − 1's visible part changes line L.
-- **CPU:** on screens within the turnaround limits the CPU almost never waits; count the stolen cycle 0s on heavy screens.
+- **CPU:** on screens within the 1.48 budget the CPU almost never waits; count the stolen cycle 0s on heavy screens.
 
 ## 10. Later versions
 

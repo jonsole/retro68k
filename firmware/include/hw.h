@@ -194,6 +194,8 @@
 #define COPCON_EN_MASK                     0x1u
 #define COPCON_IRQEN_SHIFT                 1
 #define COPCON_IRQEN_MASK                  0x2u
+#define COPCON_RESUME_SHIFT                2
+#define COPCON_RESUME_MASK                 0x4u
 #define COPCON_PRI_SHIFT                   4
 #define COPCON_PRI_MASK                    0x30u
 /* COP1LC: RW, spec 10/6 */
@@ -253,6 +255,8 @@
 #define L_CTRL_PALOFS_MASK                 0xF000u
 #define L_CTRL_PLANES_SHIFT                16
 #define L_CTRL_PLANES_MASK                 0x70000u
+#define L_CTRL_WRAP_SHIFT                  20
+#define L_CTRL_WRAP_MASK                   0xF00000u
 #define L_WINX_OFS                         0x4u
 #define L_WINX(n)                          HW_REG32(CUSTOM_BASE + L_AT(n) + L_WINX_OFS)
 #define L_WINX_XSTART_SHIFT                16

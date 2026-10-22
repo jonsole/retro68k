@@ -686,7 +686,7 @@ A **negative modulo** shows the picture differently:
 - BPLMOD = −(line length) shows the same source line on every screen line, since each line starts where the last one did.
 - BPLMOD = −(row stride + line length) steps **back** one row each line, so the picture is shown upside down. Point the pointers at the picture's last line and the picture appears flipped top to bottom. For a 320-byte-wide 8 bpp picture shown in full, that is BPLMOD = −640.
 
-The modulo is live: the hardware uses its value at the end of each line. Changing it partway down the screen is a simple way to make effects, as Example 3-5 below shows.
+The modulo is live: the hardware uses its value at the end of each line. Changing it partway down the screen is a simple way to make effects, as Example 3-6 below shows.
 
 ### Summary: the modulo
 
@@ -706,7 +706,7 @@ To scroll a picture up and down, change the address of the first line you give t
    BPLpPT  =  plane p's first line  +  y × row stride
 ```
 
-The modulo stays the same. To scroll smoothly, add or subtract one row stride per line scrolled, in each frame's vertical blank. The picture in memory must be tall enough for the window; there is no wrap-around, so to scroll endlessly either keep extra lines above and below the visible part and copy, or use a split (see "Split Screens") to join the end of the buffer to its start.
+The modulo stays the same. To scroll smoothly, add or subtract one row stride per line scrolled, in each frame's vertical blank. The picture in memory must be tall enough for the window. To scroll endlessly, without copying, use pointer wrap (see "Endless scrolling: pointer wrap" below).
 
 ### Horizontal scrolling
 
@@ -779,12 +779,73 @@ scroll_back:
 
 The pointers are consecutive long words, so the routine writes them with `MOVE.L d1,(a1)+`. Do not write registers with `-(An)`: in that mode the 68000 writes the low half first.
 
+### Endless scrolling: pointer wrap
+
+A game that scrolls through a long map does not need the whole map in memory as a picture, only the lines on the screen and a few more. With **pointer wrap**, those lines are kept as a **ring** in a block of memory, and the display goes round it by itself.
+
+CTRL.WRAP (bits 23–20) sets the size of the block, 2^(WRAP + 9) bytes:
+
+| WRAP | Block | WRAP | Block |
+|------|-------|------|-------|
+| 0 | No wrap (the default) | 7 | 64 KB |
+| 1 | 1 KB | 8 | 128 KB |
+| 2 | 2 KB | 9 | 256 KB |
+| ... | ... | 13 | 4 MB |
+
+Each pointer then stays inside the block it is in. The block must be **aligned**: it starts at a multiple of its own size. When the display moves a pointer on, a word at a time and by the line length plus BPLMOD at the end of a line, only the address bits inside the block change, so a pointer that runs off the end of the block carries on from its start. With a 64 KB wrap, a pointer at `$10000` stays between `$10000` and `$1FFFF`.
+
+Two things to remember:
+
+- Wrap applies only to the moves the display makes. A pointer value **you** write is used as it is, so work out the address inside the block yourself (`AND` with the block size − 1, then add the block's start).
+- The wrap is on bytes, not lines. Lines are easiest to handle when the row stride divides the block size exactly, so that no line is split at the end of the block. Pad each line if you need to (the modulo skips the padding).
+
+To scroll down through a map: the ring holds more lines than the window shows. Each frame you move the pointers on by one stride per line scrolled, and draw the map's new lines into the ring just below the visible ones, where the display has not reached yet. Scrolling up is the same the other way round.
+
+### Example 3-4: An endless vertical scroll
+
+A 320 × 256 view, shown at 2×, of a map as tall as you like, in 4 interleaved planes. Each plane line is padded from 40 to 64 bytes, so the stride is 256 bytes, and a 128 KB block holds a ring of 512 lines: the 256 on the screen and 256 more to draw into ahead of them.
+
+```asm
+RING        equ     $040000             ; the ring: 128 KB, aligned to 128 KB
+RING_SIZE   equ     $20000
+RING_WRAP   equ     8                   ; 2^(8+9) = 128 KB
+RG_PL       equ     4
+RG_ROW      equ     64                  ; bytes per plane line (40 shown, 24 padding)
+RG_STRIDE   equ     RG_ROW*RG_PL        ; 256 bytes from one line to the next
+LINELEN     equ     40                  ; 320 source pixels per plane line
+
+; once, with a0 = the layer:
+            move.l  #RG_STRIDE-LINELEN,L_BPLMOD(a0)     ; 216
+            move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|((RG_PL-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(RING_WRAP<<L_CTRL_WRAP_B),L_CTRL(a0)
+
+; Each frame, in the vertical blank: show map line d1.l (any line of the
+; map; it goes up by 1 per line scrolled) at the top of the window.
+; The map line y is kept in the ring at line y mod 512.
+ring_scroll:
+            movem.l d1-d2/a1,-(sp)
+            lsl.l   #8,d1               ; y * RG_STRIDE (256)
+            and.l   #RING_SIZE-1,d1     ; inside the block
+            add.l   #RING,d1            ; d1 = plane 0 of the top line
+            lea     L_BPL0PT(a0),a1
+            moveq   #RG_PL-1,d2
+.pt:        move.l  d1,(a1)+
+            add.l   #RG_ROW,d1          ; the next plane: never crosses the end,
+            dbra    d2,.pt              ; as every line is whole in the block
+            movem.l (sp)+,d1-d2/a1
+            rts
+```
+
+The display does the rest: as it fetches down the screen, a pointer that passes `RING+$1FFFF` carries on at `RING`, so the bottom of the screen shows the ring's first lines. Before map line y + 256 scrolls into view, draw it at ring line (y + 256) mod 512, with the same `AND`.
+
+Wrap works for chunky layers too, and each plane of a separate-planes layer can have its own ring, in its own block of the same size. Wrap is not across a line: a picture that scrolls sideways must still be wide enough, or be redrawn at its edges.
+
 ### Summary: scrolling
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
 | SCROLLX | Ln + `$0C` | RW | Fine scroll: source pixels (0–15) skipped at the start of each line; taken modulo the pixels in a word for chunky layers |
 | BPL0PT–BPL7PT | Ln + `$20`–`$3C` | RW | Plane pointers: coarse scrolling, across and down |
+| CTRL.WRAP | Ln + `$00`, bits 23–20 | RW | Pointer wrap: the pointers stay in an aligned block of 2^(WRAP + 9) bytes; 0 off |
 
 ---
 
@@ -804,7 +865,7 @@ The handler is also the natural place to make any other change that must happen 
 To animate without flicker, draw into one buffer while the other is shown, and swap them between frames. The main program draws the next frame into the hidden buffer, stores its address in a variable, and waits for the vertical blank; the handler loads the pointers from the variable.
 
 ```asm
-; Example 3-4: double buffering. The handler shows the buffer whose address
+; Example 3-5: double buffering. The handler shows the buffer whose address
 ; is in "shown"; 4 separate planes of PLANESIZE bytes.
 shown       equ     $008000             ; long: the buffer to show
 PLANESIZE   equ     10240
@@ -865,12 +926,12 @@ Because the modulo is used at the end of each line, changing it during a line ch
 
 The LINE interrupt (see "Video Interrupts") is made for this: it comes at the start of line LINECMP, and its handler writes BPLMOD while that line is being shown. With vertical scaling, the modulo is used only after the last copy of a source line, so the change takes effect at the end of the source line being shown.
 
-### Example 3-5: A reflection
+### Example 3-6: A reflection
 
 This example extends Example 3-1. From screen line 384 down (source line 176), the LINE interrupt sets the modulo to step back one row per source line, so the picture above the line is reflected below it. It also switches the layer to colours 16–31, a darker set, from the next line. The vertical blank handler puts the pointers, the modulo and the colours back for the next frame.
 
 ```asm
-; Example 3-5: a reflection, added to Example 3-1
+; Example 3-6: a reflection, added to Example 3-1
 LINELEN     equ     ROWBYTES            ; bytes fetched per plane per line
 MIRROR      equ     384                 ; screen line where the reflection starts
 CTRL_TOP    equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|((PLANES-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
@@ -969,12 +1030,12 @@ To make a dual-playfield screen:
 
 Each layer scrolls independently, so you can scroll the two at different speeds for a parallax effect.
 
-### Example 3-6: Dual playfields with parallax
+### Example 3-7: Dual playfields with parallax
 
 The back layer is a 640 × 256 picture in 4 interleaved planes, colours 32–47, scrolled across one pixel per frame by the routine from Example 3-3. The front layer is 320 × 256 in 3 separate planes, colours 16–23, with a band of coloured blocks; its colour 0 is transparent. Both are 2 × 2, in the same 640 × 512 window at (40, 32) as Example 3-1. Bandwidth: 3 ÷ 8 ÷ 2 + 4 ÷ 8 ÷ 2 = 0.44 bytes per pixel, well within the budget.
 
 ```asm
-; Example 3-6: two playfields, as in the Amiga's dual-playfield mode.
+; Example 3-7: two playfields, as in the Amiga's dual-playfield mode.
 ; Layer 1 (behind): a 640 x 256 picture in 4 interleaved planes, colours
 ;   32-47 (PALOFS 2), 320 x 256 of it seen at a time (2x by 2x) and
 ;   scrolled across one pixel per frame.
@@ -1220,7 +1281,7 @@ A deep layer and shallow layers share the same 256 entries. If you show a 32-col
 
 ### The background colour
 
-BGCOLOR (`$RRGGBB` in bits 23–0) is not part of the palette. It shows wherever no layer has a pixel. It is read at the start of each line, so writing it partway down the screen changes it from the next line on, which makes it easy to draw colour bars (Example 3-9). As on the Amiga, writing the background colour is a quick way to show progress during start-up.
+BGCOLOR (`$RRGGBB` in bits 23–0) is not part of the palette. It shows wherever no layer has a pixel. It is read at the start of each line, so writing it partway down the screen changes it from the next line on, which makes it easy to draw colour bars (Example 3-10). As on the Amiga, writing the background colour is a quick way to show progress during start-up.
 
 **VIDCON.BLANKALL** shows the background colour over the whole screen, hiding every layer, without stopping them.
 
@@ -1259,14 +1320,14 @@ In direct colour the palette, PRIO, PALOFS and TRANSP are not used, and nor is t
 
 With chunky layers, 24-bit and 12-bit colour are easy for the CPU: each pixel is one byte (or nibble) in each of three buffers. A 16-bit 5/6/5 screen needs planar layers, since chunky depths are only 1, 2, 4 or 8.
 
-### Example 3-7: A 24-bit screen
+### Example 3-8: A 24-bit screen
 
 24-bit colour at 2× across needs 1.5 bytes per pixel, just over the display's budget of 1.48 (see "The Fetch Budget"). A narrower window does not help, because the budget counts at every point across the screen, not over the whole line. There are two ways to fit: keep 2× across and drop to 21-bit colour (7/7/7, three 7-plane layers, 1.31 bytes per pixel), or keep 24 bits and show each source pixel 4× across (0.75 bytes per pixel). This example takes the second way, because chunky 8 bpp layers are the easiest for the CPU to draw: one byte per channel per pixel.
 
 So the example uses three chunky 8 bpp layers of 160 × 256, shown 4× across and 2× down in the 640 × 512 window of Example 3-1. Each pixel is twice as wide as it is tall, which suits smooth pictures such as gradients and photographs. The picture is a gradient: red rises from left to right and green from top to bottom, with blue at half.
 
 ```asm
-; Example 3-7: a 24-bit direct-colour screen. Three chunky 8 bpp layers of
+; Example 3-8: a 24-bit direct-colour screen. Three chunky 8 bpp layers of
 ; 160 x 256, shown 4x across and 2x down as a 640 x 512 window at (40, 32):
 ; layer 0 is red, layer 1 green, layer 2 blue.
 ; Bandwidth: 3 x 8 bits / 8 / 4 = 0.75 bytes per pixel. (At 2x across it
@@ -1389,7 +1450,7 @@ Each layer has eight 16-bit data registers, BPL0DAT–BPL7DAT, and eight 16-bit 
 - After that, each time the shifters use up a group (every 16 source pixels), they take the next one from the data registers at once, and the DMA fetches another.
 - The layers that want a word take turns, one word each, so no layer waits for more than one word from each of the others.
 
-So each layer is always one group ahead, and the display reads memory at the rate it shows it. The display has **memory cycles 1 and 3 of every 100 ns slot**: 4 bytes every 100 ns, or 40 MB/s. These are its own cycles. It also uses any cycle nobody else wants, and, as on the Amiga, a fetch about to be late takes the CPU's cycle 0: the CPU then waits one slot. Screens within the turnaround limits (spec 4, section 5.6) rarely need that.
+So each layer is always one group ahead, and the display reads memory at the rate it shows it. The display has **memory cycles 1 and 3 of every 100 ns slot**: 4 bytes every 100 ns, or 40 MB/s. These are its own cycles. It also uses any cycle nobody else wants, and, as on the Amiga, a fetch about to be late takes the CPU's cycle 0: the CPU then waits one slot. Screens within the budget below rarely need that; a screen a little over it (up to 1.5 bytes per pixel, measured) still shows correctly, at the CPU's expense.
 
 ### The budget
 
@@ -1415,7 +1476,7 @@ where, for a planar layer, bits per pixel is the number of planes. Vertical scal
 
 **The boot ROM's screen**: the console, 1 bpp at 1× (0.125), with the 4-plane picture at 2× on top (4 ÷ 8 ÷ 2 = 0.25) on some lines: 0.375 where they overlap.
 
-**Dual playfields, Example 3-6**: 3 planes at 2× (0.1875) + 4 planes at 2× (0.25) = 0.4375. Fits, with room for a third layer.
+**Dual playfields, Example 3-7**: 3 planes at 2× (0.1875) + 4 planes at 2× (0.25) = 0.4375. Fits, with room for a third layer.
 
 **A 256-colour game screen with an overlay**: an 8 bpp layer at 1× (1.0) and a 4 bpp layer at 1× over it (0.5) = 1.5. Just over the budget. Show the overlay at 2× (0.25, total 1.25: fits), or give it fewer colours (3 planes at 1×: 0.375, total 1.375: fits), or move it to a band of its own.
 
@@ -1423,7 +1484,7 @@ where, for a planar layer, bits per pixel is the number of planes. Vertical scal
 
 **Three 64-colour playfields**: 6 planes + 6 planes + 8 planes, all at 2×: 0.375 + 0.375 + 0.5 = 1.25. Fits.
 
-**24-bit direct colour**: three 8 bpp layers at 2× = 3 × 0.5 = 1.5, just over. At 4× across, as in Example 3-7: 0.75, fits. **21-bit 7/7/7 at 2×**: 21 ÷ 8 ÷ 2 = 1.31, fits. **16-bit 5/6/5 at 2×**: 16 ÷ 8 ÷ 2 = 1.0, fits.
+**24-bit direct colour**: three 8 bpp layers at 2× = 3 × 0.5 = 1.5, just over. At 4× across, as in Example 3-8: 0.75, fits. **21-bit 7/7/7 at 2×**: 21 ÷ 8 ÷ 2 = 1.31, fits. **16-bit 5/6/5 at 2×**: 16 ÷ 8 ÷ 2 = 1.0, fits.
 
 | Screen | Bytes per pixel | Fits? |
 |--------|-----------------|-------|
@@ -1478,12 +1539,12 @@ The timing follows the fetch rules in "How the display fetches":
 - Any further group must be written within 16 source pixels of the previous one being taken. That is short for the CPU, so in practice the CPU feeds windows of one or two groups: 16 or 32 source pixels, which scaling can stretch to 128 or 256 screen pixels.
 - If a group is missing when it is needed, the layer is transparent for it and OVERRUN is set, as usual.
 
-### Example 3-8: A layer fed by the CPU
+### Example 3-9: A layer fed by the CPU
 
 The CPU waits for each horizontal blank and writes two groups into layer 0, a 1-plane layer 32 source pixels wide, shown 8× across. The pattern turns one pixel each line, drawing stripes. This uses the whole CPU, with interrupts off.
 
 ```asm
-; Example 3-8: feeding a layer from the CPU. Bitplane DMA is off; in each
+; Example 3-9: feeding a layer from the CPU. Bitplane DMA is off; in each
 ; horizontal blank the CPU writes layer 0's BPL0DAT twice: the first group
 ; goes straight into the shifters, the second waits in BPL0DAT. The layer
 ; is 32 source pixels wide (two groups), shown 8x across.
@@ -1581,12 +1642,12 @@ wait_line:  move.l  d1,-(sp)
             rts
 ```
 
-### Example 3-9: Colour bars
+### Example 3-10: Colour bars
 
 The background colour is read at the start of each line, so a write during line L − 1 changes line L. This loop changes it every 8 lines from a table, which makes colour bars behind (or instead of) the layers, as Amiga programs do with the copper. It runs with interrupts off, one frame per pass.
 
 ```asm
-; Example 3-9: colour bars. Changes BGCOLOR every 8 lines from a table of
+; Example 3-10: colour bars. Changes BGCOLOR every 8 lines from a table of
 ; 72 colours (576 lines). Uses wait_line, above.
 bars:       lea     CUSTOM,a4
 .frame:     lea     bar_colours+4(pc),a1
@@ -1697,7 +1758,7 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| CTRL | Ln + `$00` | RW | EN (0), PLANAR (1), BPP (3–2), TRANSP (4), HSCALE (7–6), VSCALE (9–8), PALOFS (15–12), PLANES (18–16) |
+| CTRL | Ln + `$00` | RW | EN (0), PLANAR (1), BPP (3–2), TRANSP (4), HSCALE (7–6), VSCALE (9–8), PALOFS (15–12), PLANES (18–16), WRAP (23–20) |
 | WINX | Ln + `$04` | RW | XSTART (26–16), XEND (10–0) |
 | WINY | Ln + `$08` | RW | YSTART (26–16), YEND (10–0) |
 | SCROLLX | Ln + `$0C` | RW | Fine scroll, 0–15 source pixels (3–0) |

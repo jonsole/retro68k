@@ -26,7 +26,7 @@ def main():
             mem[a // 2] = (b[0] << 8) | b[1]
 
     if not direct:
-        fill(0x100000, 200 * 224 + 64)         # L0: 4 bpp, 224 rows of 200 bytes
+        fill(0x100000, 0x10000)                # L0: 4 bpp, rows of 200 bytes, wrapping in this 64 KB block
         fill(0x140000, 5 * 48 * 300 + 64)      # L1: 5 planes of 300 rows of 48 bytes
         fill(0x1A0000, 96 * 33 + 64, 0.3)      # L2: 8 bpp, 33 rows of 96 bytes, 30% zeros
     else:
