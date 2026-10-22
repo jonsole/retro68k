@@ -79,7 +79,7 @@ module bpldma (
     wire        sel_dat = sel && off[6:5] == 2'b10;
     wire [4:0]  ri      = {rn, off[4:2]};                  // layer x 8 + plane
 
-    reg  [22:0] pt  [0:23];
+    wire [22:0] pt  [0:23];            // BPLxPT: one register each, below
     reg  [15:0] dr  [0:23];
     reg  [15:0] mod [0:2];
     reg  [7:0]  pm  [0:2];             // BPLDMA: DMA enable per plane (chunky: bit 0 for the layer)
@@ -181,8 +181,9 @@ module bpldma (
             want[n] = (rem[n] != 0) || (left[n] != 0 && !busy[n] && !full[n] && emask[n] != 8'd0);
         found = 1'b0;
         pick  = 2'd0;
+        c     = last;
         for (o = 1; o <= 3; o = o + 1) begin
-            c = (last + o) % 3;                       // round-robin order after the last
+            c = (c == 2'd2) ? 2'd0 : c + 1'b1;        // round-robin order after the last
             if (want[c] && (!found || dl[c] < dl[pick])) begin
                 found = 1'b1;
                 pick  = c;
@@ -205,6 +206,33 @@ module bpldma (
         wire [1:0] k = !pv_chunky[g] ? 2'd0 : pv_planes[g][2] ? 2'd3 : pv_planes[g][1] ? 2'd2 : pv_planes[g][0] ? 2'd1 : 2'd0;
         assign step[g] = (pv_adv[g] ? {10'd0, pv_len[g], 1'b0} + {{7{mod[g][15]}}, mod[g]} : 23'd0)
                          - ({10'd0, issued[g], 1'b0} << k);
+    end endgenerate
+
+    // The plane pointers. Each changes in one of three ways: at line_go, on
+    // to the next line; when the DMA asks for a word from it, by 2 (one
+    // shared adder); or when the CPU or copper writes it (that wins).
+    wire        fetch_go = !rst && !line_go && (!req || ack) && |want;
+    wire [22:0] pt_cur   = pt[pi];
+    wire [22:0] pt_inc   = wadd(pt_cur, 23'd2, wmask[pick]);
+    generate for (g = 0; g < 24; g = g + 1) begin : ptrs
+        reg  [22:0] p;
+        assign pt[g] = p;
+        wire le = pv_act[g / 8] && (pv_chunky[g / 8] ? (g % 8 == 0 && pv_mask[g / 8] != 8'd0)
+                                                      : pv_mask[g / 8][g % 8]);
+        always @(posedge clk) begin
+            if (rst) p <= 23'd0;
+            else begin
+                if (line_go) begin
+                    if (le) p <= wadd(p, step[g / 8], wmask[g / 8]);
+                end else if (fetch_go && pi == g) p <= pt_inc;
+                if (rb_wr && sel_pt && ri == g) begin
+                    if (rb_be[2]) p[22:16] <= rb_wdata[22:16];
+                    if (rb_be[1]) p[15:8]  <= rb_wdata[15:8];
+                    if (rb_be[0]) p[7:1]   <= rb_wdata[7:1];
+                    p[0] <= 1'b0;
+                end
+            end
+        end
     end endgenerate
 
     integer i;
@@ -237,10 +265,7 @@ module bpldma (
                 pm[n]   <= 8'hFF;              // every plane's DMA on
                 pv_planes[n] <= 3'd0;  pv_len[n] <= 12'd0;  pv_mask[n] <= 8'd0;
             end
-            for (i = 0; i < 24; i = i + 1) begin
-                pt[i] <= 23'd0;
-                dr[i] <= 16'd0;
-            end
+            for (i = 0; i < 24; i = i + 1) dr[i] <= 16'd0;
         end else begin
             // Data back from the SRAM
             if (rvalid) begin
@@ -261,10 +286,7 @@ module bpldma (
             end
 
             if (line_go) begin
-                // Finish off the line just shown, then start the next one
-                for (i = 0; i < 24; i = i + 1)
-                    if (pv_act[i / 8] && (pv_chunky[i / 8] ? (i % 8 == 0 && pv_mask[i / 8] != 8'd0) : pv_mask[i / 8][i % 8]))
-                        pt[i] <= wadd(pt[i], step[i / 8], wmask[i / 8]);
+                // Finish off the line just shown (the pointers: above), then start the next one
                 for (n = 0; n < 3; n = n + 1) begin
                     left[n]   <= (has_dma[n] && act[n]) ? ngroups[12*n +: 12] : 12'd0;
                     issued[n] <= 12'd0;
@@ -287,8 +309,7 @@ module bpldma (
                 req        <= 1'b1;
                 req_layer  <= pick;
                 last       <= pick;
-                addr       <= pt[pi][21:1];
-                pt[pi]     <= wadd(pt[pi], 23'd2, wmask[pick]);
+                addr       <= pt_cur[21:1];
                 rem[pick]  <= rem_n;
                 if (gstart) begin
                     left[pick]   <= left[pick] - 1'b1;
@@ -306,12 +327,6 @@ module bpldma (
                 if (rb_be[1]) mod[rn][15:8] <= rb_wdata[15:8];
                 if (rb_be[0]) mod[rn][7:1]  <= rb_wdata[7:1];
                 mod[rn][0] <= 1'b0;
-            end
-            if (rb_wr && sel_pt) begin
-                if (rb_be[2]) pt[ri][22:16] <= rb_wdata[22:16];
-                if (rb_be[1]) pt[ri][15:8]  <= rb_wdata[15:8];
-                if (rb_be[0]) pt[ri][7:1]   <= rb_wdata[7:1];
-                pt[ri][0] <= 1'b0;
             end
             if (rb_wr && sel_dat) begin
                 if (rb_be[1]) dr[ri][15:8] <= rb_wdata[15:8];
