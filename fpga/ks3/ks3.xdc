@@ -125,6 +125,14 @@ set_property PULLUP true [get_ports {accel_io[*]}]      ;# RXF# and TXE# read 'n
 
 # ---- clocks
 create_clock -name clk50 -period 20.000 [get_ports clock_50_i]
+
+# The pixel clocks (MMCM 2, 576p) and the system clocks (MMCM 1) come from
+# the same oscillator but have no designed phase relation: every signal
+# between them goes through a synchroniser or a handshake, or is a setting
+# that only changes between lines (spec 4, section 3.1)
+set_clock_groups -asynchronous \
+    -group [get_clocks -of_objects [get_pins clocks/mmcm_sys/CLKOUT*]] \
+    -group [get_clocks -of_objects [get_pins clocks/mmcm_pix/CLKOUT*]]
 set clk100 [get_clocks -of_objects [get_pins clocks/mmcm/CLKOUT0]]
 set clk40  [get_clocks -of_objects [get_pins clocks/mmcm/CLKOUT1]]
 

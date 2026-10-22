@@ -32,7 +32,7 @@ There are a few differences worth knowing from the start:
 | Chip RAM | 4 MB of 10 ns SRAM, shared by the CPU and DMA (some boards: 2 MB) |
 | Boot ROM | 32 KB at `$F80000`, in FPGA block RAM, loaded with the FPGA |
 | Memory bandwidth | 100 MB/s in total; the CPU can use up to 10 MB/s with no wait states |
-| Video | HDMI and VGA at once; 640 × 480 or 800 × 600 at 60 Hz (fixed when the FPGA is built); three bitmap layers; a 256-colour palette of 24-bit colours |
+| Video | HDMI and VGA at once; one mode, 576p: 720 × 576 at 50 Hz, the digital form of PAL; three bitmap layers; a 256-colour palette of 24-bit colours |
 | Serial | USB link to a PC through an FT232H module: several MB/s, hardware flow control |
 | Interrupts | 24 sources, each with its own vector and a programmable level; NMI from a button or from the PC |
 | Timers | A 64-bit time counter, four 32-bit timers and a watchdog |
@@ -387,7 +387,7 @@ From then on, address 0 is Chip RAM for reading and writing. The overlay comes b
 
 The boot ROM in the current build checks the machine and reports over the USB serial link and on the screen:
 
-1. It turns on the USB serial link and a 640 × 480 console drawn into a bitmap layer.
+1. It turns on the USB serial link and an 80 × 30 text console, drawn into a 1-plane 640 × 480 bitmap layer centred in the 720 × 576 screen at (40, 48), with the background colour as a border.
 2. It prints a banner and checks SYSID.
 3. It builds the vector table in Chip RAM and turns the overlay off.
 4. It tests Chip RAM, from `$040000` to the end of RAM.

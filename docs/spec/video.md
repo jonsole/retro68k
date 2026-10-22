@@ -5,13 +5,13 @@ Status: **v1 scope**
 ## 1. Goals
 
 - DVI output over the HDMI connector and, at the same time, 24-bit VGA through the KS3's ADV7125 video DAC.
-- **One fixed video mode, chosen when the FPGA is built:** 640×480 at 60 Hz (the default) or 800×600 at 60 Hz. There are no timing registers.
+- **One video mode: 576p**, 720×576 at 50 Hz, exactly as CEA-861 defines it (27 MHz), so every HDMI TV and monitor takes it. It is the digital form of PAL: a normal Amiga-style screen (for example 640×512, PAL 320×256 doubled) sits in a centred window, and overscan uses the whole 720×576. There are no timing registers.
 - **Three bitmap layers**, each with its own display window, scroll, scale and palette block. Each layer is **planar** (1 to 8 Amiga-style bitplanes) or **chunky** (1, 2, 4 or 8 bits per pixel).
 - **Amiga-style bitplane DMA:** each plane has a pointer (BPLxPT) that moves through memory as the picture is shown, a modulo (BPLMOD) added at the end of each line, and a data register (BPLxDAT). The copper (or the CPU) resets the pointers every frame.
 - **No hidden buffers.** Each plane has just its data register and its shift register, as on the Amiga. The DMA loads the data registers just in time; the copper or CPU can load them too.
 - **Fetch is automatic:** the hardware works out when and what to fetch from each layer's window, so there are no fetch start and stop registers (the Amiga's DDFSTRT/DDFSTOP).
 - **Direct colour:** the three layers can be joined into one direct-colour picture, one layer per channel (red, green, blue), up to 24 bits per pixel.
-- **Everything runs from one master clock.** Every scan line is a whole number of memory slots, so DMA happens at the same beam positions on every line. The display uses only its own memory cycles (spec 5), so it never slows the CPU.
+- **Every scan line is exactly 320 memory slots** (32 µs), because the pixel clock and the memory clock come from the same oscillator, so the display's DMA repeats the same way on every line. The display uses only its own memory cycles (spec 5), so it never slows the CPU.
 
 ## 2. Comparison with the Amiga (OCS/ECS)
 
@@ -26,39 +26,47 @@ Status: **v1 scope**
 | Fetch window | DDFSTRT/DDFSTOP, set by hand | Worked out from each layer's window and scroll |
 | Scrolling | Fine scroll 0–15 px via BPLCON1, coarse by pointers | The same: SCROLLX (0–15 px) and pointers |
 | Pixel size | Lores/hires, line doubling by copper tricks | 1×, 2×, 4× or 8× per layer, horizontal and vertical separately |
-| Video timing | Fixed (PAL or NTSC) | Fixed when the FPGA is built |
+| Video timing | Fixed (PAL or NTSC) | Fixed: 576p, the digital form of PAL |
 
 ## 3. Clocks, timing and the beam
 
 ### 3.1 Clocks
 
-The KS3 build has one MMCM (the Artix-7's clock generator). It runs at 1000 MHz internally from the board's 50 MHz oscillator, and every clock is a whole-number division of that:
+The KS3 build makes its clocks from the board's 50 MHz oscillator with two MMCMs (the Artix-7's clock generators):
 
-| Clock | Frequency | Use |
-|-------|-----------|-----|
-| System / SRAM controller | 100 MHz | Memory slots of 100 ns (spec 5) |
-| fx68k | 40 MHz | 20 MHz 68000 |
-| Pixel clock | 25 MHz (640×480) or 40 MHz (800×600) | Video |
-| HDMI serialiser | 5 × pixel clock | Double-rate serialisers (OSERDESE2) |
+| Clock | Frequency | From | Use |
+|-------|-----------|------|-----|
+| System / SRAM controller | 100 MHz | MMCM 1 (VCO 1000 MHz) | Memory slots of 100 ns (spec 5) |
+| fx68k | 40 MHz | MMCM 1 | 20 MHz 68000 |
+| Pixel clock | 27 MHz | MMCM 2 (50 ÷ 5 × 108 = VCO 1080 MHz, ÷ 40) | Video |
+| HDMI serialiser | 135 MHz | MMCM 2 (÷ 8) | Double-rate serialisers (OSERDESE2): 10 bits per pixel |
 
-The pixel clock is the 200 MHz "master" divided by N: N = 8 for 640×480 and N = 5 for 800×600. In simulation it is modelled as the 200 MHz master passed through a clock buffer with an enable, which lets every Nth edge through.
+Both MMCMs run from the same oscillator, so the frequencies are exact: one 576p line (864 pixels at 27 MHz) is exactly 32 µs, which is 3200 system clocks or **320 memory slots**. The phase between the pixel clock and the system clock is fixed once the MMCMs have locked, but it is not known, so the design treats them as **asynchronous clock domains**: events cross as toggles through two flip-flops, the data registers cross under the full/taken handshake (section 5.1), the beam position is sampled until two samples agree, and the layer settings are copied once per line.
+
+In simulation the pixel clock is a free-running 27 MHz clock with an odd phase against the system clocks.
 
 **VGA:** the ADV7125 takes 8 bits per colour over 4 pins at double rate. It shows the same picture and timing as HDMI.
 
-### 3.2 The two modes
+### 3.2 The mode: 576p
 
-| Mode | N | Pixel clock | Total (H × V) | Sync (H, V) | Slots per line | Refresh |
-|------|---|-------------|---------------|-------------|----------------|---------|
-| 640×480 (default) | 8 | 25.0 MHz | 800 × 525 | 656–752, 490–492, both negative | 320 | 59.5 Hz |
-| 800×600 | 5 | 40.0 MHz | 1056 × 628 | 840–968, 601–605, both positive | 264 | 60.3 Hz |
+| Item | Value |
+|------|-------|
+| Visible | 720 × 576, 50 Hz progressive (CEA-861 formats 17 and 18: 4:3 or 16:9) |
+| Pixel clock | 27.000 MHz |
+| Horizontal | 720 visible, front porch 12, sync 64, back porch 68: 864 in all (32 µs, 31.25 kHz) |
+| Vertical | 576 visible, front porch 5, sync 5, back porch 39: 625 lines (20 ms, 50 Hz) |
+| Sync | Both active low |
+| Pixels | Not square: on a 4:3 screen each pixel is 16/15 as wide as it is tall, about the Amiga PAL shape |
 
-640×480 uses 25.0 MHz instead of VGA's 25.175 MHz; monitors accept this. 800×600 is exactly the VESA mode.
+`hpixel` counts from 0 at the first visible pixel, `vline` from 0 at the first visible line. Blanking (front porch, sync, back porch) follows the visible part. Lines 576 to 624 are the vertical retrace. VIDSIZE reads 720 × 576.
 
-Each line is a whole number of 100 ns slots, so DMA happens at the same beam positions on every line, as on the Amiga.
+**Normal screens and overscan.** HDMI sends exactly the visible pixels: there is no border beyond them, and a computer monitor shows all of them. A TV may crop a few percent off each edge (open point V2). So the whole 720 × 576 is the overscan area. A normal screen is a centred window, with the background colour round it as the border:
 
-`hpixel` counts from 0 at the first visible pixel, `vline` from 0 at the first visible line. Blanking (front porch, sync, back porch) follows the visible part. Lines VVISIBLE to VTOTAL − 1 are the vertical retrace.
-
-The build picks the mode with `PIX_N` (8 or 5) in `fpga/ks3/build.sh`. Software reads the screen size from VIDSIZE.
+| Screen | Source | Window |
+|--------|--------|--------|
+| PAL Amiga, normal | 320 × 256, 2× | 640 × 512 at (40, 32) |
+| PAL Amiga, overscan | 352–360 × 283, 2× | up to the full 720 × 576 |
+| 640 × 480 | 640 × 480, 1× | at (40, 48) |
 
 ### 3.3 Beam position
 
@@ -129,7 +137,7 @@ Each layer has a rectangle `XSTART ≤ x < XEND`, `YSTART ≤ y < YEND` (WINX, W
 
 ### 4.5 Scaling
 
-CTRL.HSCALE and CTRL.VSCALE each pick 1×, 2×, 4× or 8× (values 0–3). Each source pixel is repeated that many times across and each source line that many times down: 2× shows a 320×240 picture full-screen at 640×480. There is no fractional scaling or shrinking.
+CTRL.HSCALE and CTRL.VSCALE each pick 1×, 2×, 4× or 8× (values 0–3). Each source pixel is repeated that many times across and each source line that many times down: 2× shows a 360×288 picture on the full 720×576 screen. There is no fractional scaling or shrinking.
 
 ### 4.6 Transparency and palette
 
@@ -183,24 +191,20 @@ With VIDCON.DIRECT set, the palette and priority are not used. Every visible pix
 
 ### 5.2 Budget
 
-Data is fetched while it is shown, so the budget is a **rate**: the bytes that can be fetched for each pixel the beam passes.
+Data is fetched while it is shown, so the budget is a **rate**: the bytes that can be fetched for each pixel the beam passes. The display has 4 bytes every 100 ns, and a pixel lasts 37 ns: **1.48 bytes per pixel**.
 
-| Mode | Budget (bytes per pixel) |
-|------|--------------------------|
-| 640×480 | 1.6 |
-| 800×600 | 1.0 |
+A layer needs `bits per pixel ÷ 8 ÷ HS` bytes per screen pixel (for planar, bits per pixel = planes; count only the planes with DMA on, section 5.5). At every point across the screen, the layers whose windows cover it must add up to no more than the budget.
 
-A layer needs `bits per pixel ÷ 8 ÷ HS` bytes per screen pixel (for planar, bits per pixel = planes). At every point across the screen, the layers whose windows cover it must add up to no more than the budget.
-
-| Screen setup | Bytes per pixel | 640×480 | 800×600 |
-|--------------|-----------------|---------|---------|
-| One 8bpp layer at 1× | 1.0 | Fits | Fits |
-| 5 planes at 1× (Amiga 32 colours) | 0.625 | Fits | Fits |
-| 5 planes + 3 planes at 2× (dual playfield) | 0.5 | Fits | Fits |
-| 8bpp layer + 4bpp layer at 1× | 1.5 | Fits | **No** |
-| Direct colour 16-bit (5/6/5) at 2× across | 1.0 | Fits | Fits |
-| Direct colour 24-bit at 2× across (320 wide) | 1.5 | Fits | **No** |
-| Two 8bpp layers at 1× | 2.0 | **No** | **No** |
+| Screen setup | Bytes per pixel | Fits? |
+|--------------|-----------------|-------|
+| One 8bpp layer at 1× | 1.0 | Yes |
+| 5 planes at 2× (PAL Amiga 32 colours) | 0.31 | Yes |
+| 6 planes + 6 planes at 2× (two 64-colour playfields) + 8 planes at 2× | 1.25 | Yes |
+| 8bpp layer + 4bpp layer at 1× | 1.5 | **No** (just over) |
+| Direct colour 16-bit (5/6/5) at 2× across | 1.0 | Yes |
+| Direct colour 24-bit at 1× | 3.0 | **No** |
+| Direct colour 24-bit at 2× across, full width | 1.5 | **No** (just over); 21-bit (7/7/7) at 1.31 fits |
+| Two 8bpp layers at 1× | 2.0 | **No** |
 
 Windows help: a status bar below a game area, not on top of it, adds nothing on the lines where the game area is shown.
 
@@ -284,8 +288,8 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 
 | # | Item |
 |---|------|
-| V1 | Check the pixel pipeline meets timing at 40 MHz in Vivado |
-| V2 | Some TVs may not accept plain DVI; test, and add HDMI info packets if needed |
+| V1 | Check in Vivado that the clock-domain crossings are all covered (asynchronous clock groups) and the pixel pipeline meets timing |
+| V2 | Plain DVI has no info packets. Add the HDMI AVI InfoFrame (576p, 4:3, "underscanned", IT content) so TVs neither crop the picture nor treat it as video; needs the HDMI data-island encoder (with HDMI audio, later) |
 
 ## 9. Tests
 
@@ -299,7 +303,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 ## 10. Later versions
 
 - More layers, fractional scaling and shrinking
-- Programmable timing, more modes (720p, 1024×768, 50 Hz)
+- Programmable timing and more modes (640×480, 720p)
 - Wide fetch (memory cycle 3 for the display)
 - Sprites (spec 9, on hold)
 - EHB and HAM modes, a 1024-entry palette, tile-map layers

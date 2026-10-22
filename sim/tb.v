@@ -34,11 +34,17 @@ module tb;
     wire [15:0] dma_rdata;
     wire [3:0]  sc;
     wire        halted;
-    wire [3:0]  pclkdiv = 4'd8;     // 640x480 (spec 4, 3.2)
     wire        clk_pix;
     wire [23:0] rgb;
     wire        hs, vs, de;
-    pixclk pc (.clk200(clk200), .n(pclkdiv), .clk_pix(clk_pix));
+    // The 576p pixel clock: 27 MHz (37.037 ns), free-running, with no fixed
+    // phase to the 100 MHz clock, as from the KS3's second MMCM
+    reg clk_pix_r = 1'b0;
+    initial begin
+        #3.1;                           // an odd phase against the system clocks
+        forever begin #18.518 clk_pix_r = 1'b1; #18.519 clk_pix_r = 1'b0; end
+    end
+    assign clk_pix = clk_pix_r;
 
     retro68k #(.ROM_INIT("boot.hex")) dut (
         .clk100(clk100), .clk40(clk40), .por100(por), .por40(por),
@@ -228,8 +234,8 @@ module tb;
     endtask
 
     // ---------------------------------------------------------------- sync timing
-    // 640x480 preset: 800 x 525 at 25 MHz, both syncs active low;
-    // hsync 96 pixels, vsync 2 lines.
+    // 576p50: 864 x 625 at 27 MHz, both syncs active low;
+    // hsync 64 pixels (2370 ns), vsync 5 lines.
     real t_hs = 0, t_vs = 0;
     integer n_hs = 0, n_vs = 0, sync_errors = 0;
     always @(negedge dut.vid.en_p) begin n_hs = 0; n_vs = 0; end
@@ -240,19 +246,19 @@ module tb;
         end
         t_hs = $realtime; n_hs = n_hs + 1;
     end
-    always @(posedge hs) if (n_hs > 0 && ($realtime - t_hs < 3839.0 || $realtime - t_hs > 3841.0)) begin
-        if (sync_errors < 5) $display("%t VIDEO ERROR: hsync %0.1f ns, expected 3840", $realtime, $realtime - t_hs);
+    always @(posedge hs) if (n_hs > 0 && ($realtime - t_hs < 2369.0 || $realtime - t_hs > 2372.0)) begin
+        if (sync_errors < 5) $display("%t VIDEO ERROR: hsync %0.1f ns, expected 2370", $realtime, $realtime - t_hs);
         sync_errors = sync_errors + 1;
     end
     always @(negedge vs) begin
-        if (n_vs > 0 && ($realtime - t_vs < 16799000.0 || $realtime - t_vs > 16801000.0)) begin
-            $display("%t VIDEO ERROR: frame period %0.0f ns, expected 16800000", $realtime, $realtime - t_vs);
+        if (n_vs > 0 && ($realtime - t_vs < 19999000.0 || $realtime - t_vs > 20001000.0)) begin
+            $display("%t VIDEO ERROR: frame period %0.0f ns, expected 20000000", $realtime, $realtime - t_vs);
             sync_errors = sync_errors + 1;
         end
         t_vs = $realtime; n_vs = n_vs + 1;
     end
-    always @(posedge vs) if (n_vs > 0 && ($realtime - t_vs < 63999.0 || $realtime - t_vs > 64001.0)) begin
-        $display("%t VIDEO ERROR: vsync %0.0f ns, expected 64000", $realtime, $realtime - t_vs);
+    always @(posedge vs) if (n_vs > 0 && ($realtime - t_vs < 159999.0 || $realtime - t_vs > 160001.0)) begin
+        $display("%t VIDEO ERROR: vsync %0.0f ns, expected 160000", $realtime, $realtime - t_vs);
         sync_errors = sync_errors + 1;
     end
 

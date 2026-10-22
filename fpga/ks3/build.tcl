@@ -1,10 +1,9 @@
 # retro68k: Vivado build for the ZX Spectrum Next KS3 (non-project batch mode).
 # Run through build.sh, which prepares the boot ROM and the build folder:
-#   vivado -mode batch -source build.tcl -tclargs <repo root> <build dir> <PIX_N>
+#   vivado -mode batch -source build.tcl -tclargs <repo root> <build dir>
 
 set root   [file normalize [lindex $argv 0]]
 set out    [file normalize [lindex $argv 1]]
-set pix_n  [lindex $argv 2]
 set part   xc7a35tcsg324-2
 set rtl    $root/fpga/rtl
 
@@ -26,7 +25,7 @@ read_verilog [list \
 read_xdc $root/fpga/ks3/ks3.xdc
 
 # boot.hex, microrom.mem and nanorom.mem are in this folder
-synth_design -top top_ks3 -include_dirs $rtl -generic PIX_N=$pix_n
+synth_design -top top_ks3 -include_dirs $rtl
 write_checkpoint -force post_synth.dcp
 report_utilization -file utilization_synth.txt
 

@@ -6,9 +6,7 @@
 // joysticks, I2C, audio. The FT232H USB module sits on the accelerator
 // port (provisional pins, spec 14 open point U6):
 //   accel_io[7:0] D7-D0, [8] RXF#, [9] TXE#, [10] RD#, [11] WR#, [12] SIWU#
-module top_ks3 #(
-    parameter PIX_N = 8                 // pixel clock = 200 MHz / PIX_N (8: 640x480)
-) (
+module top_ks3 (
     input  wire        clock_50_i,
 
     // SRAM
@@ -35,7 +33,7 @@ module top_ks3 #(
 );
     // ---------------------------------------------------------------- clocks and reset
     wire clk100, clk40, clk_pix, clk_pix5, clk_pixd, locked, por;
-    ks3_clocks #(.PIX_N(PIX_N)) clocks (
+    ks3_clocks clocks (
         .clk50(clock_50_i), .clk100(clk100), .clk40(clk40),
         .clk_pix(clk_pix), .clk_pix5(clk_pix5), .clk_pixd(clk_pixd), .locked(locked)
     );
@@ -62,7 +60,7 @@ module top_ks3 #(
     wire [23:0] rgb;
     wire        hs, vs, de;
 
-    retro68k #(.ROM_INIT("boot.hex"), .PIX_N(PIX_N)) sys (
+    retro68k #(.ROM_INIT("boot.hex")) sys (
         .clk100(clk100), .clk40(clk40), .clk_pix(clk_pix),
         .por100(por), .por40(por),
         .btn_reset_n(!btn_q[0]), .buttons(btn_q[2:1]),

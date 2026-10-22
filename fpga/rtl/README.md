@@ -16,7 +16,7 @@ Written (phase 2, version 1):
 | `serial.v` | USB serial: FT232H async FIFO interface, 2 KB FIFOs, control commands | 14 |
 | `intc.v` | Interrupt controller: 24 vectored sources, programmable levels, NMI | 13 |
 | `timers.v` | 64-bit time counter, 4 chainable timers (clock, lines, frames), watchdog | 12 |
-| `video.v` | Video: one fixed mode (`PIX_N`), palette, background, 3 bitmap layers, priority, direct colour, beam position, VBLANK, LINE and OVERRUN, DMACON | 4, 5 |
+| `video.v` | Video: one mode, 576p (720 × 576 at 50 Hz, 27 MHz pixel clock, asynchronous to the system clock), palette, background, 3 bitmap layers, priority, direct colour, beam position, VBLANK, LINE and OVERRUN, DMACON | 4, 5 |
 | `bpldma.v` | Bitplane pointers, modulo, data registers and fetch | 4, 5 |
 | `layer_pix.v` | One layer's shifters: planar or chunky, scroll, scaling, transparency | 4 |
 | `fifo8.v` | Byte FIFO in block RAM | |
@@ -24,9 +24,8 @@ Written (phase 2, version 1):
 | `top_ks3.v` | The KS3 top level: pins, SRAM pads, FT232H, buttons, video out | |
 | `por_align.v` | Power-on reset that ends on the 50 ns grid | 1 |
 | `tmds_encoder.v` | DVI TMDS encoder | 4 |
-| `platform/artix7/` | `ks3_clocks.v` (MMCM), `oddr.v`, `hdmi_out.v` (OSERDESE2), `vga_out.v` (ADV7125, as on the Next) | 4 |
+| `platform/artix7/` | `ks3_clocks.v` (two MMCMs: system clocks, and the 27 and 135 MHz pixel clocks), `oddr.v`, `hdmi_out.v` (OSERDESE2), `vga_out.v` (ADV7125, as on the Next) | 4 |
 | `platform/sim/oddr.v` | Behavioural DDR output register | |
-| `platform/sim/pixclk.v` | Pixel clock: the master gated to every Nth edge, as a BUFGCE | 4 |
 
 Still to come: copper, audio, DMA engine, SD card, PS/2 keyboard. Sprites were removed from version 1 (spec 9, on hold; the last version is in git history at commit 7df97fd).
 

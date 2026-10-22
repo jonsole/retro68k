@@ -11,7 +11,9 @@
 ;   8. "PASS" or "FAIL", then echo whatever arrives over USB
 ;
 ; Everything printed also appears on the screen: an 80 x 30 console drawn
-; with the ROM font into a 1-plane 640 x 480 bitmap (layer 0).
+; with the ROM font into a 1-plane 640 x 480 bitmap (layer 0), shown as a
+; centred window in the 720 x 576 (576p) screen, with the background
+; colour as a border.
 ; From step 6 on, the vertical blank interrupt stays on: it resets the
 ; layers' plane pointers for each frame (spec 4, 4.4; the copper's job later).
 ;
@@ -39,6 +41,8 @@ v_tmr       equ VARS+24             ; long: timer 0 interrupts seen
 
 CON         equ $030000             ; the console: 640 x 480, 1 bit per pixel
 CON_LINE    equ 640/8               ; bytes per line
+CON_X       equ (720-640)/2         ; where the console sits on the screen
+CON_Y       equ (576-480)/2
 CON_COLS    equ 80
 CON_ROWS    equ 30                  ; of 16 lines
 BITMAP      equ $020000             ; the test picture for layer 1
@@ -395,8 +399,8 @@ screen_init:
             lea     L0(a4),a0
             move.l  #CON,L_BPL0PT(a0)
             move.l  #0,L_BPLMOD(a0)
-            move.l  #(0<<16)|640,L_WINX(a0)
-            move.l  #(0<<16)|480,L_WINY(a0)
+            move.l  #(CON_X<<16)|(CON_X+640),L_WINX(a0)
+            move.l  #(CON_Y<<16)|(CON_Y+480),L_WINY(a0)
             move.l  #L_CTRL_EN_M,L_CTRL(a0)     ; chunky, 1 bit per pixel, colours 0-1
             move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)

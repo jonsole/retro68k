@@ -1,22 +1,22 @@
-// Video (spec 4): one fixed mode (640x480 or 800x600 at 60 Hz, set by
-// PIX_N when the FPGA is built), a 256-colour palette, background colour,
+// Video (spec 4): 576p (720x576 at 50 Hz, CEA-861, 27 MHz), a 256-colour
+// palette, background colour,
 // three bitmap layers (chunky 1/2/4/8 bpp or planar 1-8 planes, Amiga-style:
 // plane pointers, modulo and data registers, bpldma.v), priority, beam
 // position, VBLANK, LINE and OVERRUN.
 // Also DMACON (spec 5, section 8), which sits in this register block.
 //
-// Two clock domains:
+// Two clock domains, asynchronous to each other:
 //   clk     100 MHz: registers, bitplane DMA, palette writes, interrupts
-//   clk_pix 200 MHz / N: the beam and the pixel pipeline
-// Both come from the same 200 MHz master (clk_pix is the master gated to
-// every Nth edge), so signals cross between them as ordinary related-clock
-// paths. Layer settings are copied into the pixel domain at the start of
-// each horizontal blank.
+//   clk_pix  27 MHz: the beam and the pixel pipeline
+// Crossings: events are toggles through two flip-flops; the data registers
+// cross under the full/taken handshake (bpldma.v, layer_pix.v); the beam
+// position is sampled until two samples agree; layer settings, PRIO,
+// BGCOLOR and VIDCON are settings, copied into the pixel domain once per
+// line (a write that lands exactly on that copy may take effect one line
+// later, or show for one line in part); the palette is a two-clock RAM.
 `include "regmap.vh"
 
-module video #(
-    parameter PIX_N = 8                // 8: 640x480, 5: 800x600
-) (
+module video (
     input  wire        clk,            // 100 MHz
     input  wire        rst,
 
@@ -48,16 +48,16 @@ module video #(
     output reg         de
 );
     // ================================================================ the mode (section 3.2)
-    localparam M800 = (PIX_N == 5);
-    localparam [10:0] HVIS = M800 ? 11'd800  : 11'd640;
-    localparam [10:0] HSS  = M800 ? 11'd840  : 11'd656;
-    localparam [10:0] HSE  = M800 ? 11'd968  : 11'd752;
-    localparam [10:0] HTOT = M800 ? 11'd1056 : 11'd800;
-    localparam [10:0] VVIS = M800 ? 11'd600  : 11'd480;
-    localparam [10:0] VSS  = M800 ? 11'd601  : 11'd490;
-    localparam [10:0] VSE  = M800 ? 11'd605  : 11'd492;
-    localparam [10:0] VTOT = M800 ? 11'd628  : 11'd525;
-    localparam        SPOL = M800 ? 1'b1     : 1'b0;      // 1: active-high sync
+    // 576p50 (CEA-861 format 17/18): 864 x 625 at 27 MHz, both syncs active low
+    localparam [10:0] HVIS = 11'd720;
+    localparam [10:0] HSS  = 11'd732;       // front porch 12
+    localparam [10:0] HSE  = 11'd796;       // sync 64, back porch 68
+    localparam [10:0] HTOT = 11'd864;
+    localparam [10:0] VVIS = 11'd576;
+    localparam [10:0] VSS  = 11'd581;       // front porch 5
+    localparam [10:0] VSE  = 11'd586;       // sync 5, back porch 39
+    localparam [10:0] VTOT = 11'd625;
+    localparam        SPOL = 1'b0;          // 1: active-high sync
 
     // ================================================================ registers (100 MHz)
     wire [15:0] off      = {rb_addr[15:2], 2'b00};
@@ -81,10 +81,19 @@ module video #(
     reg  [3:0]  l_sx [0:2];
 
     // From the pixel domain
-    reg  [10:0] p_hc, p_vc;            // beam position
+    reg  [10:0] p_hc, p_vc;            // beam position (pixel domain)
     reg  [15:0] p_frames;
+    // ... sampled on this side until two samples agree, so a read is never torn
+    reg  [37:0] bs1, bs2, bsync;
+    always @(posedge clk) begin
+        bs1 <= {p_frames, p_vc, p_hc};
+        bs2 <= bs1;
+        if (bs1 == bs2) bsync <= bs2;
+    end
+    wire [10:0] s_hc = bsync[10:0], s_vc = bsync[21:11];
+    wire [15:0] s_frames = bsync[37:22];
     reg         p_vb_t, p_line_t;      // toggles: vertical blank started, line compare hit
-    wire        p_invblank = (p_vc >= VVIS);
+    wire        p_invblank = (s_vc >= VVIS);
 
     function [31:0] merge(input [31:0] old, input [31:0] new, input [3:0] be);
         merge = { be[3] ? new[31:24] : old[31:24], be[2] ? new[23:16] : old[23:16],
@@ -167,8 +176,8 @@ module video #(
             `RM_VIDCON:     reg_q <= {27'd0, vidcon};
             `RM_VIDSTAT:    reg_q <= {23'd0, p_invblank, 1'b0, vidstat};
             `RM_VIDINTEN:   reg_q <= {25'd0, vidinten};
-            `RM_BEAMPOS:    reg_q <= {5'd0, p_vc, 5'd0, p_hc};
-            `RM_FRAMECOUNT: reg_q <= {16'd0, p_frames};
+            `RM_BEAMPOS:    reg_q <= {5'd0, s_vc, 5'd0, s_hc};
+            `RM_FRAMECOUNT: reg_q <= {16'd0, s_frames};
             `RM_LINECMP:    reg_q <= {5'd0, lc_v, 16'd0};
             `RM_BGCOLOR:    reg_q <= {8'd0, bgcolor};
             `RM_PRIO:       reg_q <= {26'd0, prio};
@@ -225,7 +234,11 @@ module video #(
     wire prst = rst_p[1];
 
     reg en_p;
-    always @(posedge clk_pix) en_p <= !prst && vidcon[0];
+    reg [1:0] en_s;
+    always @(posedge clk_pix) begin
+        en_s <= {en_s[0], vidcon[0]};
+        en_p <= !prst && en_s[1];
+    end
 
     // ---- beam
     reg [10:0] hc, vc;
@@ -361,7 +374,9 @@ module video #(
     wire [7:0] bl_idx [0:2], bl_raw [0:2];
     // The layer units may take this line's first group once the DMA has
     // restarted (line_gen caught up) and the handshake has crossed back
-    wire       buf_ready = (line_gen == line_t) && (hc >= HVIS + 4'd8 || hc < HVIS);
+    reg  [1:0] lg_s;
+    always @(posedge clk_pix) lg_s <= {lg_s[0], line_gen};
+    wire       buf_ready = (lg_s[1] == line_t) && (hc >= HVIS + 4'd8 || hc < HVIS);
     genvar g;
     generate for (g = 0; g < 3; g = g + 1) begin : lay
         layer_pix u (

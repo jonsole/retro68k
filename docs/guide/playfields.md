@@ -39,7 +39,7 @@ If you have programmed the Amiga's playfields, you already know most of what fol
 | Fine scroll | BPLCON1, 0–15 pixels | SCROLLX, 0–15 pixels, per layer |
 | Pixel size | Lores and hires; line doubling with copper tricks | 1×, 2×, 4× or 8× per layer, across and down separately |
 | Priority | BPLCON2: playfield 2 in front or behind | PRIO: any order of the three layers |
-| Video mode | PAL or NTSC | 640 × 480 or 800 × 600 at 60 Hz, fixed when the FPGA is built |
+| Video mode | PAL or NTSC | 576p only: 720 × 576 at 50 Hz, the digital form of PAL |
 
 Note that the planes are numbered from 0 here, not from 1. Plane 0 gives bit 0 of the pixel's colour number, as the Amiga's plane 1 does.
 
@@ -65,32 +65,45 @@ The first sections build a working screen as quickly as possible: "The Screen" d
 
 ## The Screen
 
-The display has **one video mode, chosen when the FPGA is built**: 640 × 480 or 800 × 600, both at 60 Hz, on HDMI and VGA at the same time. There are no timing registers. A program that must work on both builds reads the screen size from VIDSIZE.
+The display has **one video mode, 576p**: 720 × 576 at 50 Hz, exactly as the CEA-861 standard defines it, on HDMI and VGA at the same time. Every HDMI TV and monitor takes it. It is the digital form of PAL, so Amiga PAL screens fit it well. There are no timing registers.
 
 | Mode | Pixel clock | Visible | Total (pixels × lines) | Line time | Frame | Refresh |
 |------|-------------|---------|------------------------|-----------|-------|---------|
-| 640 × 480 (usual) | 25 MHz | 640 × 480 | 800 × 525 | 32.0 µs | 16.80 ms | 59.5 Hz |
-| 800 × 600 | 40 MHz | 800 × 600 | 1056 × 628 | 26.4 µs | 16.58 ms | 60.3 Hz |
+| 576p | 27 MHz | 720 × 576 | 864 × 625 | 32.0 µs | 20.0 ms | 50 Hz |
 
-Positions on the screen are given in **screen pixels** across (`hpixel`) and **lines** down (`vline`), both counted from 0 at the top left visible pixel. After the visible part of each line comes the **horizontal blank** (front porch, sync, back porch); after the last visible line comes the **vertical blank**, the lines from VVISIBLE to the end of the frame.
+Positions on the screen are given in **screen pixels** across (`hpixel`) and **lines** down (`vline`), both counted from 0 at the top left visible pixel. After the visible part of each line comes the **horizontal blank** (front porch, sync, back porch); after the last visible line comes the **vertical blank**, the lines from VVISIBLE (576) to the end of the frame.
 
 ```
    hpixel 0                         HVISIBLE           total
  vline 0 +-------------------------------+--------------+
          |                               |              |
          |        visible screen         |  horizontal  |
-         |     640 x 480 or 800 x 600    |    blank     |
+         |           720 x 576           |    blank     |
          |                               |              |
 VVISIBLE +-------------------------------+--------------+
-         |           vertical blank (45 or 28 lines)    |
+         |           vertical blank (49 lines)          |
    total +----------------------------------------------+
 
                   Figure 3-1: The Screen and the Beam
 ```
 
-The horizontal blank is 160 pixels (6.4 µs) at 640 × 480 and 256 pixels (6.4 µs) at 800 × 600. The vertical blank is 45 lines (1.44 ms) and 28 lines (0.74 ms).
+The horizontal blank is 144 pixels (5.33 µs). The vertical blank is 49 lines (1.57 ms).
 
-To read the screen size:
+The pixels are not quite square: on a 4:3 screen each one is 16/15 as wide as it is tall, about the shape of an Amiga PAL pixel.
+
+### Normal screens and overscan
+
+HDMI sends exactly the visible pixels, with no border beyond them, so the whole 720 × 576 is the **overscan** area. A normal screen is a smaller window in the middle, with the background colour round it as the border, as on the Amiga:
+
+| Screen | Source | Window |
+|--------|--------|--------|
+| PAL Amiga, normal | 320 × 256 at 2 × 2 | 640 × 512 at (40, 32) |
+| PAL Amiga, overscan | up to 360 × 288 at 2 × 2 | up to the full 720 × 576 |
+| 640 × 480 | 640 × 480 at 1 × 1 | at (40, 48) |
+
+A computer monitor shows all 720 × 576 pixels. A TV may crop a few percent off each edge, so keep text and anything important inside the normal area.
+
+VIDSIZE holds the screen size, 720 × 576. To read it:
 
 ```asm
         include "hw.inc"
@@ -98,44 +111,47 @@ To read the screen size:
         lea     CUSTOM,a4
         move.l  VIDSIZE(a4),d0          ; VVISIBLE in bits 26-16, HVISIBLE in 10-0
         move.l  d0,d1
-        and.l   #VIDSIZE_HVISIBLE_M,d1  ; d1 = 640 or 800
+        and.l   #VIDSIZE_HVISIBLE_M,d1  ; d1 = 720
         swap    d0
-        and.l   #VIDSIZE_VVISIBLE_M>>16,d0  ; d0 = 480 or 600
+        and.l   #VIDSIZE_VVISIBLE_M>>16,d0  ; d0 = 576
 ```
 
 ---
 
 ## Forming a Basic Playfield
 
-To show a picture you need: the picture in Chip RAM, a display window, a plane pointer for each bitplane, a modulo, some colours, and the layer, DMA and display turned on. This section goes through the steps for the most common case, one layer showing a 320 × 240 picture in 16 colours, made large enough to fill a 640 × 480 screen. Each step is explained in more detail later in the chapter.
+To show a picture you need: the picture in Chip RAM, a display window, a plane pointer for each bitplane, a modulo, some colours, and the layer, DMA and display turned on. This section goes through the steps for the most common case, one layer showing a 320 × 256 picture in 16 colours at 2 × 2, as a 640 × 512 window in the middle of the screen: the Amiga's PAL lores screen. Each step is explained in more detail later in the chapter.
 
 ### Step 1: Choose the format and allocate memory
 
 A layer is either **planar** (1 to 8 bitplanes, as on the Amiga) or **chunky** (1, 2, 4 or 8 bits per pixel, packed in words). For 16 colours you need 4 bits per pixel: 4 bitplanes, or chunky 4 bpp. This example uses 4 bitplanes, stored one after the other.
 
-Each bitplane holds one bit of every pixel, 16 pixels to a word. One line of a 320-pixel plane is 320 ÷ 8 = 40 bytes, and a whole plane of 240 lines is 40 × 240 = 9600 bytes. Four planes take 38,400 bytes.
+Each bitplane holds one bit of every pixel, 16 pixels to a word. One line of a 320-pixel plane is 320 ÷ 8 = 40 bytes, and a whole plane of 256 lines is 40 × 256 = 10,240 bytes. Four planes take 40,960 bytes.
 
 All memory is Chip RAM, so any free, even address will do. The picture must start on an even address, and each plane must too.
 
 ```asm
 SCREEN      equ     $040000             ; the picture, in Chip RAM
 WIDTH       equ     320                 ; source pixels across
-HEIGHT      equ     240                 ; source lines
+HEIGHT      equ     256                 ; source lines
 PLANES      equ     4
 ROWBYTES    equ     WIDTH/8             ; 40 bytes per plane line
-PLANESIZE   equ     ROWBYTES*HEIGHT     ; 9600 bytes per plane
+PLANESIZE   equ     ROWBYTES*HEIGHT     ; 10240 bytes per plane
 ```
 
 ### Step 2: Define the display window
 
 The **display window** is the rectangle of the screen where the layer shows. It is given in screen pixels and lines by WINX (XSTART in bits 26–16, XEND in bits 10–0) and WINY (YSTART and YEND, the same way). The window includes XSTART and YSTART but stops just before XEND and YEND. Outside its window, a layer is transparent.
 
-Here the window is the whole screen. The picture is 320 × 240, and CTRL (step 6) will show each source pixel 2 × 2, so 320 × 240 source pixels fill 640 × 480 screen pixels.
+The picture is 320 × 256, and CTRL (step 6) will show each source pixel 2 × 2, so it covers 640 × 512 screen pixels. Centred in the 720 × 576 screen, that window starts at (40, 32):
 
 ```asm
+WIN_X       equ     (720-640)/2         ; 40
+WIN_Y       equ     (576-512)/2         ; 32
+
         lea     L0(a4),a0               ; a0 = layer 0
-        move.l  #(0<<16)|640,L_WINX(a0) ; XSTART 0, XEND 640
-        move.l  #(0<<16)|480,L_WINY(a0) ; YSTART 0, YEND 480
+        move.l  #(WIN_X<<16)|(WIN_X+640),L_WINX(a0) ; XSTART 40, XEND 680
+        move.l  #(WIN_Y<<16)|(WIN_Y+512),L_WINY(a0) ; YSTART 32, YEND 544
 ```
 
 You never set a data-fetch start or stop: the hardware works out from the window, the scale and the fine scroll which words to fetch and when.
@@ -220,8 +236,9 @@ The layers fetch only when **DMACON.DMAEN** and **DMACON.BPLEN** are both set an
 Here are the steps put together. The picture is a pattern of 16 × 16-pixel squares in all 16 colours.
 
 ```asm
-; Example 3-1: a basic playfield. A 320 x 240 picture in 4 separate
-; bitplanes (16 colours), shown 2x across and 2x down to fill a 640 x 480
+; Example 3-1: a basic playfield. A 320 x 256 picture in 4 separate
+; bitplanes (16 colours), shown 2x across and 2x down as a 640 x 512
+; window in the middle of the 720 x 576 screen, as a PAL Amiga lores
 ; screen. Assumes supervisor mode and the vector table in Chip RAM at 0.
 
             include "hw.inc"
@@ -229,10 +246,12 @@ Here are the steps put together. The picture is a pattern of 16 × 16-pixel squa
 VECTORS     equ     $000000             ; the vector table, in Chip RAM
 SCREEN      equ     $040000             ; the picture, in Chip RAM
 WIDTH       equ     320                 ; source pixels across
-HEIGHT      equ     240                 ; source lines
+HEIGHT      equ     256                 ; source lines
 PLANES      equ     4
 ROWBYTES    equ     WIDTH/8             ; 40 bytes per plane line
-PLANESIZE   equ     ROWBYTES*HEIGHT     ; 9600 bytes per plane
+PLANESIZE   equ     ROWBYTES*HEIGHT     ; 10240 bytes per plane
+WIN_X       equ     (720-2*WIDTH)/2     ; the window: 640 x 512 at (40, 32)
+WIN_Y       equ     (576-2*HEIGHT)/2
 
 start:      move.w  #$2700,sr           ; no interrupts while we set up
             lea     CUSTOM,a4
@@ -247,8 +266,8 @@ start:      move.w  #$2700,sr           ; no interrupts while we set up
 
             lea     L0(a4),a0           ; a0 = layer 0
             ; step 2: the display window, in screen pixels
-            move.l  #(0<<16)|640,L_WINX(a0)     ; XSTART 0, XEND 640
-            move.l  #(0<<16)|480,L_WINY(a0)     ; YSTART 0, YEND 480
+            move.l  #(WIN_X<<16)|(WIN_X+2*WIDTH),L_WINX(a0)     ; XSTART 40, XEND 680
+            move.l  #(WIN_Y<<16)|(WIN_Y+2*HEIGHT),L_WINY(a0)    ; YSTART 32, YEND 544
             move.l  #0,L_SCROLLX(a0)
             ; step 3: the plane pointers
             bsr     setptrs
@@ -319,7 +338,7 @@ colours:    dc.l    $000000,$FFFFFF,$FF0000,$00FF00,$0000FF,$FFFF00,$00FFFF,$FF0
             dc.l    $808080,$C0C0C0,$800000,$008000,$000080,$808000,$008080,$800080
 ```
 
-On an 800 × 600 build the same program shows the picture in the top left 640 × 480 of the screen, with the background colour around it. "The Display Window" shows how to centre it.
+The background colour, black here, shows round the window as a border: 40 pixels at each side and 32 lines at the top and bottom. A TV that crops the edges of the picture loses only some of the border. For a full overscan picture, make the window larger, up to the whole 720 × 576 (see "Scaling").
 
 ### Stopping the display
 
@@ -377,17 +396,17 @@ You decide where the planes are in memory. The hardware only follows the pointer
  (BPL0PT)                | plane 0, line 0          |  40 bytes
                          | plane 0, line 1          |
                          |  ...                     |
-                         | plane 0, line 239        |
- SCREEN + 9600           +--------------------------+
+                         | plane 0, line 255        |
+ SCREEN + 10240          +--------------------------+
  (BPL1PT)                | plane 1, line 0          |
                          |  ...                     |
- SCREEN + 19200 (BPL2PT) +--------------------------+
+ SCREEN + 20480 (BPL2PT) +--------------------------+
                          | plane 2 ...              |
- SCREEN + 28800 (BPL3PT) +--------------------------+
+ SCREEN + 30720 (BPL3PT) +--------------------------+
                          | plane 3 ...              |
                          +--------------------------+
 
-     Figure 3-3: Separate Bitplanes, 320 x 240, 4 Planes
+     Figure 3-3: Separate Bitplanes, 320 x 256, 4 Planes
 ```
 
 The pointers start one plane apart, and the modulo is 0.
@@ -403,15 +422,15 @@ The pointers start one plane apart, and the modulo is 0.
  ...            ^ BPL0PT       ^ BPL1PT       ^ BPL2PT       ^ BPL3PT
                  = SCREEN       = SCREEN+40    = SCREEN+80    = SCREEN+120
 
-     Figure 3-4: Interleaved Bitplanes, 320 x 240, 4 Planes
+     Figure 3-4: Interleaved Bitplanes, 320 x 256, 4 Planes
 ```
 
 The pointers start one plane line apart. After each line, each pointer must skip over the other three planes' lines, so the modulo is (planes − 1) × the plane line: 3 × 40 = 120. Interleaved planes keep a whole picture line in one place, which makes it easy to scroll vertically and to copy or clear lines.
 
 | Layout | Pointers | BPLMOD |
 |--------|----------|--------|
-| 320 × 240, 4 planes, separate | BPLpPT = SCREEN + p × 9600 | 0 |
-| 320 × 240, 4 planes, interleaved | BPLpPT = SCREEN + p × 40 | 3 × 40 = 120 |
+| 320 × 256, 4 planes, separate | BPLpPT = SCREEN + p × 10240 | 0 |
+| 320 × 256, 4 planes, interleaved | BPLpPT = SCREEN + p × 40 | 3 × 40 = 120 |
 | 320 × 256, 5 planes, separate | BPLpPT = SCREEN + p × 10240 | 0 |
 | 320 × 256, 5 planes, interleaved | BPLpPT = SCREEN + p × 40 | 4 × 40 = 160 |
 
@@ -465,16 +484,18 @@ A chunky layer has one pointer, BPL0PT; the other pointers are left alone. Like 
 
 Chunky pixels are easier and faster for the CPU to draw one at a time, since one pixel is one byte (8 bpp) or one nibble (4 bpp). Planar pixels are better for drawing whole shapes plane by plane, and for using fewer bits per pixel than a chunky depth allows (3, 5, 6 or 7).
 
-A 1-bit chunky layer and a 1-plane planar layer are the same thing. The boot ROM's console uses a 1 bpp chunky layer of 640 × 480, 80 bytes per line:
+A 1-bit chunky layer and a 1-plane planar layer are the same thing. The boot ROM's console uses a 1 bpp chunky layer of 640 × 480, 80 bytes per line, in a window centred in the screen at (40, 48):
 
 ```asm
 CON         equ     $030000             ; the console: 640 x 480, 1 bit per pixel
+CON_X       equ     (720-640)/2         ; 40
+CON_Y       equ     (576-480)/2         ; 48
 
             lea     L0(a4),a0
             move.l  #CON,L_BPL0PT(a0)
             move.l  #0,L_BPLMOD(a0)
-            move.l  #(0<<16)|640,L_WINX(a0)
-            move.l  #(0<<16)|480,L_WINY(a0)
+            move.l  #(CON_X<<16)|(CON_X+640),L_WINX(a0)
+            move.l  #(CON_Y<<16)|(CON_Y+480),L_WINY(a0)
             move.l  #L_CTRL_EN_M,L_CTRL(a0)     ; chunky, 1 bit per pixel, colours 0-1
 ```
 
@@ -482,13 +503,13 @@ CON         equ     $030000             ; the console: 640 x 480, 1 bit per pixe
 
 | Picture | Format | Bytes |
 |---------|--------|-------|
-| 320 × 240, 16 colours | 4 planes or 4 bpp | 38,400 |
-| 320 × 240, 256 colours | 8 planes or 8 bpp | 76,800 |
+| 320 × 256, 16 colours | 4 planes or 4 bpp | 40,960 |
 | 320 × 256, 32 colours | 5 planes | 51,200 |
-| 640 × 480, 2 colours | 1 plane or 1 bpp | 38,400 |
-| 640 × 480, 16 colours | 4 planes or 4 bpp | 153,600 |
-| 640 × 480, 256 colours | 8 planes or 8 bpp | 307,200 |
-| 800 × 600, 256 colours | 8 planes or 8 bpp | 480,000 |
+| 320 × 256, 256 colours | 8 planes or 8 bpp | 81,920 |
+| 640 × 480, 2 colours (the console) | 1 plane or 1 bpp | 38,400 |
+| 640 × 512, 16 colours | 4 planes or 4 bpp | 163,840 |
+| 640 × 512, 256 colours | 8 planes or 8 bpp | 327,680 |
+| 720 × 576, 256 colours | 8 planes or 8 bpp | 414,720 |
 
 There are 2 or 4 MB of Chip RAM, so even a 256-colour full screen leaves plenty of room for several buffers.
 
@@ -537,32 +558,17 @@ The window is given in **screen** pixels. With scaling (next section), the windo
 
 ### Centring a window
 
-This fragment centres a 640 × 480 window, for a 320 × 240 picture at 2 × 2, on the screen of either build. On 640 × 480 it gives 0–640 and 0–480; on 800 × 600, 80–720 and 60–540.
+There is one screen size, so a centred window can be worked out when you assemble. For a window W pixels wide and H lines high, XSTART is (720 − W) ÷ 2 and YSTART is (576 − H) ÷ 2. This fragment centres a 640 × 512 window, for a 320 × 256 picture at 2 × 2: it gives 40–680 across and 32–544 down.
 
 ```asm
+WIN_W       equ     640
+WIN_H       equ     512
+WIN_X       equ     (720-WIN_W)/2       ; 40
+WIN_Y       equ     (576-WIN_H)/2       ; 32
+
         lea     L0(a4),a0
-        move.l  VIDSIZE(a4),d0
-        moveq   #0,d1
-        move.w  d0,d1
-        and.w   #VIDSIZE_HVISIBLE_M,d1  ; HVISIBLE
-        sub.w   #640,d1
-        lsr.w   #1,d1                   ; XSTART
-        move.l  d1,d2
-        swap    d2                      ; XSTART in bits 26-16
-        add.w   #640,d1
-        move.w  d1,d2                   ; XEND in bits 10-0
-        move.l  d2,L_WINX(a0)
-        swap    d0
-        moveq   #0,d1
-        move.w  d0,d1
-        and.w   #VIDSIZE_VVISIBLE_M>>16,d1  ; VVISIBLE
-        sub.w   #480,d1
-        lsr.w   #1,d1                   ; YSTART
-        move.l  d1,d2
-        swap    d2
-        add.w   #480,d1
-        move.w  d1,d2                   ; YEND
-        move.l  d2,L_WINY(a0)
+        move.l  #(WIN_X<<16)|(WIN_X+WIN_W),L_WINX(a0)
+        move.l  #(WIN_Y<<16)|(WIN_Y+WIN_H),L_WINY(a0)
 ```
 
 ### When window changes take effect
@@ -611,15 +617,16 @@ Each layer can show every source pixel 1, 2, 4 or 8 times across (CTRL.HSCALE) a
 | 2 | 4× |
 | 3 | 8× |
 
-This gives the low-resolution looks of older machines on a modern screen, with sharp, square pixels:
+This gives the low-resolution looks of older machines on a modern screen, with sharp pixels:
 
-| Picture | Scale | On 640 × 480 | On 800 × 600 | Looks like |
-|---------|-------|--------------|--------------|------------|
-| 320 × 240 | 2 × 2 | Full screen | 640 × 480, centred | Amiga lores, non-interlaced |
-| 640 × 240 | 1 × 2 | Full screen | 640 × 480, centred | Amiga hires, non-interlaced |
-| 400 × 300 | 2 × 2 | (too big) | Full screen | |
-| 160 × 120 | 4 × 4 | Full screen | 640 × 480, centred | Chunky 8-bit-era graphics |
-| 320 × 480 | 2 × 1 | Full screen | | Tall pixels |
+| Picture | Scale | On the 720 × 576 screen | Looks like |
+|---------|-------|-------------------------|------------|
+| 320 × 256 | 2 × 2 | 640 × 512 at (40, 32) | Amiga PAL lores, non-interlaced |
+| 640 × 256 | 1 × 2 | 640 × 512 at (40, 32) | Amiga PAL hires, non-interlaced |
+| 360 × 288 | 2 × 2 | Full screen | Amiga PAL lores, full overscan |
+| 320 × 240 | 2 × 2 | 640 × 480 at (40, 48) | Amiga NTSC lores |
+| 160 × 128 | 4 × 4 | 640 × 512 at (40, 32) | Chunky 8-bit-era graphics |
+| 320 × 512 | 2 × 1 | 640 × 512 at (40, 32) | Tall pixels |
 
 There is no fractional scaling and no shrinking.
 
@@ -666,9 +673,9 @@ In general, if one plane line of the picture starts **row stride** bytes after t
 
 | Picture | Window shows | Row stride | Line length | BPLMOD |
 |---------|--------------|------------|-------------|--------|
-| 320 × 240, 4 planes, separate | all, 2× | 40 | 40 | 0 |
-| 320 × 240, 4 planes, interleaved | all, 2× | 4 × 40 = 160 | 40 | 120 |
-| 640 × 240, 4 planes, interleaved | 320 source pixels | 4 × 80 = 320 | 40 | 280 |
+| 320 × 256, 4 planes, separate | all, 2× | 40 | 40 | 0 |
+| 320 × 256, 4 planes, interleaved | all, 2× | 4 × 40 = 160 | 40 | 120 |
+| 640 × 256, 4 planes, interleaved | 320 source pixels | 4 × 80 = 320 | 40 | 280 |
 | 640 × 480, chunky 4 bpp | 320 source pixels | 320 | 160 | 160 |
 | 640 × 480, chunky 8 bpp | 320 source pixels | 640 | 320 | 320 |
 
@@ -734,7 +741,7 @@ The scroll registers take effect at different times: the pointers are used at on
 
 ### Example 3-3: A scrolling routine
 
-This routine points a layer at a 640 × 240 picture in 4 interleaved planes, from any position (x, y). The layer's window shows 320 source pixels (640 screen pixels at 2×), so the line length is 40 bytes and BPLMOD = 4 × 80 − 40 = 280.
+This routine points a layer at a 640 × 256 picture in 4 interleaved planes, from any position (x, y). The layer's window shows 320 source pixels (640 screen pixels at 2×), so the line length is 40 bytes and BPLMOD = 4 × 80 − 40 = 280.
 
 ```asm
 BACK        equ     $040000             ; the picture
@@ -788,7 +795,7 @@ The plane pointers are not reset by the hardware. At the end of a frame each poi
 - **the copper**, which will do it in the vertical blank with a few MOVE instructions in its list, as Amiga programs do (spec 10; the copper is not yet in this version of the hardware);
 - **the CPU**, in its vertical blank interrupt, which is what the examples in this chapter do.
 
-The VBLANK interrupt comes at the start of the vertical blank (line VVISIBLE, pixel 0), after the last visible line has been fetched and the pointers have stopped moving. The hardware starts fetching the next frame's first line at the start of the horizontal blank of the last line of the frame (line 524 at 640 × 480, line 627 at 800 × 600). So the handler has the whole vertical blank, about 1.4 ms at 640 × 480 and 0.7 ms at 800 × 600, to write the pointers. A layer whose window starts lower down is fetched later, at the start of the horizontal blank before its YSTART.
+The VBLANK interrupt comes at the start of the vertical blank (line VVISIBLE, pixel 0), after the last visible line has been fetched and the pointers have stopped moving. The hardware starts fetching the next frame's first line at the start of the horizontal blank of the last line of the frame (line 624). So the handler has the whole vertical blank, 49 lines or about 1.5 ms, to write the pointers. A layer whose window starts lower down is fetched later, at the start of the horizontal blank before its YSTART.
 
 The handler is also the natural place to make any other change that must happen between frames: scroll positions, which buffer is shown, a new palette.
 
@@ -800,7 +807,7 @@ To animate without flicker, draw into one buffer while the other is shown, and s
 ; Example 3-4: double buffering. The handler shows the buffer whose address
 ; is in "shown"; 4 separate planes of PLANESIZE bytes.
 shown       equ     $008000             ; long: the buffer to show
-PLANESIZE   equ     9600
+PLANESIZE   equ     10240
 
 vblank:     movem.l d0/a0,-(sp)
             lea     CUSTOM,a0
@@ -837,13 +844,13 @@ A **split screen** shows different pictures, or different parts of one picture, 
 The simplest way is to use one layer for each band. Give each layer a window covering its band, and set each one up independently: its own pointers, modulo, scroll, scale and format. A layer is fetched only on the lines its window covers, so bands that do not overlap cost no extra bandwidth.
 
 ```
- line   0 +-----------------------------------------+
+ line  32 +-----------------------------------------+
           |  layer 0: game area                      |
-          |  320 x 200, 5 planes, 2x, scrolling      |
-          |  WINY 0-400                              |
-      400 +-----------------------------------------+
-          |  layer 1: status panel, 640 x 80, 2 pl.  |
-      480 +-----------------------------------------+  WINY 400-480
+          |  320 x 224, 5 planes, 2x, scrolling      |
+          |  WINY 32-480                             |
+      480 +-----------------------------------------+
+          |  layer 1: status panel, 640 x 64, 2 pl.  |
+      544 +-----------------------------------------+  WINY 480-544
 
             Figure 3-8: A Split Screen from Two Layers
 ```
@@ -860,12 +867,12 @@ The LINE interrupt (see "Video Interrupts") is made for this: it comes at the st
 
 ### Example 3-5: A reflection
 
-This example extends Example 3-1. From screen line 320 down, the LINE interrupt sets the modulo to step back one row per source line, so the picture above the line is reflected below it. It also switches the layer to colours 16–31, a darker set, from the next line. The vertical blank handler puts the pointers, the modulo and the colours back for the next frame.
+This example extends Example 3-1. From screen line 384 down (source line 176), the LINE interrupt sets the modulo to step back one row per source line, so the picture above the line is reflected below it. It also switches the layer to colours 16–31, a darker set, from the next line. The vertical blank handler puts the pointers, the modulo and the colours back for the next frame.
 
 ```asm
 ; Example 3-5: a reflection, added to Example 3-1
 LINELEN     equ     ROWBYTES            ; bytes fetched per plane per line
-MIRROR      equ     320                 ; screen line where the reflection starts
+MIRROR      equ     384                 ; screen line where the reflection starts
 CTRL_TOP    equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|((PLANES-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
 
             ; in the set-up: colours 16-31 for the water, then the interrupts
@@ -964,15 +971,16 @@ Each layer scrolls independently, so you can scroll the two at different speeds 
 
 ### Example 3-6: Dual playfields with parallax
 
-The back layer is a 640 × 240 picture in 4 interleaved planes, colours 32–47, scrolled across one pixel per frame by the routine from Example 3-3. The front layer is 320 × 240 in 3 separate planes, colours 16–23, with a band of coloured blocks; its colour 0 is transparent. Both are 2 × 2. Bandwidth: 3 ÷ 8 ÷ 2 + 4 ÷ 8 ÷ 2 = 0.44 bytes per pixel, well within the budget.
+The back layer is a 640 × 256 picture in 4 interleaved planes, colours 32–47, scrolled across one pixel per frame by the routine from Example 3-3. The front layer is 320 × 256 in 3 separate planes, colours 16–23, with a band of coloured blocks; its colour 0 is transparent. Both are 2 × 2, in the same 640 × 512 window at (40, 32) as Example 3-1. Bandwidth: 3 ÷ 8 ÷ 2 + 4 ÷ 8 ÷ 2 = 0.44 bytes per pixel, well within the budget.
 
 ```asm
 ; Example 3-6: two playfields, as in the Amiga's dual-playfield mode.
-; Layer 1 (behind): a 640 x 240 picture in 4 interleaved planes, colours
-;   32-47 (PALOFS 2), seen through a 320 x 240 window (2x by 2x) and scrolled
-;   across one pixel per frame.
-; Layer 0 (in front): a 320 x 240 picture in 3 separate planes, colours
+; Layer 1 (behind): a 640 x 256 picture in 4 interleaved planes, colours
+;   32-47 (PALOFS 2), 320 x 256 of it seen at a time (2x by 2x) and
+;   scrolled across one pixel per frame.
+; Layer 0 (in front): a 320 x 256 picture in 3 separate planes, colours
 ;   16-23 (PALOFS 1), with colour 0 transparent so layer 1 shows through.
+; Both in a 640 x 512 window at (40, 32).
 ; Assumes supervisor mode and the vector table in Chip RAM at 0.
 
             include "hw.inc"
@@ -982,20 +990,22 @@ VECTORS     equ     $000000
 ; layer 1: the background
 BACK        equ     $040000
 BK_W        equ     640                 ; picture width, source pixels
-BK_H        equ     240
+BK_H        equ     256
 BK_PL       equ     4
 BK_ROW      equ     BK_W/8              ; 80 bytes per plane line
 BK_STRIDE   equ     BK_ROW*BK_PL        ; 320 bytes from one line to the next
 VIEW_W      equ     320                 ; source pixels in the window
 LINELEN     equ     VIEW_W/8            ; 40 bytes fetched per plane per line
+WIN_X       equ     40                  ; both layers: 640 x 512 at (40, 32)
+WIN_Y       equ     32
 
 ; layer 0: the foreground
 FRONT       equ     $060000
 FG_W        equ     320
-FG_H        equ     240
+FG_H        equ     256
 FG_PL       equ     3
 FG_ROW      equ     FG_W/8
-FG_PLANE    equ     FG_ROW*FG_H         ; 9600 bytes per plane
+FG_PLANE    equ     FG_ROW*FG_H         ; 10240 bytes per plane
 
 scroll_x    equ     $008000             ; word: layer 1's scroll position
 scroll_d    equ     $008002             ; word: +1 or -1
@@ -1012,8 +1022,8 @@ start:      move.w  #$2700,sr
 
             ; layer 1: behind, solid, 2x by 2x
             lea     L1(a4),a0
-            move.l  #(0<<16)|640,L_WINX(a0)
-            move.l  #(0<<16)|480,L_WINY(a0)
+            move.l  #(WIN_X<<16)|(WIN_X+640),L_WINX(a0)
+            move.l  #(WIN_Y<<16)|(WIN_Y+512),L_WINY(a0)
             move.l  #BK_STRIDE-LINELEN,L_BPLMOD(a0)    ; 280
             moveq   #0,d0
             moveq   #0,d1
@@ -1022,8 +1032,8 @@ start:      move.w  #$2700,sr
 
             ; layer 0: in front, colour 0 transparent, 2x by 2x
             lea     L0(a4),a0
-            move.l  #(0<<16)|640,L_WINX(a0)
-            move.l  #(0<<16)|480,L_WINY(a0)
+            move.l  #(WIN_X<<16)|(WIN_X+640),L_WINX(a0)
+            move.l  #(WIN_Y<<16)|(WIN_Y+512),L_WINY(a0)
             move.l  #0,L_SCROLLX(a0)
             move.l  #0,L_BPLMOD(a0)
             bsr     front_ptrs
@@ -1239,7 +1249,8 @@ Each channel's value is widened to 8 bits by repeating its bits, so that full sc
 
 | Colour | L0 | L1 | L2 | Bits per pixel | Bandwidth at 2× across |
 |--------|----|----|----|----------------|------------------------|
-| 24-bit (8/8/8) | 8 bpp or 8 planes | 8 bpp or 8 planes | 8 bpp or 8 planes | 24 | 1.5 bytes per pixel |
+| 24-bit (8/8/8) | 8 bpp or 8 planes | 8 bpp or 8 planes | 8 bpp or 8 planes | 24 | 1.5 bytes per pixel: just over the budget; 0.75 at 4× across |
+| 21-bit (7/7/7) | 7 planes | 7 planes | 7 planes | 21 | 1.31 |
 | 16-bit (5/6/5) | 5 planes | 6 planes | 5 planes | 16 | 1.0 |
 | 12-bit (4/4/4), as the Amiga's colour registers | 4 bpp or 4 planes | 4 bpp or 4 planes | 4 bpp or 4 planes | 12 | 0.75 |
 | 9-bit (3/3/3) | 3 planes | 3 planes | 3 planes | 9 | 0.56 |
@@ -1250,23 +1261,29 @@ With chunky layers, 24-bit and 12-bit colour are easy for the CPU: each pixel is
 
 ### Example 3-7: A 24-bit screen
 
-Three chunky 8 bpp layers of 320 × 240, shown 2 × 2. The picture is a gradient: red rises from left to right and green from top to bottom, with blue at half. This needs 1.5 bytes per pixel, so it fits the 640 × 480 build only (see "The Fetch Budget").
+24-bit colour at 2× across needs 1.5 bytes per pixel, just over the display's budget of 1.48 (see "The Fetch Budget"). A narrower window does not help, because the budget counts at every point across the screen, not over the whole line. There are two ways to fit: keep 2× across and drop to 21-bit colour (7/7/7, three 7-plane layers, 1.31 bytes per pixel), or keep 24 bits and show each source pixel 4× across (0.75 bytes per pixel). This example takes the second way, because chunky 8 bpp layers are the easiest for the CPU to draw: one byte per channel per pixel.
+
+So the example uses three chunky 8 bpp layers of 160 × 256, shown 4× across and 2× down in the 640 × 512 window of Example 3-1. Each pixel is twice as wide as it is tall, which suits smooth pictures such as gradients and photographs. The picture is a gradient: red rises from left to right and green from top to bottom, with blue at half.
 
 ```asm
 ; Example 3-7: a 24-bit direct-colour screen. Three chunky 8 bpp layers of
-; 320 x 240, shown 2x by 2x: layer 0 is red, layer 1 green, layer 2 blue.
-; Bandwidth: 3 x 8 bits / 8 / 2 = 1.5 bytes per pixel, so 640 x 480 only.
+; 160 x 256, shown 4x across and 2x down as a 640 x 512 window at (40, 32):
+; layer 0 is red, layer 1 green, layer 2 blue.
+; Bandwidth: 3 x 8 bits / 8 / 4 = 0.75 bytes per pixel. (At 2x across it
+; would be 1.5, just over the budget of 1.48.)
 ; Assumes supervisor mode and the vector table in Chip RAM at 0.
 
             include "hw.inc"
 
 VECTORS     equ     $000000
-WIDTH       equ     320
-HEIGHT      equ     240
-RED         equ     $040000             ; 76800 bytes each
-GREEN       equ     $060000
-BLUE        equ     $080000
-CTRL_8BPP   equ     L_CTRL_EN_M|(3<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
+WIDTH       equ     160
+HEIGHT      equ     256
+WIN_X       equ     40
+WIN_Y       equ     32
+RED         equ     $040000             ; 40960 bytes each
+GREEN       equ     $050000
+BLUE        equ     $060000
+CTRL_8BPP   equ     L_CTRL_EN_M|(3<<L_CTRL_BPP_B)|(2<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
 
 start:      move.w  #$2700,sr
             lea     CUSTOM,a4
@@ -1274,8 +1291,8 @@ start:      move.w  #$2700,sr
             bsr     draw
             lea     L0(a4),a0           ; the same window, scroll and scale for all three
             moveq   #3-1,d0
-.layer:     move.l  #(0<<16)|640,L_WINX(a0)
-            move.l  #(0<<16)|480,L_WINY(a0)
+.layer:     move.l  #(WIN_X<<16)|(WIN_X+4*WIDTH),L_WINX(a0)
+            move.l  #(WIN_Y<<16)|(WIN_Y+2*HEIGHT),L_WINY(a0)
             move.l  #0,L_SCROLLX(a0)
             move.l  #0,L_BPLMOD(a0)
             move.l  #CTRL_8BPP,L_CTRL(a0)
@@ -1308,7 +1325,7 @@ draw:       lea     RED,a0              ; red: line 0 ...
             moveq   #0,d0
 .r0:        move.w  d0,d1
             mulu    #51,d1
-            lsr.l   #6,d1               ; 0-254 across 320 pixels
+            lsr.l   #5,d1               ; 0-253 across 160 pixels
             move.b  d1,(a0)+
             addq.w  #1,d0
             cmp.w   #WIDTH,d0
@@ -1338,10 +1355,10 @@ draw:       lea     RED,a0              ; red: line 0 ...
             rts
 ```
 
-A 16-bit 5/6/5 screen is set up the same way with planar layers. Only the CTRL values and the pointers change:
+A 16-bit 5/6/5 screen at 2× across (1.0 bytes per pixel) is set up the same way with planar layers. Only the CTRL values and the pointers change:
 
 ```asm
-; 16-bit colour, 320 x 240 at 2x by 2x: red 5 planes, green 6, blue 5
+; 16-bit colour, 320 x 256 at 2x by 2x: red 5 planes, green 6, blue 5
 CTRL_565_R  equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|(4<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
 CTRL_565_G  equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|(5<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
 CTRL_565_B  equ     CTRL_565_R
@@ -1376,12 +1393,13 @@ So each layer is always one group ahead, and the display reads memory at the rat
 
 ### The budget
 
-Because data is fetched while it is shown, the limit is a **rate**: bytes per screen pixel that the beam passes, counting the blanking.
+Because data is fetched while it is shown, the limit is a **rate**: bytes per screen pixel that the beam passes, counting the blanking. A line is 864 pixels (720 visible and 144 of blanking) and lasts 32 µs, which is exactly 320 memory slots:
 
-| Mode | Bytes per line | Pixels per line | Budget |
-|------|----------------|-----------------|--------|
-| 640 × 480 | 320 slots × 4 = 1280 | 800 | **1.6 bytes per pixel** |
-| 800 × 600 | 264 slots × 4 = 1056 | 1056 | **1.0 bytes per pixel** |
+| Bytes per line | Pixels per line | Budget |
+|----------------|-----------------|--------|
+| 320 slots × 4 = 1280 | 864 | **1.48 bytes per pixel** |
+
+Put another way: the display has 4 bytes every 100 ns, and a pixel lasts 37 ns.
 
 A layer needs:
 
@@ -1393,27 +1411,33 @@ where, for a planar layer, bits per pixel is the number of planes. Vertical scal
 
 ### Worked examples
 
-**A 5-plane 320 × 256 picture at 1×** (the Amiga's 32-colour lores screen, but here with 1× pixels): 5 ÷ 8 ÷ 1 = 0.625. Fits both modes.
+**A 5-plane 320 × 256 picture at 1×** (the Amiga's 32-colour lores screen, but here with 1× pixels): 5 ÷ 8 ÷ 1 = 0.625. Fits.
 
 **The boot ROM's screen**: the console, 1 bpp at 1× (0.125), with the 4-plane picture at 2× on top (4 ÷ 8 ÷ 2 = 0.25) on some lines: 0.375 where they overlap.
 
-**Dual playfields, Example 3-6**: 3 planes at 2× (0.1875) + 4 planes at 2× (0.25) = 0.4375. Fits both modes, with room for a third layer.
+**Dual playfields, Example 3-6**: 3 planes at 2× (0.1875) + 4 planes at 2× (0.25) = 0.4375. Fits, with room for a third layer.
 
-**A 256-colour game screen with an overlay**: an 8 bpp layer at 1× (1.0) and a 4 bpp layer at 1× over it (0.5) = 1.5. Fits 640 × 480 (1.6) but **not** 800 × 600 (1.0). On 800 × 600, show the overlay at 2× (0.25, total 1.25: still too much), or make the main layer 2× (0.5 + 0.5 = 1.0: fits), or move the overlay to a band of its own.
+**A 256-colour game screen with an overlay**: an 8 bpp layer at 1× (1.0) and a 4 bpp layer at 1× over it (0.5) = 1.5. Just over the budget. Show the overlay at 2× (0.25, total 1.25: fits), or give it fewer colours (3 planes at 1×: 0.375, total 1.375: fits), or move it to a band of its own.
 
-**Two full-width 8 bpp layers at 1×**: 2.0. Too much for either mode. Show one of them at 2× (1.0 + 0.5 = 1.5): fits 640 × 480.
+**Two full-width 8 bpp layers at 1×**: 2.0. Too much. Show one of them at 2× (1.0 + 0.5 = 1.5): still just over. Show both at 2× (0.5 + 0.5 = 1.0), or one at 4× (1.0 + 0.25 = 1.25): fits.
 
-**24-bit direct colour, Example 3-7**: three 8 bpp layers at 2× = 3 × 0.5 = 1.5. Fits 640 × 480 only. **16-bit 5/6/5 at 2×**: 16 ÷ 8 ÷ 2 = 1.0: fits both.
+**Three 64-colour playfields**: 6 planes + 6 planes + 8 planes, all at 2×: 0.375 + 0.375 + 0.5 = 1.25. Fits.
 
-| Screen | Bytes per pixel | 640 × 480 | 800 × 600 |
-|--------|-----------------|-----------|-----------|
-| One 8 bpp layer at 1× | 1.0 | Fits | Fits |
-| 5 planes at 1× | 0.625 | Fits | Fits |
-| 5 planes + 3 planes, both at 2× | 0.5 | Fits | Fits |
-| 8 bpp at 1× + 4 bpp at 1× | 1.5 | Fits | No |
-| 16-bit direct colour at 2× | 1.0 | Fits | Fits |
-| 24-bit direct colour at 2× | 1.5 | Fits | No |
-| Two 8 bpp layers at 1× | 2.0 | No | No |
+**24-bit direct colour**: three 8 bpp layers at 2× = 3 × 0.5 = 1.5, just over. At 4× across, as in Example 3-7: 0.75, fits. **21-bit 7/7/7 at 2×**: 21 ÷ 8 ÷ 2 = 1.31, fits. **16-bit 5/6/5 at 2×**: 16 ÷ 8 ÷ 2 = 1.0, fits.
+
+| Screen | Bytes per pixel | Fits? |
+|--------|-----------------|-------|
+| One 8 bpp layer at 1× | 1.0 | Yes |
+| 5 planes at 1× | 0.625 | Yes |
+| 5 planes + 3 planes, both at 2× | 0.5 | Yes |
+| 6 + 6 + 8 planes, all at 2× | 1.25 | Yes |
+| 8 bpp at 1× + 4 bpp at 2× | 1.25 | Yes |
+| 8 bpp at 1× + 4 bpp at 1× | 1.5 | **No** (just over) |
+| 16-bit direct colour at 2× | 1.0 | Yes |
+| 21-bit direct colour at 2× | 1.31 | Yes |
+| 24-bit direct colour at 4× across | 0.75 | Yes |
+| 24-bit direct colour at 2× | 1.5 | **No** (just over) |
+| Two 8 bpp layers at 1× | 2.0 | **No** |
 
 ### Using the windows
 
@@ -1475,8 +1499,8 @@ start:      move.w  #$2700,sr
             move.l  #$202020,PALETTE+0*4(a4)
             move.l  #$FFC000,PALETTE+1*4(a4)
             lea     L0(a4),a0
-            move.l  #(192<<16)|(192+32*8),L_WINX(a0)   ; 256 screen pixels
-            move.l  #(0<<16)|480,L_WINY(a0)
+            move.l  #(232<<16)|(232+32*8),L_WINX(a0)   ; 256 screen pixels, centred
+            move.l  #(0<<16)|576,L_WINY(a0)
             move.l  #0,L_SCROLLX(a0)
             move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|(0<<L_CTRL_PLANES_B)|(3<<L_CTRL_HSCALE_B),L_CTRL(a0)
             move.l  #VIDCON_EN_M,VIDCON(a4)
@@ -1563,23 +1587,23 @@ The background colour is read at the start of each line, so a write during line 
 
 ```asm
 ; Example 3-9: colour bars. Changes BGCOLOR every 8 lines from a table of
-; 60 colours (480 lines). Uses wait_line, above.
+; 72 colours (576 lines). Uses wait_line, above.
 bars:       lea     CUSTOM,a4
 .frame:     lea     bar_colours+4(pc),a1
             moveq   #7,d0               ; write during line 7 for line 8, ...
 .bar:       bsr     wait_line
             move.l  (a1)+,BGCOLOR(a4)
             addq.w  #8,d0
-            cmp.w   #480-8,d0
-            blo.s   .bar                ; ... up to line 471 for line 472
-            move.w  #480,d0
+            cmp.w   #576-8,d0
+            blo.s   .bar                ; ... up to line 567 for line 568
+            move.w  #576,d0
             bsr     wait_line           ; the vertical blank
             move.l  bar_colours(pc),BGCOLOR(a4)     ; line 0's colour, for the next frame
             bra.s   .frame
 
 bar_colours:
-            rept    60
-            dc.l    ((REPTN*4)<<16)|(255-REPTN*4)
+            rept    72
+            dc.l    ((REPTN*3)<<16)|(255-REPTN*3)
             endr
 ```
 
@@ -1623,7 +1647,7 @@ You can also poll the flags with interrupts off, as the boot ROM's video test do
             move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)
 ```
 
-**LINE** comes once per frame, at the start of the line in LINECMP (bits 26–16). To have it on several lines, write the next line number into LINECMP in the handler. The 68000 takes from about 2 µs to about 10 µs to start a handler, depending on the instruction it is in the middle of, so a LINE handler runs during the line it was asked for (32 µs at 640 × 480); that is enough to change CTRL, WINX, WINY, SCROLLX, PRIO or BGCOLOR for the **next** line, or BPLMOD for the end of this one.
+**LINE** comes once per frame, at the start of the line in LINECMP (bits 26–16). To have it on several lines, write the next line number into LINECMP in the handler. The 68000 takes from about 2 µs to about 10 µs to start a handler, depending on the instruction it is in the middle of, so a LINE handler runs during the line it was asked for (32 µs); that is enough to change CTRL, WINX, WINY, SCROLLX, PRIO or BGCOLOR for the **next** line, or BPLMOD for the end of this one.
 
 ### Summary: interrupts and the beam
 

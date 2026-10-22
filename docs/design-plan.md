@@ -15,7 +15,7 @@ The design is installed as an extra core on the Next, next to the normal Next co
 | R1 | CPU is a 68000: the fx68k core inside the FPGA, at 20 MHz | decided |
 | R2 | Fast main memory: Chip RAM in fast SRAM, shared Amiga-style with DMA, where the CPU never waits for Chip RAM | project goal |
 | R3 | Video, audio and glue logic are done by an FPGA | project goal |
-| R4 | Video output is HDMI/DVI and VGA; pixel clock is a whole-number division of one master clock; one mode fixed when the FPGA is built, 640×480 or 800×600 at 60 Hz; DMA locked to the beam | decided (version 1) |
+| R4 | Video output is HDMI/DVI and VGA; one mode, 576p (720×576 at 50 Hz, CEA-861, 27 MHz); every line exactly 320 memory slots, so the display's DMA repeats the same way on every line | decided (version 1) |
 | R5 | Audio: 4 Paula-style 8-bit sample channels | decided (version 1) |
 | R6 | Usable as a home computer: boots to a monitor, then BASIC; PS/2 keyboard; SD card | decided ("both") |
 | R7 | Usable as a game/demo machine: bitmap layers with scrolling, a copper, a DMA engine for copies and fills (sprites later) | decided ("both") |
@@ -45,7 +45,7 @@ Checked against the official Next FPGA sources (`zxnext_top_issue5.vhd` and `zxn
 
 What this means:
 - **The SRAM is fast enough to give the CPU its own memory cycle in every 100 ns slot**, so the CPU never waits for the display, audio, copper or DMA engine (D5). There is no Fast RAM: all RAM is Chip RAM.
-- **Block RAM is 225 KB**, still too small for a 640×480×8bpp frame buffer plus everything else, so video memory stays in Chip RAM and is fetched just in time by DMA, as planned. The palette stays in block RAM; there is no text mode (the boot ROM's font is in the ROM).
+- **Block RAM is 225 KB**, still too small for a 720×576×8bpp frame buffer (405 KB) plus everything else, so video memory stays in Chip RAM and is fetched just in time by DMA, as planned. The palette stays in block RAM; there is no text mode (the boot ROM's font is in the ROM).
 - **No LEDs or switches.** The boot ROM shows start-up progress and errors as the screen's background colour (as the Amiga did) and on the serial console. Start-up options come from keys held during reset and the DivMMC button (spec 7).
 - **Toolchain is Vivado** (the free edition covers the XC7A35T), scripted with Tcl in batch mode, on Linux or Windows.
 
@@ -72,13 +72,12 @@ The full list is in spec 7, section 8.
 
 ### D4. Clocks
 
-- **One master clock, as on the Amiga.** An MMCM, set once at power-on, makes a 200 MHz master from the 50 MHz oscillator. Everything else is the master divided by a whole number:
+- **One master clock for the system, as on the Amiga.** MMCM 1, set once at power-on, makes a 200 MHz master from the 50 MHz oscillator (VCO 1000 MHz). The system clocks are the master divided by a whole number:
   - **System / SRAM controller: 100 MHz** (÷ 2)
   - **68000: 20 MHz** (fx68k clocked at 40 MHz, ÷ 5, with alternating phase enables)
   - **Memory cycle: 20 ns** (÷ 4); **slot: 100 ns = 5 memory cycles = 2 CPU clocks** (÷ 20), the Amiga's ratio
-  - **Pixel clock: ÷ N, N = 8 (25 MHz, 640×480) or 5 (40 MHz, 800×600)**, fixed when the FPGA is built (`PIX_N`)
-- Every scan line is a whole number of slots (320 at 640×480, 264 at 800×600), so DMA is locked to the beam (spec 4, section 3.2).
-- The same MMCM also makes the HDMI serialiser clock (5 × the pixel clock); there is no second MMCM. The VGA DAC is clocked from the pixel clock.
+- **A second MMCM for the pixels.** MMCM 2 makes the 576p pixel clock from the same oscillator: 50 ÷ 5 × 108 = VCO 1080 MHz, ÷ 40 = **27 MHz**, and ÷ 8 = 135 MHz for the HDMI serialisers. The VGA DAC is clocked from the pixel clock.
+- Both MMCMs run from one oscillator, so the frequencies are exact: every 576p line (864 pixels) is exactly 32 µs, **320 slots** (spec 4, section 3.1). The phase between the two MMCMs is not known, so the pixel clock is treated as an asynchronous clock domain: events cross through synchronisers and the data registers under a handshake.
 
 ### D5. Memory architecture and memory map
 
@@ -102,11 +101,11 @@ Some boards may have 2 MB of SRAM; SYSCFG.CHIPMB reports which (spec 7).
 
 Defined in [spec 4: video](spec/video.md). In short:
 
-- DVI over HDMI and VGA at the same time; **pixel clock = 200 MHz ÷ N**. **One fixed mode, chosen when the FPGA is built:** 640×480 at 60 Hz (default, N = 8) or 800×600 at 60 Hz (N = 5). No timing registers. DMA is locked to the beam
-- **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and palette block. No text layer and no sprites (spec 9 is on hold); the boot ROM draws its console into a 1-plane layer
+- DVI over HDMI and VGA at the same time. **One mode, 576p:** 720×576 at 50 Hz with a 27 MHz pixel clock, as CEA-861 defines it, so every HDMI TV and monitor takes it; the digital form of PAL. No timing registers. The whole 720×576 is the overscan area; a normal screen is a centred window (for example a PAL Amiga 320×256 at 2× is 640×512 at (40, 32)), with the background colour as the border. Every line is exactly 320 slots
+- **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and palette block. No text layer and no sprites (spec 9 is on hold); the boot ROM draws its 80×30 console into a 1-plane 640×480 layer, centred at (40, 48)
 - Each layer is **planar** (1–8 Amiga-style bitplanes) or **chunky** (1/2/4/8 bits per pixel), with Amiga-style plane pointers (BPLxPT), modulo (BPLMOD) and data registers (BPLxDAT), and no hidden buffers. The copper resets the pointers each frame
 - Whole-number scaling: 1×, 2×, 4× or 8×, across and down separately
-- Video memory is fetched on demand by DMA as the beam scans, in memory cycles 1 and 2 of each slot only (no wide fetch). The budget is a rate in bytes per pixel: 1.6 at 640×480, 1.0 at 800×600. Layers never use the CPU's cycle
+- Video memory is fetched on demand by DMA as the beam scans, in memory cycles 1 and 2 of each slot only (no wide fetch). The budget is a rate: 4 bytes per 100 ns slot, 1.48 bytes per pixel. Layers never use the CPU's cycle
 - 256-entry palette of 24-bit colours, or direct colour (L0 red, L1 green, L2 blue); beam position registers; vertical-blank and line interrupts; a copper (spec 10)
 
 ### D7. Audio
@@ -183,7 +182,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 1. [`docs/spec/bus-interface.md`](spec/bus-interface.md): **drafted.** fx68k at 40 MHz with phase enables, fixed-point 40/100 MHz crossing, bus cycle timing, decoding, wait states, bus errors, interrupt acknowledge, reset and halt
 2. Memory map: folded into spec 3
 3. [`docs/spec/registers.md`](spec/registers.md): **drafted.** Memory map, rules for all registers (32-bit, written and read as 16-bit halves), every register address in the custom and system blocks
-4. [`docs/spec/video.md`](spec/video.md): **v1 scope.** One fixed mode (640×480 or 800×600 at 60 Hz), three planar or chunky bitmap layers with Amiga-style plane pointers, windows, scaling, palette, direct colour, interrupts, HDMI and VGA
+4. [`docs/spec/video.md`](spec/video.md): **v1 scope.** One mode, 576p (720×576 at 50 Hz), three planar or chunky bitmap layers with Amiga-style plane pointers, windows, scaling, palette, direct colour, interrupts, HDMI and VGA
 5. [`docs/spec/memory-architecture.md`](spec/memory-architecture.md): **v1 scope.** Slots and memory cycles, SRAM timing, CPU access at 20 MHz with no waits, fixed owners per cycle, DMACON
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 4 Paula-style channels, 8-bit samples, nearest-sample playback, sigma-delta output
 7. [`docs/spec/system.md`](spec/system.md): **drafted.** Reset sources and behaviour, boot ROM and overlay, start-up keys and colours, buttons, ID registers, installing as a Next core, board connections (timers are spec 12, interrupts 13, USB serial 14, SD card 15, keyboard 16)
@@ -238,8 +237,8 @@ All the planning specs are drafted (section 3). To finish phase 0:
    - **Next core format** (Q4): read how third-party cores are installed on the KS3.
 3. ~~Write the register-map generator.~~ Done: `fpga/regmap.def` and `tools/regmap.py` (spec 3, section 6).
 
-**Phase 2 has started** (it needs no board): fx68k, the bus interface, the SRAM controller, boot ROM, system registers and USB serial run in Icarus Verilog (`sim/`). The boot ROM prints its checks over the simulated serial link with zero CPU wait states, also while a DMA port uses every other memory cycle. The interrupt controller, the timers and the video are in too, so the boot ROM's output also appears on the simulated screen: **phase 2 is done in simulation** (`docs/images/phase2-boot.png`). Sprites were built (checked pixel by pixel, with collisions) and then removed to save logic; spec 9 is on hold and the last version is at commit 7df97fd. The video now matches the v1 spec: one fixed mode, three bitmap layers with Amiga-style bitplane DMA, and the boot ROM's console drawn into a 1-plane layer with a font in ROM (checked pixel by pixel against a Python model of spec 4, also with the DMA port busy).
+**Phase 2 has started** (it needs no board): fx68k, the bus interface, the SRAM controller, boot ROM, system registers and USB serial run in Icarus Verilog (`sim/`). The boot ROM prints its checks over the simulated serial link with zero CPU wait states, also while a DMA port uses every other memory cycle. The interrupt controller, the timers and the video are in too, so the boot ROM's output also appears on the simulated screen: **phase 2 is done in simulation** (`docs/images/phase2-boot.png`). Sprites were built (checked pixel by pixel, with collisions) and then removed to save logic; spec 9 is on hold and the last version is at commit 7df97fd. The video now matches the v1 spec: one mode, 576p, with its own 27 MHz pixel clock asynchronous to the system clock, three bitmap layers with Amiga-style bitplane DMA, and the boot ROM's console drawn into a 1-plane layer with a font in ROM (checked pixel by pixel against a Python model of spec 4, also with the DMA port busy).
 
-**Phase 3 is ready to try on the board:** `fpga/ks3/build.sh` builds the boot ROM and the bitstream with Vivado and loads it over JTAG (`fpga/ks3/README.md`). The KS3 platform layer (one MMCM for all clocks, SRAM pads, HDMI and VGA out, pins from the Next's issue 5 pin file) is in `fpga/rtl/platform/artix7/` and `fpga/rtl/top_ks3.v`. The Yosys resource figures are to be re-measured after the cut to version 1; Vivado timing is still to be seen.
+**Phase 3 is ready to try on the board:** `fpga/ks3/build.sh` builds the boot ROM and the bitstream with Vivado and loads it over JTAG (`fpga/ks3/README.md`). The KS3 platform layer (two MMCMs: one for the system clocks, one for the 576p pixel clocks; SRAM pads, HDMI and VGA out, pins from the Next's issue 5 pin file) is in `fpga/rtl/platform/artix7/` and `fpga/rtl/top_ks3.v`. The Yosys resource figures are to be re-measured after the cut to version 1; Vivado timing is still to be seen.
 
 Then phase 1 (FPGA bring-up) starts: scripted Vivado build, JTAG loading, HDMI/VGA test pattern and USB echo.

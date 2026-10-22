@@ -5,12 +5,11 @@
 // still to come, so tests can load the memory while the CPU runs.
 module retro68k #(
     parameter ROM_INIT = "boot.hex",
-    parameter [5:0] CHIPMB = 6'd4,
-    parameter PIX_N = 8               // video mode (spec 4, 3.2): 8 = 640x480, 5 = 800x600
+    parameter [5:0] CHIPMB = 6'd4
 ) (
     input  wire        clk100,
     input  wire        clk40,
-    input  wire        clk_pix,       // 200 MHz / PIX_N, from the same master
+    input  wire        clk_pix,       // 27 MHz pixel clock (576p), asynchronous to clk100
     input  wire        por100,        // power-on reset; last seen high on a slot boundary
     input  wire        por40,         // the same, in the 40 MHz domain
     input  wire        btn_reset_n,   // debounced
@@ -209,7 +208,7 @@ module retro68k #(
     // ---------------------------------------------------------------- video (spec 4)
     wire irq_vblank, irq_line, irq_viderr, line_tick, frame_tick;
     wire [15:0] dmacon;
-    video #(.PIX_N(PIX_N)) vid (
+    video vid (
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_vid),

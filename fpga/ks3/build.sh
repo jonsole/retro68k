@@ -5,7 +5,6 @@
 #   fpga/ks3/build.sh --program       build, then load it over JTAG with Vivado
 #   fpga/ks3/build.sh --program-only  just load the last build
 #   fpga/ks3/build.sh --ofl CABLE     load with openFPGALoader instead (e.g. --ofl digilent_hs2)
-#   fpga/ks3/build.sh --pix-n N       pixel clock 200/N MHz (default 8: 640x480)
 #
 # Needs Vivado (the free edition covers the XC7A35T) on the PATH or in $VIVADO,
 # python3, and git. The 68000 assembler (vasm) is used from the PATH or $VASM;
@@ -20,7 +19,6 @@ set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 out="$here/build"
-pix_n=8
 do_build=1
 do_program=0
 ofl_cable=""
@@ -30,7 +28,6 @@ while [ $# -gt 0 ]; do
         --program)      do_program=1 ;;
         --program-only) do_program=1; do_build=0 ;;
         --ofl)          do_program=1; ofl_cable="${2:?--ofl needs a cable name}"; shift ;;
-        --pix-n)        pix_n="${2:?--pix-n needs a number}"; shift ;;
         -h|--help)      sed -n '2,18p' "$0"; exit 0 ;;
         *)              echo "build.sh: unknown option $1 (try --help)" >&2; exit 1 ;;
     esac
@@ -39,8 +36,6 @@ done
 
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'build.sh: %s\n' "$*" >&2; exit 1; }
-
-case "$pix_n" in 3|4|5|6|7|8) ;; *) die "--pix-n must be 3 to 8" ;; esac
 
 vivado="${VIVADO:-$(command -v vivado || true)}"
 
@@ -78,7 +73,7 @@ if [ "$do_build" = 1 ]; then
     say "Running Vivado (synthesis, place and route, bitstream): about 10-20 minutes"
     set +e
     (cd "$out" && "$vivado" -mode batch -nojournal -log vivado.log \
-        -source "$here/build.tcl" -tclargs "$root" "$out" "$pix_n")
+        -source "$here/build.tcl" -tclargs "$root" "$out")
     status=$?
     set -e
     grep -h "^retro68k:" "$out/vivado.log" || true

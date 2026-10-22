@@ -47,7 +47,7 @@ The full map is in spec 3, section 1. Memory in short:
 
 ### 4.1 Clocks
 
-Everything comes from one 200 MHz master clock divided by whole numbers (spec 4, section 3.1):
+The system clocks are whole-number divisions of one 200 MHz master, from the first MMCM. The pixel clock comes from a second MMCM, from the same 50 MHz oscillator (spec 4, section 3.1):
 
 | Clock | Master ÷ | Frequency |
 |-------|----------|-----------|
@@ -55,9 +55,9 @@ Everything comes from one 200 MHz master clock divided by whole numbers (spec 4,
 | fx68k master clock | 5 | 40 MHz with alternating phase enables → **20 MHz 68000** |
 | Memory cycle | 4 | 20 ns |
 | Slot | 20 | 100 ns = 5 memory cycles |
-| Pixel clock | N = 8 or 5 (`PIX_N`, fixed when the FPGA is built) | 25 MHz (640×480) or 40 MHz (800×600) |
+| Pixel clock | – (MMCM 2: 50 ÷ 5 × 108 ÷ 40) | 27 MHz (576p), asynchronous to the clocks above |
 
-Both video modes make every scan line a whole number of slots: 320 slots at 640×480 and 264 at 800×600 (spec 4, section 3.2). The slot counter `hslot` restarts at 0 at the start of every line.
+Both MMCMs run from the same oscillator, so the frequencies are exact: every 576p scan line (864 pixels at 27 MHz) is exactly 32 µs, which is **320 slots** (spec 4, section 3.2). Only the phase between the pixel clock and the system clock is unknown, so the video treats them as asynchronous clock domains and crosses between them with synchronisers and handshakes. The slot counter `hslot` restarts at 0 at the start of every line.
 
 ### 4.2 One memory cycle
 
@@ -137,12 +137,12 @@ Each cycle has one owner, which always comes first:
 
 Every slot of every line has the same owners (section 4.3), so the allocation per line is simply the number of slots:
 
-| Owner | Cycle | Cycles per line, 640×480 | Cycles per line, 800×600 | Bandwidth |
-|-------|-------|--------------------------|--------------------------|-----------|
-| CPU | 0 | 320 | 264 | 20 MB/s of cycles; the CPU uses at most 10 MB/s |
-| Display fetch | 1–2 | 640 | 528 | 40 MB/s |
-| Audio and peripherals | 3 | 320 | 264 | 20 MB/s |
-| Free pool | 4 | 320 | 264 | 20 MB/s, plus the cycles other owners leave |
+| Owner | Cycle | Cycles per line (576p, 320 slots) | Bandwidth |
+|-------|-------|-----------------------------------|-----------|
+| CPU | 0 | 320 | 20 MB/s of cycles; the CPU uses at most 10 MB/s |
+| Display fetch | 1–2 | 640 | 40 MB/s |
+| Audio and peripherals | 3 | 320 | 20 MB/s |
+| Free pool | 4 | 320 | 20 MB/s, plus the cycles other owners leave |
 
 If an owner doesn't need its cycle (the CPU is between accesses, no layer is fetching, no audio channel needs a word), the cycle goes to the free pool.
 
@@ -150,12 +150,12 @@ If an owner doesn't need its cycle (the CPU is between accesses, no layer is fet
 
 | Owner | Needs | Gets |
 |-------|-------|------|
-| Display (layers) | Depends on the layers | 1.6 bytes per pixel at 640×480, 1.0 at 800×600 (spec 4, section 5.2) |
+| Display (layers) | Depends on the layers | 1280 bytes per line: 1.48 bytes per pixel (864 pixels per line, spec 4, section 5.2) |
 | Audio, 4 channels of 8-bit samples | One word (2 samples) per channel at a time, as on the Amiga | Cycle 3: 20 MB/s |
 | Copper | 2 cycles per instruction | The free pool, first |
-| DMA engine | – | The rest of the free pool: about 50–65 MB/s of memory cycles at 640×480 (spec 11) |
+| DMA engine | – | The rest of the free pool: about 50–65 MB/s of memory cycles, depending on the screen (spec 11) |
 
-During vertical blanking there is no display fetch, so cycles 1–2 go to the free pool too.
+During vertical blanking (49 of the 625 lines) there is no display fetch, so cycles 1–2 go to the free pool too. In the horizontal blank (144 of the 864 pixels) the display fetches only the first two groups of each layer's next line.
 
 ### 7.2 No line buffers
 
@@ -191,7 +191,7 @@ Together with BPLDMA, every DMA user can be turned off on its own (one audio cha
 
 ## 10. Tests
 
-- **Cycle table:** for both video modes, check each owner gets its cycles at the same `hslot` on every line, and that unused cycles go to the free pool.
+- **Cycle table:** check each owner gets its cycles at the same `hslot` on every line, and that unused cycles go to the free pool.
 - **CPU zero-wait:** run fx68k from Chip RAM with the display, audio, copper and DMA engine all busy; assert /DTACK is never delayed.
 - **SRAM model:** run the controller against an SRAM simulation model with the datasheet timing checks on (setup, hold, pulse widths, bus turnaround). Done in `sim/` for version 1.
-- **Board test:** a full 4 MB pattern test from the CPU and from the DMA engine at once, in both video modes.
+- **Board test:** a full 4 MB pattern test from the CPU and from the DMA engine at once, with the display busy.

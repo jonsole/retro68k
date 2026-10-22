@@ -111,7 +111,7 @@ The boot ROM's own spec will define this in detail. In outline:
 2. Read RESETWHY, the keys held down and the DivMMC button.
 3. On power-on only: test Chip RAM.
 4. Set up the vector table in RAM, turn the overlay off, set up interrupts and a 1000 Hz timer tick.
-5. Start the default screen: 640×480 with an 80×30 text layer.
+5. Start the default screen: an 80×30 text console, drawn with the ROM font into a 1-plane 640×480 bitmap layer, in a window centred in the 720×576 (576p) screen at (40, 48), with the background colour as a border. There is no text layer.
 6. **If RESETWHY.UPLOAD, or U is held:** wait for a program over the USB serial link and run it.
 7. **Otherwise:** start the SD card. If it holds a boot file, load and run it.
 8. **If there is no boot file, or M or the DivMMC button is held:** start the monitor, on the screen and the USB serial console at once. BASIC comes later (phase 7).
@@ -127,7 +127,6 @@ The KS3 has no user LEDs or switches, so:
 |-------------------|--------------------|
 | M, or the DivMMC button | Go straight to the monitor |
 | U | Wait for a program over USB |
-| 5 | Default screen at 50 Hz instead of 60 Hz |
 | D | Development: leave the boot ROM writable (don't set ROMLOCK) |
 
 Keys can be held on the PS/2 keyboard or the Spectrum keyboard (spec 16).
