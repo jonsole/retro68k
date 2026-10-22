@@ -207,7 +207,6 @@
 `define RM_SPR_CTL_VMAG                     19:18
 `define RM_SPR_CTL_DEPTH                    21:20
 `define RM_SPR_CTL_PAL                      27:24
-`define RM_SPR_CTL_END                      31
 `define RM_SPR_DAT                          16'h000C
 `define RM_SPR_DAT_DATA                     15:0
 `define RM_AUD_BASE                         16'h0440

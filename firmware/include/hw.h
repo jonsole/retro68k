@@ -426,8 +426,6 @@
 #define SPR_CTL_DEPTH_MASK                 0x300000u
 #define SPR_CTL_PAL_SHIFT                  24
 #define SPR_CTL_PAL_MASK                   0xF000000u
-#define SPR_CTL_END_SHIFT                  31
-#define SPR_CTL_END_MASK                   0x80000000u
 #define SPR_DAT_OFS                        0xCu
 #define SPR_DAT(n)                         HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_DAT_OFS)
 #define SPR_DAT_DATA_SHIFT                 0

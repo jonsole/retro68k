@@ -507,8 +507,6 @@ SPR_CTL_DEPTH_M              equ $300000
 SPR_CTL_PAL_B                equ $18
 SPR_CTL_PAL_W                equ $4
 SPR_CTL_PAL_M                equ $F000000
-SPR_CTL_END_B                equ $1F
-SPR_CTL_END_M                equ $80000000
 SPR_DAT                      equ $C          ; RW, spec 9/6 (add to SPRn)
 SPR_DAT_DATA_B               equ $0
 SPR_DAT_DATA_W               equ $10
