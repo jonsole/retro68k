@@ -16,7 +16,7 @@ read_verilog -sv [list \
     $root/fpga/third_party/fx68k/fx68kAlu.sv \
     $root/fpga/third_party/fx68k/uaddrPla.sv ]
 read_verilog [list \
-    $rtl/timebase.v $rtl/cpu_fx68k.v $rtl/sram_ctl.v $rtl/bus_if.v $rtl/bootrom.v \
+    $rtl/timebase.v $rtl/cpu_fx68k.v $rtl/sram_ctl.v $rtl/dmac.v $rtl/bus_if.v $rtl/bootrom.v \
     $rtl/fifo8.v $rtl/sysregs.v $rtl/serial.v $rtl/intc.v $rtl/timers.v \
     $rtl/layer_pix.v $rtl/bpldma.v $rtl/video.v $rtl/retro68k.v \
     $rtl/por_align.v $rtl/tmds_encoder.v $rtl/top_ks3.v \

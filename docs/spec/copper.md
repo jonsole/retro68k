@@ -12,7 +12,7 @@ The copper is a small coprocessor that follows the beam, as on the Amiga: it run
 | Instructions | MOVE, WAIT, SKIP (as the Amiga), plus JUMP and STOP |
 | Can write | The custom register block only (`0xE00000`–`0xE07FFF`): all video, DMA and copper registers and the palette. Not the system block |
 | Beam position | Full range (11-bit line and pixel), pixel exact |
-| Memory | Its own DMA channel in the scheduler (spec 5, section 6): best effort, cycle 4 and any cycle nobody else wants |
+| Memory | Its own DMA channel in the scheduler (spec 5, section 6): best effort, cycle 4 and any cycle nobody else wants; COPCON.PRI can raise it (section 5) |
 | Prefetch | The next instruction, so the MOVE after a WAIT runs as soon as the WAIT is over |
 | Interrupt | A MOVE to COPINT raises the copper's interrupt (source COPPER) |
 
@@ -68,6 +68,15 @@ Unused bit patterns are reserved; the copper treats them as STOP and sets COPSTA
 - **Beam position:** the copper compares against the beam position seen on the memory side (spec 4, section 3.1), a few clocks behind the pixel clock. A WAIT ends within about one pixel of its position.
 - **MOVE after a WAIT:** the next instruction is already fetched, so the write happens 10–20 ns after the WAIT ends. Writes that follow need their own fetches.
 - **Fetches:** each instruction is two 16-bit words. The copper's channel is best effort: cycle 4 of every slot, plus any cycle nobody else wants (spec 5, section 6), so at least 20 MB/s: one instruction every 200 ns or better, about 5 pixels at 576p, and much faster in the blanking.
+- **Priority (COPCON.PRI):** a list that must make many writes quickly can raise the copper's priority:
+
+  | PRI | The copper gets |
+  |-----|-----------------|
+  | 0, normal | Cycle 4 and the cycles nobody else wants, after audio (the default) |
+  | 1, high | Cycle 4 as its own, and first place in the free order: ahead of audio, the DMA engine, and display fetches that are not urgent |
+  | 2, nasty | As 1, and it may also take the CPU's cycle 0, like the Amiga's blitter-nasty mode; the CPU's access then waits one slot |
+
+  An urgent display fetch (spec 4, section 5.6) still comes first at every level, so raising the copper never spoils the picture. PRI matters only while the copper has an instruction to fetch: while it waits, it takes nothing.
 - **When writes take effect:** as for the CPU (spec 4, section 5.4): the palette at once (a colour change shows within about 1–2 pixels of the WAIT position), layer settings from the next line, BPLxPT, BPLMOD and BPLxDAT at once.
 - **Register bus:** the copper and the CPU share the register bus; the copper goes first, so a CPU register access may wait one clock.
 
@@ -77,7 +86,7 @@ Offsets in the custom register block at `0xE00000`.
 
 | Offset | Name | Access | Bits | Description |
 |--------|------|--------|------|-------------|
-| `0x700` | COPCON | RW | EN (0), IRQEN (1) | Copper on (DMACON.DMAEN and COPEN must also be set); COPINT raises the interrupt |
+| `0x700` | COPCON | RW | EN (0), IRQEN (1), PRI (5–4) | Copper on (DMACON.DMAEN and COPEN must also be set); COPINT raises the interrupt; priority for memory cycles (section 5): 0 normal, 1 high, 2 nasty |
 | `0x704` | COP1LC | RW | 22–2 | First list: restarted at every vertical blank |
 | `0x708` | COP2LC | RW | 22–2 | Second list |
 | `0x70C` | COPJMP1 | W | – | Strobe: restart at COP1LC now |

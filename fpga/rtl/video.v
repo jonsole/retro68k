@@ -36,6 +36,8 @@ module video (
     // DMACON, and the display fetch port of the SRAM controller
     output reg  [15:0] dmacon,
     output wire        disp_req,
+    output wire        disp_urgent,
+    output wire [9:0]  disp_deadline,
     output wire [21:1] disp_addr,
     input  wire        disp_ack,
     input  wire        disp_rvalid,
@@ -287,6 +289,7 @@ module video (
     reg  [2:0]  f_act, f_adv, f_chunky;
     reg  [11:0] f_groups [0:2], f_len [0:2];
     reg  [2:0]  f_planes [0:2];
+    reg  [1:0]  f_hs [0:2];
     reg         line_t;
     // This line's settings, for the layer units
     reg  [2:0]  c_act, c_planar, c_transp;
@@ -340,6 +343,7 @@ module video (
                 f_len[n]    <= n_len[n];
                 f_planes[n] <= l_ctrl[n][1] ? l_ctrl[n][18:16] : (3'd1 << l_ctrl[n][3:2]) - 1'b1;
                 f_chunky[n] <= !l_ctrl[n][1];
+                f_hs[n]     <= l_ctrl[n][7:6];
                 c_xs[n]     <= l_xs[n];
                 c_xe[n]     <= l_xe[n];
                 c_planar[n] <= l_ctrl[n][1];
@@ -362,12 +366,12 @@ module video (
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(dma_q),
         .line_t(line_t), .act(f_act), .adv(f_adv),
-        .planes({f_planes[2], f_planes[1], f_planes[0]}), .chunky(f_chunky),
+        .planes({f_planes[2], f_planes[1], f_planes[0]}), .chunky(f_chunky), .hscale({f_hs[2], f_hs[1], f_hs[0]}),
         .ngroups({f_groups[2], f_groups[1], f_groups[0]}),
         .len({f_len[2], f_len[1], f_len[0]}),
         .line_go(line_go), .line_gen(line_gen),
         .dat(dat), .fill_t(fill_t), .take_t(take_t),
-        .req(disp_req), .addr(disp_addr), .ack(disp_ack), .rvalid(disp_rvalid), .rdata(disp_rdata)
+        .req(disp_req), .urgent(disp_urgent), .deadline(disp_deadline), .addr(disp_addr), .ack(disp_ack), .rvalid(disp_rvalid), .rdata(disp_rdata)
     );
 
     // ---- layer units: their output is stage 1

@@ -160,16 +160,35 @@ module retro68k #(
     );
 
     // ---------------------------------------------------------------- memory
-    wire        disp_req, disp_ack, disp_rvalid;
+    wire        disp_req, disp_urgent, disp_ack, disp_rvalid;
     wire [21:1] disp_addr;
-    sram_ctl mem (
-        .clk(clk100), .rst(sys_rst), .sc(sc),
+    wire [9:0]  disp_deadline;
+    // The DMA scheduler (spec 5): who gets each memory cycle. Sprites, audio,
+    // copper and the DMA engine are still to come; their channels are tied off.
+    wire        m_start, m_go, m_go_we, m_rvalid_any;
+    wire [2:0]  m_cycle, m_go_tag, m_rtag;
+    wire [21:1] m_go_addr;
+    wire [15:0] m_go_wdata;
+    wire [1:0]  m_go_be;
+    dmac sched (
+        .clk(clk100), .rst(sys_rst), .start_next(m_start), .next_cycle(m_cycle),
         .cpu_req(m_req), .cpu_we(m_we), .cpu_addr(m_addr), .cpu_wdata(m_wdata), .cpu_be(m_be),
         .cpu_ack(m_ack), .cpu_rvalid(m_rvalid),
-        .dma_req(dma_req), .dma_we(dma_we), .dma_addr(dma_addr), .dma_wdata(dma_wdata),
-        .dma_be(dma_be), .dma_ack(dma_ack), .dma_rvalid(dma_rvalid),
-        .disp_req(disp_req), .disp_addr(disp_addr), .disp_ack(disp_ack),
-        .disp_rvalid(disp_rvalid),
+        .bpl_req(disp_req), .bpl_addr(disp_addr), .bpl_deadline(disp_deadline), .bpl_urgent(disp_urgent),
+        .bpl_ack(disp_ack), .bpl_rvalid(disp_rvalid),
+        .spr_req(1'b0), .spr_addr(21'd0), .spr_deadline(10'h3FF), .spr_urgent(1'b0), .spr_ack(), .spr_rvalid(),
+        .aud_req(1'b0), .aud_addr(21'd0), .aud_ack(), .aud_rvalid(),
+        .cop_req(1'b0), .cop_addr(21'd0), .cop_pri(2'd0), .cop_ack(), .cop_rvalid(),
+        .blt_req(1'b0), .blt_we(1'b0), .blt_addr(21'd0), .blt_wdata(16'd0), .blt_be(2'b00), .blt_ack(), .blt_rvalid(),
+        .port_req(dma_req), .port_we(dma_we), .port_addr(dma_addr), .port_wdata(dma_wdata), .port_be(dma_be),
+        .port_ack(dma_ack), .port_rvalid(dma_rvalid),
+        .go(m_go), .go_we(m_go_we), .go_addr(m_go_addr), .go_wdata(m_go_wdata), .go_be(m_go_be), .go_tag(m_go_tag),
+        .rvalid(m_rvalid_any), .rtag(m_rtag)
+    );
+    sram_ctl mem (
+        .clk(clk100), .rst(sys_rst), .sc(sc),
+        .go(m_go), .go_we(m_go_we), .go_addr(m_go_addr), .go_wdata(m_go_wdata), .go_be(m_go_be), .go_tag(m_go_tag),
+        .start_next(m_start), .next_cycle(m_cycle), .rvalid(m_rvalid_any), .rtag(m_rtag),
         .rdata(mem_rdata),
         .sram_a(sram_a), .sram_ce_n(sram_ce_n), .sram_ub_n(sram_ub_n), .sram_lb_n(sram_lb_n),
         .sram_oe_n_r(sram_oe_n_r), .sram_oe_n_f(sram_oe_n_f),
@@ -215,7 +234,7 @@ module retro68k #(
         .rb_rdata(rd_vid),
         .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
         .line_tick(line_tick), .frame_tick(frame_tick),
-        .dmacon(dmacon), .disp_req(disp_req), .disp_addr(disp_addr),
+        .dmacon(dmacon), .disp_req(disp_req), .disp_urgent(disp_urgent), .disp_addr(disp_addr),
         .disp_ack(disp_ack), .disp_rvalid(disp_rvalid), .disp_rdata(mem_rdata),
         .clk_pix(clk_pix), .clk_pix5(clk_pix5), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
     );

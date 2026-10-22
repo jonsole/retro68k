@@ -15,9 +15,11 @@
 // the DMA fetches the next group. Full and taken cross between the clock
 // domains as toggles (fill_t here, take_t there).
 //
-// The DMA uses the display's memory cycles (1 and 3 of each slot). The
-// layers that want a word take turns, one word each (round robin), so no
-// layer waits for more than one word from each of the others.
+// The DMA uses the display's memory cycles (1 and 3 of each slot). Each
+// word goes to the layer whose deadline is nearest (earliest deadline
+// first): when a layer's shifters take a group, its countdown loads the
+// time that group lasts (16 source pixels, about 59 system clocks x the
+// horizontal scale). Layers with equal countdowns take turns.
 //
 // Line by line: at line_go (start of horizontal blank, from the pixel
 // domain) the line just shown is finished off: each plane pointer it used
@@ -44,6 +46,7 @@ module bpldma (
     input  wire [2:0]   adv,           // ... and its pointers move on after it (last copy of a source line)
     input  wire [8:0]   planes,        // 3 x 3 bits: words per group - 1 (planes, or chunky bits per pixel)
     input  wire [2:0]   chunky,        // the layer's words all come from BPL0PT
+    input  wire [5:0]   hscale,        // 3 x 2 bits: log2 of the horizontal scale (for the deadlines)
     input  wire [35:0]  ngroups,       // 3 x 12: groups to fetch
     input  wire [35:0]  len,           // 3 x 12: line length in words per plane
     output wire         line_go,       // 1 clock: a new line started here
@@ -56,6 +59,8 @@ module bpldma (
 
     // SRAM controller display port
     output reg          req,
+    output wire         urgent,        // req must not wait: may take the CPU's cycle 0
+    output wire [9:0]   deadline,      // system clocks until req's data is needed (for the scheduler)
     output reg  [21:1]  addr,
     input  wire         ack,
     input  wire         rvalid,
@@ -88,7 +93,7 @@ module bpldma (
     assign line_go = line_s[1] != line_s[0];
     reg  [2:0]  gen;
     assign line_gen = gen[0];
-    reg  [2:0]  take_s1, take_s2;
+    reg  [2:0]  take_s1, take_s2, take_s3;
     wire [2:0]  full = fill_t ^ take_s2;
 
     reg  [11:0] left   [0:2];          // groups still to start
@@ -130,19 +135,48 @@ module bpldma (
         end
     endfunction
 
-    // Who asks next: the layers with a group being asked for, or able to
-    // start one, take turns after the last one served
+    // Deadlines: system clocks until each layer's shifters use up the group
+    // they took last, so the next one must be in by then. The line's first
+    // take (the group loaded ahead of the window) sets no deadline: the next
+    // one is not needed until the window has started.
+    reg  [9:0]  dl [0:2];
+    reg  [2:0]  first_take;
+    reg  [1:0]  req_layer;
+    function [3:0] ones(input [7:0] v);
+        integer b;
+        begin
+            ones = 4'd0;
+            for (b = 0; b < 8; b = b + 1) ones = ones + v[b];
+        end
+    endfunction
+    // A request is urgent when its layer's deadline is close: the words
+    // still to come at 50 ns each, plus about 140 ns for the read and the
+    // crossing back. Then it takes the CPU's cycle 0 too (spec 4, 5.6).
+    wire [3:0]  words_left = ones(rem[req_layer]) + 1'b1;
+    assign      urgent = req && (dl[req_layer] < 10'd14 + {words_left, 2'b00} + words_left);
+    assign      deadline = dl[req_layer];
+
+    // Who asks next: of the layers with a group being asked for, or able to
+    // start one, the one with the nearest deadline; on a tie, the next after
+    // the last one served
     reg  [2:0]  want;
     reg  [1:0]  pick, last;
     integer n;
-    always @(*) begin
+    always @(*) begin : choose
+        integer o;
+        reg [1:0] c;
+        reg       found;
         for (n = 0; n < 3; n = n + 1)
             want[n] = (rem[n] != 0) || (left[n] != 0 && !busy[n] && !full[n] && emask[n] != 8'd0);
-        case (last)
-            2'd0:    pick = want[1] ? 2'd1 : want[2] ? 2'd2 : 2'd0;
-            2'd1:    pick = want[2] ? 2'd2 : want[0] ? 2'd0 : 2'd1;
-            default: pick = want[0] ? 2'd0 : want[1] ? 2'd1 : 2'd2;
-        endcase
+        found = 1'b0;
+        pick  = 2'd0;
+        for (o = 1; o <= 3; o = o + 1) begin
+            c = (last + o) % 3;                       // round-robin order after the last
+            if (want[c] && (!found || dl[c] < dl[pick])) begin
+                found = 1'b1;
+                pick  = c;
+            end
+        end
     end
     // The data register to fill next: high to low
     wire        gstart  = (rem[pick] == 8'd0);                     // a new group
@@ -167,6 +201,12 @@ module bpldma (
         line_s  <= {line_s[0], line_t};
         take_s1 <= take_t;
         take_s2 <= take_s1;
+        take_s3 <= take_s2;
+        for (n = 0; n < 3; n = n + 1)
+            if (take_s3[n] != take_s2[n]) begin                     // a group was taken
+                dl[n] <= first_take[n] ? 10'h3FF : 10'd59 << hscale[2*n +: 2];
+                first_take[n] <= 1'b0;
+            end else if (dl[n] != 10'd0 && dl[n] != 10'h3FF) dl[n] <= dl[n] - 1'b1;
         if (rst) begin
             req    <= 1'b0;
             last   <= 2'd2;
@@ -178,8 +218,10 @@ module bpldma (
             pv_act <= 3'd0;
             pv_adv <= 3'd0;
             pv_chunky <= 3'd0;
+            first_take <= 3'd0;
+            req_layer <= 2'd0;
             for (n = 0; n < 3; n = n + 1) begin
-                left[n] <= 12'd0;  issued[n] <= 12'd0;  rem[n] <= 8'd0;
+                left[n] <= 12'd0;  issued[n] <= 12'd0;  rem[n] <= 8'd0;  dl[n] <= 10'h3FF;
                 mod[n]  <= 16'd0;
                 pm[n]   <= 8'hFF;              // every plane's DMA on
                 pv_planes[n] <= 3'd0;  pv_len[n] <= 12'd0;  pv_mask[n] <= 8'd0;
@@ -216,6 +258,8 @@ module bpldma (
                     left[n]   <= (has_dma[n] && act[n]) ? ngroups[12*n +: 12] : 12'd0;
                     issued[n] <= 12'd0;
                     rem[n]    <= 8'd0;
+                    dl[n]     <= 10'h3FF;                     // no deadline until the first in-window take
+                    first_take[n] <= 1'b1;
                     pv_planes[n] <= planes[3*n +: 3];
                     pv_mask[n]   <= emask[n];
                     pv_len[n]    <= len[12*n +: 12];
@@ -230,6 +274,7 @@ module bpldma (
             end else if ((!req || ack) && |want) begin
                 // Ask for the next word
                 req        <= 1'b1;
+                req_layer  <= pick;
                 last       <= pick;
                 addr       <= pt[pi][21:1];
                 pt[pi]     <= pt[pi] + 23'd2;
