@@ -32,6 +32,8 @@ module video (
     output wire        irq_viderr,
     output wire        line_tick,      // 1 clock (100 MHz) per video line, for the timers
     output wire        frame_tick,     // 1 clock at the start of each vertical blank
+    output wire [10:0] beam_v,         // the beam position, memory side (for the copper)
+    output wire [10:0] beam_h,
 
     // DMACON, and the display fetch port of the SRAM controller
     output reg  [15:0] dmacon,
@@ -95,6 +97,8 @@ module video (
     end
     wire [10:0] s_hc = bsync[10:0], s_vc = bsync[21:11];
     wire [15:0] s_frames = bsync[37:22];
+    assign beam_v = s_vc;
+    assign beam_h = s_hc;
     reg         p_vb_t, p_line_t;      // toggles: vertical blank started, line compare hit
     wire        p_invblank = (s_vc >= VVIS);
 

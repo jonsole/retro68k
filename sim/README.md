@@ -10,6 +10,9 @@ make run ARGS=+bustrace=N # every bus cycle (address and data) for the first N
 make run ARGS=+serial     # echo test, PC BREAK (NMI) and RESET commands
 make frame                # also save the screen as build/frame.png (needs Pillow)
 make run ARGS=+vcd        # waveform in build/tb.vcd
+make vtest                # video test: random pictures checked pixel by pixel (vtest/)
+make ctest                # copper test: a self-checking ROM, then the frame (ctest/)
+make run ARGS=+coptrace   # the copper's instructions and register writes
 ```
 
 Needs `iverilog` (12), `sv2v` (converts fx68k from SystemVerilog), `vasmm68k_mot` and `python3`. Paths can be given with `make SV2V=... VASM=...`. A run takes about 2–5 minutes. The test also checks the video sync timing against 576p (CEA-861: 864 × 625 at 27 MHz).

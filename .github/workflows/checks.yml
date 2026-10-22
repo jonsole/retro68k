@@ -44,6 +44,31 @@ jobs:
       - name: Boot ROM test with the DMA port busy
         run: make -C sim run ARGS=+dma
 
+  copper:
+    name: Copper test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y iverilog
+      - name: Install sv2v
+        run: |
+          curl -sSL -o sv2v.zip https://github.com/zachjs/sv2v/releases/download/v0.0.13/sv2v-Linux.zip
+          unzip -q sv2v.zip
+          echo "$PWD/sv2v-Linux" >> "$GITHUB_PATH"
+      - name: Build vasm
+        run: |
+          curl -sSL -o vasm.tar.gz http://sun.hasenbraten.de/vasm/release/vasm.tar.gz
+          tar xzf vasm.tar.gz
+          make -C vasm CPU=m68k SYNTAX=mot -j4 > /dev/null
+          echo "$PWD/vasm" >> "$GITHUB_PATH"
+      - name: Copper test ROM and frame check
+        run: make -C sim ctest
+
   ks3-synth:
     name: KS3 synthesis check (Yosys)
     runs-on: ubuntu-latest

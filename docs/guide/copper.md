@@ -29,7 +29,7 @@ This chapter covers:
 
 You should have read "Working with the Hardware Registers" in the Introduction and System Control Hardware chapter, and the Playfield Hardware chapter, because nearly everything the copper does is to write the registers described there. Interrupts are explained in the Interrupts and Timers chapter.
 
-**Note:** The copper is fully specified, but it is **not yet built** in the FPGA design. The examples in this chapter are written against the specification, and each one assembles with the macros in `copper.inc`, but they will not run until the copper is added. Until then, use the CPU methods in the Playfield Hardware chapter (the VBLANK and LINE interrupts).
+**Note:** The copper is built in the FPGA design (`fpga/rtl/copper.v`) and tested in simulation (`make -C sim ctest`), but not yet on the board. The examples in this chapter assemble with the macros in `copper.inc`.
 
 ### Comparison with the Amiga
 

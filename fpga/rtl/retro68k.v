@@ -130,15 +130,27 @@ module retro68k #(
     wire [1:0]  rom_we;
     wire [14:1] rom_addr;
     wire [15:0] rom_wdata, rom_rdata;
-    wire        rb_rd, rb_wr;
-    wire [23:2] rb_addr;
-    wire [31:0] rb_wdata;
-    wire [3:0]  rb_be;
+    // The register bus: the CPU's accesses (bus_if) and the copper's writes.
+    // A CPU access on the bus goes first; the copper's write waits a clock.
+    wire        c_rb_rd, c_rb_wr;
+    wire [23:2] c_rb_addr;
+    wire [31:0] c_rb_wdata;
+    wire [3:0]  c_rb_be;
+    wire        cw_req;
+    wire [23:2] cw_addr;
+    wire [31:0] cw_wdata;
+    wire [3:0]  cw_be;
+    wire        cw_go    = cw_req && !c_rb_rd && !c_rb_wr;
+    wire        rb_rd    = c_rb_rd;
+    wire        rb_wr    = c_rb_wr || cw_go;
+    wire [23:2] rb_addr  = cw_go ? cw_addr  : c_rb_addr;
+    wire [31:0] rb_wdata = cw_go ? cw_wdata : c_rb_wdata;
+    wire [3:0]  rb_be    = cw_go ? cw_be    : c_rb_be;
     wire [31:0] rd_sys, rd_ser;
     wire        iack;
     wire [2:0]  iack_level;
     wire [7:0]  iack_vector;
-    wire [31:0] rd_int, rd_vid, rd_tmr;
+    wire [31:0] rd_int, rd_vid, rd_tmr, rd_cop;
     wire        berr_ev;
     wire [23:0] berr_addr;
     wire [3:0]  berr_why;
@@ -153,8 +165,8 @@ module retro68k #(
         .m_ack(m_ack), .m_rvalid(m_rvalid), .m_rdata(mem_rdata),
         .rom_en(rom_en), .rom_we(rom_we), .rom_addr(rom_addr), .rom_wdata(rom_wdata),
         .rom_rdata(rom_rdata),
-        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
-        .rb_rdata(rd_sys | rd_ser | rd_int | rd_vid | rd_tmr),
+        .rb_rd(c_rb_rd), .rb_wr(c_rb_wr), .rb_addr(c_rb_addr), .rb_wdata(c_rb_wdata), .rb_be(c_rb_be),
+        .rb_rdata(rd_sys | rd_ser | rd_int | rd_vid | rd_tmr | rd_cop),
         .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector),
         .berr_ev(berr_ev), .berr_addr(berr_addr), .berr_why(berr_why)
     );
@@ -163,8 +175,11 @@ module retro68k #(
     wire        disp_req, disp_urgent, disp_ack, disp_rvalid;
     wire [21:1] disp_addr;
     wire [9:0]  disp_deadline;
-    // The DMA scheduler (spec 5): who gets each memory cycle. Sprites, audio,
-    // copper and the DMA engine are still to come; their channels are tied off.
+    wire        cop_req, cop_ack, cop_rvalid;
+    wire [21:1] cop_addr;
+    wire [1:0]  cop_pri;
+    // The DMA scheduler (spec 5): who gets each memory cycle. Sprites, audio
+    // and the DMA engine are still to come; their channels are tied off.
     wire        m_start, m_go, m_go_we, m_rvalid_any;
     wire [2:0]  m_cycle, m_go_tag, m_rtag;
     wire [21:1] m_go_addr;
@@ -178,7 +193,7 @@ module retro68k #(
         .bpl_ack(disp_ack), .bpl_rvalid(disp_rvalid),
         .spr_req(1'b0), .spr_addr(21'd0), .spr_deadline(10'h3FF), .spr_urgent(1'b0), .spr_ack(), .spr_rvalid(),
         .aud_req(1'b0), .aud_addr(21'd0), .aud_ack(), .aud_rvalid(),
-        .cop_req(1'b0), .cop_addr(21'd0), .cop_pri(2'd0), .cop_ack(), .cop_rvalid(),
+        .cop_req(cop_req), .cop_addr(cop_addr), .cop_pri(cop_pri), .cop_ack(cop_ack), .cop_rvalid(cop_rvalid),
         .blt_req(1'b0), .blt_we(1'b0), .blt_addr(21'd0), .blt_wdata(16'd0), .blt_be(2'b00), .blt_ack(), .blt_rvalid(),
         .port_req(dma_req), .port_we(dma_we), .port_addr(dma_addr), .port_wdata(dma_wdata), .port_be(dma_be),
         .port_ack(dma_ack), .port_rvalid(dma_rvalid),
@@ -228,15 +243,30 @@ module retro68k #(
     // ---------------------------------------------------------------- video (spec 4)
     wire irq_vblank, irq_line, irq_viderr, line_tick, frame_tick;
     wire [15:0] dmacon;
+    wire [10:0] beam_v, beam_h;
     video vid (
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_vid),
         .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
-        .line_tick(line_tick), .frame_tick(frame_tick),
+        .line_tick(line_tick), .frame_tick(frame_tick), .beam_v(beam_v), .beam_h(beam_h),
         .dmacon(dmacon), .disp_req(disp_req), .disp_urgent(disp_urgent), .disp_addr(disp_addr),
         .disp_ack(disp_ack), .disp_rvalid(disp_rvalid), .disp_rdata(mem_rdata),
         .clk_pix(clk_pix), .clk_pix5(clk_pix5), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
+    );
+
+    // ---------------------------------------------------------------- copper (spec 10)
+    wire cop_irq;
+    copper cop (
+        .clk(clk100), .rst(sys_rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_cop),
+        .cw_req(cw_req), .cw_addr(cw_addr), .cw_wdata(cw_wdata), .cw_be(cw_be), .cw_go(cw_go),
+        .mem_req(cop_req), .mem_addr(cop_addr), .mem_pri(cop_pri), .mem_ack(cop_ack),
+        .mem_rvalid(cop_rvalid), .mem_rdata(mem_rdata),
+        .beam_v(beam_v), .beam_h(beam_h), .vblank(frame_tick), .dmacon(dmacon),
+        .blt_idle(1'b1),   // no DMA engine yet
+        .irq(cop_irq)
     );
 
     // ---------------------------------------------------------------- timers (spec 12)
@@ -258,7 +288,7 @@ module retro68k #(
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_int),
-        .req({8'd0, ser_irq, tmr_irq, 7'd0, irq_viderr, 1'b0, irq_line, irq_vblank}),
+        .req({8'd0, ser_irq, tmr_irq, 7'd0, irq_viderr, cop_irq, irq_line, irq_vblank}),
         .nmi_button(nmi_s[1]), .nmi_usb(cmd_break),
         .level(int_level), .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector)
     );

@@ -150,7 +150,7 @@ Macros `CCALL address`, `CRET`.
 - **Beam position:** the copper compares against the beam position seen on the memory side (spec 4, section 3.1), a few clocks behind the pixel clock. A WAIT ends within about one pixel of its position.
 - **MOVE after a WAIT:** the next instruction is already fetched, so the write happens 10–20 ns after the WAIT ends. Writes that follow need their own fetches.
 - **Every instruction is one fetch** (two words), the new ones included; an ALU instruction takes one extra clock. JUMP, CALL, RET and a SKIP or SKIPC that skips throw the prefetched instruction away, so the instruction after them is fetched fresh. A loop therefore costs a fetch for every instruction in it, every pass: unrolled MOVEs are faster, loops are shorter.
-- **Fetches:** each instruction is two 16-bit words. At PRI 0 the copper's channel is best effort: it gets cycle 4 and any other cycle nobody else wants (spec 5, section 6), which is usually plenty but not guaranteed on a busy screen. At PRI 1 cycle 4 is its own: at least 20 MB/s, one instruction every 200 ns or better (about 5 pixels at 576p), and much faster in the blanking.
+- **Fetches:** each instruction is two 16-bit words. At PRI 0 the copper's channel is best effort: it gets cycle 4 and any other cycle nobody else wants (spec 5, section 6), which is usually plenty but not guaranteed on a busy screen. At PRI 1 cycle 4 is its own: at least 20 MB/s, one instruction every 200 ns or better (about 5 pixels at 576p), and faster when the memory is quiet: in simulation, with one word fetched at a time, one instruction every 140 ns (about 4 pixels) in the vertical blank.
 - **Priority (COPCON.PRI):** a list that must make many writes quickly can raise the copper's priority:
 
   | PRI | The copper gets |
@@ -161,7 +161,7 @@ Macros `CCALL address`, `CRET`.
 
   An urgent display fetch (spec 4, section 5.6) still comes first at every level, so raising the copper never spoils the picture. PRI matters only while the copper has an instruction to fetch: while it waits, it takes nothing.
 - **When writes take effect:** as for the CPU (spec 4, section 5.4): the palette at once (a colour change shows within about 1–2 pixels of the WAIT position), layer settings from the next line, BPLxPT, BPLMOD and BPLxDAT at once.
-- **Register bus:** the copper and the CPU share the register bus; the copper goes first, so a CPU register access may wait one clock.
+- **Register bus:** the copper and the CPU share the register bus; a CPU access already on the bus goes first, so a copper write may wait one clock (10 ns).
 
 ## 6. Registers
 
@@ -186,6 +186,8 @@ Offsets in the custom register block at `0xE00000`.
 **Strobes** (COPJMP1, COPJMP2, COPINT) act on any write that reaches their low half (a MOVE to the low half, or a CPU MOVE.W to address + 2, or MOVE.L).
 
 **The copper's registers from the CPU:** COPX, COPY, COPFLAGS and COPR0–7 are 16-bit registers in the low half. The CPU can write them at any time; a write lands between two copper instructions. To hand values to a running list without a race, write them while the copper is stopped or idle, or use storage registers that only one side writes.
+
+**Restarting** (the vertical blank, COPJMP1, COPJMP2) throws away the prefetched instruction; the vertical blank also drops a held high half (RESUME has already saved its MOVE's address).
 
 **Starting:** after reset COPCON, COP1LC, COP2LC, COPSTAT, X, Y, the flags, R0–R7 and the stack are 0. With COPCON.EN, DMACON.COPEN and DMAEN all set, the copper starts from COP1LC at the next vertical blank; a write to COPJMP1 starts it at once. Clearing any of them stops it at once; setting them again starts it at the next vertical blank (or COPJMP1).
 
@@ -254,7 +256,7 @@ The assembler macros for these (`CMOVE`, `CWAIT`, `CSKIP`, `CJUMP`, `CSTOP`) are
 | Program counter, one prefetched instruction, the high-half latch, beam compare | Logic, about 300–400 LUTs |
 | X, Y, the flags, the 16-bit ALU, the conditions | About 150 LUTs, 35 flip-flops |
 | R0–R7 and the stack (8 × 21 bits) | Distributed RAM, about 20 LUTs; their register-bus reads about 50 LUTs |
-| Total | About 550–650 LUTs |
+| Total | About 550–650 LUTs estimated; the first build is about 1,100 LUTs and 510 flip-flops (Yosys): R0–R7 have three read ports, so they are flip-flops, not distributed RAM. To be trimmed |
 
 ## 9. Open points
 
@@ -262,7 +264,7 @@ The assembler macros for these (`CMOVE`, `CWAIT`, `CSKIP`, `CJUMP`, `CSTOP`) are
 |---|------|
 | C1 | Whether a 32-bit MOVEL (an 8-byte instruction) is worth adding, to set a pointer in one instruction |
 | C4 | A load of X or Y from Chip RAM (a table), which the arithmetic cannot replace |
-| C2 | Exact pixel delay from a WAIT to a palette change, measured on the board |
+| C2 | Exact pixel delay from a WAIT to a palette change. In simulation: the write after a WAIT shows at the WAIT's pixel (0 pixels late); each further write takes a fetch, about 4 pixels. To be confirmed on the board |
 | C3 | Whether RESUME should also save the held high half, so that no MOVE is ever repeated |
 
 ## 10. Tests

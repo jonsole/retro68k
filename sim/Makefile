@@ -18,10 +18,10 @@ FX68K := $(ROOT)/fpga/third_party/fx68k
 BUILD := build
 
 RTL_SRC := $(RTL)/timebase.v $(RTL)/cpu_fx68k.v $(RTL)/sram_ctl.v $(RTL)/dmac.v $(RTL)/bus_if.v \
-           $(RTL)/bootrom.v $(RTL)/fifo8.v $(RTL)/sysregs.v $(RTL)/serial.v $(RTL)/intc.v $(RTL)/timers.v $(RTL)/layer_pix.v $(RTL)/bpldma.v $(RTL)/video.v $(RTL)/retro68k.v
+           $(RTL)/bootrom.v $(RTL)/fifo8.v $(RTL)/sysregs.v $(RTL)/serial.v $(RTL)/intc.v $(RTL)/timers.v $(RTL)/layer_pix.v $(RTL)/bpldma.v $(RTL)/video.v $(RTL)/copper.v $(RTL)/retro68k.v
 SIM_SRC := $(RTL)/platform/sim/oddr.v sram_model.v ft232h_model.v tb.v
 
-.PHONY: vtest all run frame clean
+.PHONY: vtest ctest all run frame clean
 all: run
 
 $(BUILD):
@@ -70,6 +70,19 @@ vtest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
 	    grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }; \
 	    python3 vtest/vmodel.py $$d $$d/ram.hex $$d/model.png; \
 	done
+
+# Copper test (spec 10): a self-checking ROM (registers, ALU, conditions,
+# CALL/RET, MOVR, COPINT, RESUME), then the frame checked for colour
+# changes at beam positions (ctest/ccheck.py)
+ctest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
+	@set -e; d=$(BUILD)/ctest; mkdir -p $$d; \
+	$(VASM) -quiet -Fbin -I $(ROOT)/firmware/include -o $$d/ctest.bin ctest/ctest.s; \
+	python3 $(ROOT)/tools/bin2hex.py $$d/ctest.bin $$d/ctest.hex; \
+	cp $(BUILD)/microrom.mem $(BUILD)/nanorom.mem $$d/; \
+	(cd $$d && $(VVP) -n ../tb.vvp +frame +rom=ctest.hex > sim.log); \
+	grep -a "^FAIL\|^PASS" $$d/sim.log || true; \
+	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }; \
+	python3 ctest/ccheck.py $$d
 
 clean:
 	rm -rf $(BUILD)

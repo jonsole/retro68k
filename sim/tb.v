@@ -185,6 +185,18 @@ module tb;
         ncyc = ncyc + 1;
     end
 
+    // Copper trace (+coptrace): its instructions and register writes
+    integer ncop = 0, coptrace = 0;
+    initial coptrace = $test$plusargs("coptrace");
+    always @(posedge clk100) if (coptrace && ncop < 400) begin
+        if (dut.cop.xs == 3'd1 && dut.cop.have && !dut.cop.hold) begin
+            $display("%t cop %h: %h  beam %0d,%0d", $realtime, {dut.cop.npc, 2'b00}, dut.cop.ins, dut.cop.beam_v, dut.cop.beam_h);
+            ncop = ncop + 1;
+        end
+        if (dut.cw_go) $display("%t cop write %h = %h be %b", $realtime, {dut.cw_addr, 2'b00}, dut.cw_wdata, dut.cw_be);
+        if (dut.cop.vblank) $display("%t cop vblank, en %b", $realtime, dut.cop.en);
+    end
+
     // Register bus trace (+rbtrace): the first 40 register accesses
     integer nrb = 0, rbtrace = 0;
     initial rbtrace = $test$plusargs("rbtrace");
