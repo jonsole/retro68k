@@ -1503,7 +1503,7 @@ All offsets are from CUSTOM (`$E00000`). Access: R read only, W write only, RW r
 | COP2LC | `$708` | RW | List 2 address (22–2). Written by the hardware only with COPCON.RESUME |
 | COPJMP1 | `$70C` | W | Strobe: start again at COP1LC now |
 | COPJMP2 | `$710` | W | Strobe: continue at COP2LC now |
-| COPPC | `$714` | R | Address of the instruction being run (22–2) |
+| COPPC | `$714` | R | Address of the instruction being run (22–2); when stopped, the STOP that stopped it |
 | COPSTAT | `$718` | R, W1C | WAITING (0), STOPPED (1); ERR (2) and IRQ (3) sticky, write 1 to clear |
 | COPINT | `$71C` | W | Strobe: sets COPSTAT.IRQ |
 | COPX, COPY | `$720`, `$724` | RW | X and Y (15–0) |

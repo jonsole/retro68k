@@ -378,7 +378,7 @@ module copper (
             `RM_COPCON:   rb_rdata <= {26'd0, copcon};
             `RM_COP1LC:   rb_rdata <= {9'd0, lc1, 2'd0};
             `RM_COP2LC:   rb_rdata <= {9'd0, lc2, 2'd0};
-            `RM_COPPC:    rb_rdata <= {9'd0, (xs == X_RUN || xs == X_OFF) ? npc : xpc, 2'd0};
+            `RM_COPPC:    rb_rdata <= {9'd0, (xs == X_RUN) ? npc : xpc, 2'd0};   // stopped: the STOP
             `RM_COPSTAT:  rb_rdata <= {28'd0, st_irq, st_err, xs == X_OFF, xs == X_WAIT};
             `RM_COPX:     rb_rdata <= {16'd0, rx};
             `RM_COPY:     rb_rdata <= {16'd0, ry};

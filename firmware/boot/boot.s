@@ -8,19 +8,22 @@
 ;   5b. timer 0 interrupts, against the time counter
 ;   6. the vertical blank interrupt from the video
 ;   7. a bitmap layer (layer 1, 4 planes, 2x) fetched from Chip RAM: no overruns
-;   8. "PASS" or "FAIL", then echo whatever arrives over USB
+;   8. the copper has run its list to the end, with no errors
+;   9. "PASS" or "FAIL", then echo whatever arrives over USB
 ;
 ; Everything printed also appears on the screen: an 80 x 30 console drawn
 ; with the ROM font into a 1-plane 640 x 480 bitmap (layer 0), shown as a
 ; centred window in the 720 x 576 (576p) screen, with the background
 ; colour as a border.
-; From step 6 on, the vertical blank interrupt stays on: it resets the
-; layers' plane pointers for each frame (spec 4, 4.4; the copper's job later).
+; The copper resets the layers' plane pointers for each frame (spec 4, 4.4),
+; with a short list copied into Chip RAM at the start (spec 10). From step
+; 6 on, the vertical blank interrupt stays on, and only counts frames.
 ;
 ; Assemble: vasmm68k_mot -Fbin -I ../include [-DSIM] -o boot.bin boot.s
 ; With SIM defined, the RAM test covers only 8 KB, to keep simulation short.
 
             include "hw.inc"
+            include "copper.inc"
 
 ; While the reset overlay is on, reads of 0-$7FFF come from the ROM, so the
 ; stack and variables live above that.
@@ -52,6 +55,7 @@ BM_PL       equ 4
 BM_LINE     equ BM_W/8              ; bytes per plane line
 BM_X        equ 400                 ; shown 2x at (400, 300)
 BM_Y        equ 300
+COPLIST     equ $03A000             ; the copper list (after the console)
 
             org ROM                 ; $F80000; also seen at 0 while the reset overlay is on
             dc.l STACK_TOP          ; initial supervisor stack pointer
@@ -274,7 +278,18 @@ berr_back:  move.l  v_berr,d0                   ; the handler comes back here
             and.l   #VIDSTAT_OVERRUN_M,d0
             bsr     okfail
 
-; ---- 8. result
+; ---- 8. the copper: at its STOP (COPPC on the STOP, STOPPED set), no errors
+            lea     s_copper(pc),a0
+            bsr     puts
+            move.l  COPSTAT(a4),d0
+            and.l   #COPSTAT_STOPPED_M|COPSTAT_ERR_M,d0
+            cmp.l   #COPSTAT_STOPPED_M,d0
+            bne.s   .cop_done                   ; Z clear: fail
+            move.l  COPPC(a4),d0
+            cmp.l   #COPLIST+(coplist_stop-coplist),d0
+.cop_done:  bsr     okfail
+
+; ---- 9. result
             tst.l   v_fail
             bne.s   .fail
             lea     s_pass(pc),a0
@@ -402,9 +417,30 @@ screen_init:
             move.l  #(CON_X<<16)|(CON_X+640),L_WINX(a0)
             move.l  #(CON_Y<<16)|(CON_Y+480),L_WINY(a0)
             move.l  #L_CTRL_EN_M,L_CTRL(a0)     ; chunky, 1 bit per pixel, colours 0-1
-            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M,DMACON+2(a4)
+            ; the copper list into Chip RAM; the copper runs it from the
+            ; next vertical blank on
+            lea     coplist(pc),a0
+            lea     COPLIST,a1
+            moveq   #(coplist_end-coplist)/4-1,d0
+.cop:       move.l  (a0)+,(a1)+
+            dbra    d0,.cop
+            move.l  #COPLIST,COP1LC(a4)
+            move.l  #COPCON_EN_M,COPCON(a4)
+            move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_BPLEN_M|DMACON_COPEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
             rts
+
+; The copper list: every frame, in the vertical blank, the plane pointers
+; back to the top of each picture (layer 0, the console; layer 1, the bitmap)
+            cnop    0,4
+coplist:    CMOVEL  L0+L_BPL0PT,CON
+            CMOVEL  L1+L_BPL0PT,BITMAP+0*BM_LINE
+            CMOVEL  L1+L_BPL1PT,BITMAP+1*BM_LINE
+            CMOVEL  L1+L_BPL2PT,BITMAP+2*BM_LINE
+            CMOVEL  L1+L_BPL3PT,BITMAP+3*BM_LINE
+coplist_stop:
+            CSTOP
+coplist_end:
 
 ; print d0.l as 8 hex digits (d0 kept)
 puthex8:    movem.l d0-d2,-(sp)
@@ -507,15 +543,9 @@ bm_ptrs:    move.l  #BITMAP+0*BM_LINE,L_BPL0PT(a0)
 
 planebits:  dc.w    $5555,$3333,$0F0F,$00FF
 
-; vertical blank: count it, clear the flag, reset layer 1's plane pointers
-vblank:     move.l  a0,-(sp)
-            lea     CUSTOM,a0
-            move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a0)
-            move.l  #CON,L0+L_BPL0PT(a0)
-            lea     L1(a0),a0
-            bsr     bm_ptrs
+; vertical blank: count it and clear the flag (the copper resets the pointers)
+vblank:     move.l  #VIDSTAT_VBLANK_M,CUSTOM+VIDSTAT
             addq.l  #1,v_vbl
-            move.l  (sp)+,a0
             rte
 
 unhandled:  bra.s   unhandled
@@ -532,6 +562,7 @@ s_irq:      dc.b    "interrupt",0
 s_vbl:      dc.b    "vertical blank",0
 s_tmr:      dc.b    "timer",0
 s_layer:    dc.b    "bitmap layer",0
+s_copper:   dc.b    "copper",0
 s_nmi:      dc.b    "NMI",13,10,0
 s_ok:       dc.b    " ok",13,10,0
 s_bad:      dc.b    " FAIL",13,10,0

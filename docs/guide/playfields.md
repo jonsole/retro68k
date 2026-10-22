@@ -258,7 +258,10 @@ start:      move.w  #$2700,sr           ; no interrupts while we set up
             lea     SYSTEM,a5
             bsr     draw                ; step 1: the picture in Chip RAM
 
-            ; turn off anything left on, e.g. by the boot ROM
+            ; turn off anything left on, e.g. by the boot ROM, whose copper
+            ; list would otherwise go on resetting layers 0 and 1's pointers
+            move.w  #DMACON_COPEN_M,DMACON+2(a4)    ; copper off (bit 15 clear: clear)
+            move.l  #0,COPCON(a4)
             move.l  #0,L0+L_CTRL(a4)    ; (MOVE.L #0, never CLR.L)
             move.l  #0,L1+L_CTRL(a4)
             move.l  #0,L2+L_CTRL(a4)
@@ -853,7 +856,7 @@ Wrap works for chunky layers too, and each plane of a separate-planes layer can 
 
 The plane pointers are not reset by the hardware. At the end of a frame each pointer has moved on by one line length plus BPLMOD for every source line shown, and if nothing rewrites it, the next frame carries on from there through memory. As on the Amiga, something must write the pointers at the start of every frame:
 
-- **the copper**, which will do it in the vertical blank with a few MOVE instructions in its list, as Amiga programs do (Chapter 5 has the list for Example 3-1; the copper is specified but not yet in this version of the hardware);
+- **the copper**, which does it in the vertical blank with a few MOVE instructions in its list, as Amiga programs do (Chapter 5 has the list for Example 3-1). The boot ROM resets its own layers' pointers this way;
 - **the CPU**, in its vertical blank interrupt, which is what the examples in this chapter do.
 
 The VBLANK interrupt comes at the start of the vertical blank (line VVISIBLE, pixel 0), after the last visible line has been fetched and the pointers have stopped moving. The hardware starts fetching the next frame's first line at the start of the horizontal blank of the last line of the frame (line 624). So the handler has the whole vertical blank, 49 lines or about 1.5 ms, to write the pointers. A layer whose window starts lower down is fetched later, at the start of the horizontal blank before its YSTART.

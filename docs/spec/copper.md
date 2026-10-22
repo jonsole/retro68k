@@ -174,7 +174,7 @@ Offsets in the custom register block at `0xE00000`.
 | `0x708` | COP2LC | RW | 22–2 | Second list: runs when COPJMP2 is written. The vertical blank reloads the copper from COP1LC only. COP2LC is changed by the hardware only with COPCON.RESUME set (section 6.1) |
 | `0x70C` | COPJMP1 | W | – | Strobe: restart at COP1LC now |
 | `0x710` | COPJMP2 | W | – | Strobe: continue at COP2LC now |
-| `0x714` | COPPC | R | 22–2 | The instruction being run |
+| `0x714` | COPPC | R | 22–2 | The instruction being run; when stopped, the STOP (or the reserved instruction) that stopped it |
 | `0x718` | COPSTAT | RW1C | WAITING (0), STOPPED (1), ERR (2), IRQ (3) | ERR (a reserved instruction) and IRQ (set by COPINT) are sticky: write 1 to clear |
 | `0x71C` | COPINT | W | – | Strobe: sets COPSTAT.IRQ. Meant to be written by the copper itself |
 | `0x720` | COPX | RW | 15–0 | X (section 4.2) |
