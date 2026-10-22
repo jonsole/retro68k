@@ -260,9 +260,11 @@ The next group must be complete before the current one is used up: 16 source pix
 | 5 + 4, 5 + 5, 8 + 2 at 1× | 9–10 | 1.13–1.25 | Fits |
 | 8 + 3, 6 + 5 at 1× | 11 | 1.38 | Runs short |
 | 8 + 8 at 2× | 16 | 1.0 | Fits |
+| 8 + 8 + 4, 8 + 8 + 6 at 2× | 20–22 | 1.25–1.38 | Fits |
+| 8 + 8 + 7 at 2× | 23 | 1.44 | Runs short |
 | A 1× layer of 6–8 planes with a deep layer at 2× or 4× | – | – | Runs short (see below) |
 
-So: **at 1×, at most 10 planes (or chunky words) in step**; at 2× and more, the bandwidth budget (section 5.2) is the limit in practice.
+So: **at 1×, at most 10 planes (or chunky words) in step; at 2×, at most 22.** At 4× and more, the bandwidth budget (section 5.2) is the limit.
 
 The layers take turns one word each (section 5.1), so a deep layer at 2× gets as many turns as a layer at 1×, although its deadline is twice as far away. A deep 1× layer next to a deep 2× layer therefore runs short even though both fit the budget. Keep deep layers at 1× alone, or give the other layers few planes (open point V3). Planes with their DMA off (section 5.5) don't count. Layers whose groups start on different pixels (different fine scroll, or windows starting at different x) share the time better.
 
