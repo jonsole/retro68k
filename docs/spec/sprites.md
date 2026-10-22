@@ -13,7 +13,7 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Sprites | 8 (SPR0–SPR7). Each can be reused further down the screen by the copper rewriting its registers |
 | Window | HSTART–HSTOP across, VSTART–VSTOP down, like a layer's window. The image's size follows from the window and the magnify |
 | Size | Any, as a layer's: set by the window. Only the memory budget limits it (section 5) |
-| Colours | 2, 4 or 8 bits per pixel. 2 and 4 bpp: 3 or 15 colours + transparent, from any 16-colour block of the palette; 8 bpp: 255 colours + transparent, the whole palette |
+| Colours | 2, 4 or 8 bits per pixel. 2 and 4 bpp: 3 or 15 colours + transparent, from any 16-colour block of the sprite palette; 8 bpp: 255 colours + transparent, the whole sprite palette. The sprites have a 256-colour palette of their own, separate from the layers' |
 | Position | Any pixel; clipped at the left, right and bottom edges by the hardware, at the top by software (section 3) |
 | Magnify | ×1, ×2 or ×4, across and down separately |
 | Depth | Per sprite: in front of all layers, between any two (in PRIO order), or behind all |
@@ -68,7 +68,7 @@ The image's size follows from the window: **source width** = (HSTOP − HSTART) 
 | 17–16 | HMAG | Each source pixel shown 1, 2 or 4 times across (0, 1, 2) |
 | 19–18 | VMAG | Each source line shown on 1, 2 or 4 screen lines (0, 1, 2) |
 | 21–20 | DEPTH | 0 = in front of all layers; 1 = behind the front layer; 2 = behind the middle layer; 3 = behind all layers (in PRIO order) |
-| 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the palette (colour = PAL × 16 + value). Not used at 8 bpp |
+| 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the sprite palette (colour = PAL × 16 + value). Not used at 8 bpp |
 
 A sprite shows inside its window once per frame. A sprite whose DMA is on (SPRDMA) shows every frame where its registers say; to hide it, turn its DMA off, or set VSTART to 576 or more.
 
@@ -82,7 +82,7 @@ A sprite shows inside its window once per frame. A sprite whose DMA is on (SPRDM
 
 ### 3.1 Pixels and colours
 
-Image lines are **chunky**, as chunky layers are: 2, 4 or 8 bits per pixel, packed in words, the first pixel in the highest bits. A value of 0 is transparent. Other values are palette entries: at 8 bpp the value itself; at 2 and 4 bpp, PAL × 16 + the value.
+Image lines are **chunky**, as chunky layers are: 2, 4 or 8 bits per pixel, packed in words, the first pixel in the highest bits. A value of 0 is transparent. Other values are entries of the **sprite palette**, SPRPALETTE (`0xE04C00`–`0xE04FFF`, spec 4, section 6.3), which the sprites share and the layers do not use: at 8 bpp the value itself; at 2 and 4 bpp, PAL × 16 + the value. With VIDCON.SHAREPAL set, sprites use PALETTE0 instead, as the layers then do.
 
 ### 3.2 Magnify
 
@@ -94,7 +94,7 @@ There is no flip: for an object that faces either way, store both images.
 
 Each sprite's DEPTH puts it in front of all three layers, between any two in their PRIO order, or behind all of them (in front of the background colour). Where two sprites overlap, the lower-numbered channel is in front. A layer's transparent pixels (TRANSP, value 0) show the sprites and layers behind them.
 
-In direct-colour mode (VIDCON.DIRECT, spec 4, section 4.9) sprites are drawn in front of the picture with their palette colours, and DEPTH is not used.
+In direct-colour mode (VIDCON.DIRECT, spec 4, section 4.9) sprites are drawn in front of the picture in their colours from the sprite palette, and DEPTH is not used.
 
 ## 4. Data registers: the FIFO
 

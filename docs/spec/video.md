@@ -6,7 +6,7 @@ Status: **v1 scope**
 
 - DVI output over the HDMI connector and, at the same time, 24-bit VGA through the KS3's ADV7125 video DAC.
 - **One video mode: 576p**, 720×576 at 50 Hz, exactly as CEA-861 defines it (27 MHz), so every HDMI TV and monitor takes it. It is the digital form of PAL: a normal Amiga-style screen (for example 640×512, PAL 320×256 doubled) sits in a centred window, and overscan uses the whole 720×576. There are no timing registers.
-- **Three bitmap layers**, each with its own display window, scroll, scale and palette block. Each layer is **planar** (1 to 8 Amiga-style bitplanes) or **chunky** (1, 2, 4 or 8 bits per pixel).
+- **Three bitmap layers**, each with its own display window, scroll, scale and 256-colour palette. Each layer is **planar** (1 to 8 Amiga-style bitplanes) or **chunky** (1, 2, 4 or 8 bits per pixel).
 - **Amiga-style bitplane DMA:** each plane has a pointer (BPLxPT) that moves through memory as the picture is shown, a stride (BPLSTRIDE) from each line's start to the next, and a data register (BPLxDAT). The copper (or the CPU) resets the pointers every frame.
 - **No hidden buffers.** Each plane has just its data register and its shift register, as on the Amiga. The DMA loads the data registers just in time; the copper or CPU can load them too.
 - **Fetch is automatic:** the hardware works out when and what to fetch from each layer's window, so there are no fetch start and stop registers (the Amiga's DDFSTRT/DDFSTOP).
@@ -19,7 +19,7 @@ Status: **v1 scope**
 |---------|-------|-------------|
 | Playfields | 1, or 2 in dual-playfield mode | 3 layers, in any order |
 | Pixel layout | Planar, 1–6 planes | Per layer: planar with 1–8 planes, or chunky with 1, 2, 4 or 8 bits per pixel |
-| Colours | 32 from 4096 (EHB, HAM) | 256-entry palette of 24-bit colours; each layer of up to 4 bits picks a 16-colour block. Direct colour up to 24 bits |
+| Colours | 32 from 4096 (EHB, HAM) | A 256-entry palette of 24-bit colours per layer, and one for the sprites; a layer of up to 4 bits picks a 16-colour block of its palette. Direct colour up to 24 bits |
 | Plane pointers | BPLxPT, moved on by the fetch and BPLxMOD; rewritten by the copper each frame | The same, per layer: BPL0PT–BPL7PT. In place of the modulo, BPLSTRIDE: bytes from one line's start to the next, whatever is fetched (no fix-ups for fine scroll) |
 | Data registers | BPLxDAT, loaded by DMA; writing BPL1DAT starts the shifters | The same: BPL0DAT–BPL7DAT; writing BPL0DAT completes a group |
 | Display window | One per screen (DIWSTRT/DIWSTOP) | One per layer (WINX/WINY) |
@@ -149,8 +149,10 @@ CTRL.HSCALE and CTRL.VSCALE each pick 1×, 2×, 4× or 8× (values 0–3). Each 
 
 ### 4.6 Transparency and palette
 
-- **Palette:** 256 entries of 24-bit RGB, memory-mapped. The CPU and copper can write any entry at any time; a write takes effect from the next pixel, so mid-line colour changes work.
-- For layers of up to 4 bits per pixel (chunky 1, 2 or 4bpp, planar 1–4 planes), the colour index is `PALOFS × 16 + pixel value`. Deeper layers (chunky 8bpp, planar 5–8 planes) use the pixel value directly and ignore PALOFS.
+- **Palettes:** four palettes of 256 entries of 24-bit RGB, memory-mapped (section 6.3): one for each layer (PALETTE0 for L0, PALETTE1 for L1, PALETTE2 for L2) and one for the sprites (SPRPALETTE, spec 9). A layer's pixels take their colours from its own palette only, so three 8-bit layers can show 765 different colours (plus the background). The CPU and copper can write any entry at any time; a write takes effect from the next pixel, so mid-line colour changes work.
+- For layers of up to 4 bits per pixel (chunky 1, 2 or 4bpp, planar 1–4 planes), the colour index in the layer's palette is `PALOFS × 16 + pixel value`: PALOFS picks one of the palette's 16 blocks, so changing it swaps a layer's colours at once. Deeper layers (chunky 8bpp, planar 5–8 planes) use the pixel value directly and ignore PALOFS.
+- **Shared palette:** with VIDCON.SHAREPAL set, every layer and sprite takes its colours from PALETTE0, as on a machine with one palette (layers then share it by PALOFS blocks, as sprites share theirs by PAL). Useful when one palette write should change a colour everywhere, for example copper colour bars across all three layers.
+- The background colour (BGCOLOR) is a register of its own, not a palette entry.
 - If CTRL.TRANSP is set, pixel value 0 is transparent and lower layers show through. If it is clear, the layer is solid inside its window.
 
 ### 4.7 Text
@@ -171,7 +173,7 @@ Any order is allowed; the value 3 names no layer. The default is L0 in front, th
 
 ### 4.9 Direct colour
 
-With VIDCON.DIRECT set, the palette and priority are not used. Every visible pixel is made from the three layers' pixel values:
+With VIDCON.DIRECT set, the layers' palettes and the priority are not used (sprites still use SPRPALETTE, spec 9). Every visible pixel is made from the three layers' pixel values:
 
 | Channel | From | Depth |
 |---------|------|-------|
@@ -280,7 +282,7 @@ The offsets are within the custom register block at `0xE00000`. Spec 3 has the f
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
-| `0x000` | VIDCON | EN (0), BLANKALL (2), DIRECT (4) | Video on; show the background colour only; direct colour |
+| `0x000` | VIDCON | EN (0), BLANKALL (2), DIRECT (4), SHAREPAL (5) | Video on; show the background colour only; direct colour; all layers and sprites use PALETTE0 (section 4.6) |
 | `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L2 (6–4), SPRUNDER (7: a sprite's FIFO ran dry, spec 9), INVBLANK (8, read-only) | Sticky flags, write 1 to clear |
 | `0x008` | VIDINTEN | Same layout as VIDSTAT | Interrupt enables |
 | `0x00C` | BEAMPOS | `vline` 26–16, `hpixel` 10–0 | Read-only |
@@ -311,13 +313,19 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 
 | Area | Location | Contents |
 |------|----------|----------|
-| Palette | `0xE04000`–`0xE043FF` | 256 × 32-bit, `0x00RRGGBB` |
+| PALETTE0 | `0xE04000`–`0xE043FF` | L0's palette: 256 × 32-bit, `0x00RRGGBB` |
+| PALETTE1 | `0xE04400`–`0xE047FF` | L1's palette |
+| PALETTE2 | `0xE04800`–`0xE04BFF` | L2's palette |
+| SPRPALETTE | `0xE04C00`–`0xE04FFF` | The sprites' palette (spec 9) |
+
+Entry i of palette p is at `0xE04000 + p × 0x400 + i × 4`. Bits 31–24 read as 0. After reset the palettes' contents are undefined; the boot ROM sets the colours it uses.
 
 ## 7. FPGA resources
 
 | Item | Resource |
 |------|----------|
-| Palette, 256 × 24 bits | 1 block RAM per copy (CPU read port and pixel read port) |
+| Palettes, 4 × 256 × 24 bits | One RAM of 1024 × 24 (the address is the palette number and the index): 2 RAMB18, as the single 256-entry palette took (a RAMB18 is 18 bits wide, so 24 bits took two either way). One copy, true dual port: the CPU side at 100 MHz, the pixel side reads |
+| The pixel pipeline | The priority stage passes on, with the winning pixel's index, which palette it is from (2 bits): a few LUTs |
 | 24 pointers, 24 data registers, 24 shift registers | Logic |
 | Clocks | One MMCM, shared with the rest of the design |
 
@@ -343,5 +351,5 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 - More layers, fractional scaling and shrinking
 - More modes (exact 640×480, 720p, 1024×768): a different pixel clock from MMCM 2, at build time or by reconfiguring it; the rest of the design is ready for it
 - Wide fetch (memory cycle 3 for the display)
-- EHB and HAM modes, a 1024-entry palette, tile-map layers
+- EHB and HAM modes, tile-map layers
 - HDMI audio

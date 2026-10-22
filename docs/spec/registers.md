@@ -66,7 +66,7 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 | `0x0400`–`0x06FF` | 768 B | Audio | 6 |
 | `0x0700`–`0x07FF` | 256 B | Copper | 10 |
 | `0x0800`–`0x3FFF` | | Free | |
-| `0x4000`–`0x43FF` | 1 KB | Palette: 256 × 32-bit `0x00RRGGBB` | 4, section 6.3 |
+| `0x4000`–`0x4FFF` | 4 KB | Palettes: PALETTE0–2 (one per layer) and SPRPALETTE, each 256 × 32-bit `0x00RRGGBB` | 4, section 6.3 |
 | `0x6000`–`0x67FF` | 2 KB | DMA descriptor RAM: 64 × 32 bytes | 11, section 8 |
 | `0x6800`–`0xFFFF` | | Free | |
 

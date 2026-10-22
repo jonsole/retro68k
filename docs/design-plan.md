@@ -91,7 +91,7 @@ Defined in [spec 5: memory architecture](spec/memory-architecture.md). In short:
 |-------|------|--------|
 | `0x000000`–`0x3FFFFF` | 4 MB | Chip RAM (boot ROM overlays address 0 at reset) |
 | `0x400000`–`0xDFFFFF` | | Reserved (bus error) |
-| `0xE00000`–`0xE0FFFF` | 64 KB | Custom registers: video, audio, DMA engine, copper; palette at `0xE04000`–`0xE043FF` |
+| `0xE00000`–`0xE0FFFF` | 64 KB | Custom registers: video, audio, DMA engine, copper; palettes at `0xE04000`–`0xE04FFF` |
 | `0xF00000`–`0xF0FFFF` | 64 KB | System: USB serial, timers, interrupts, SD, keyboard |
 | `0xF80000`–`0xF87FFF` | 32 KB | Boot ROM (block RAM) |
 
@@ -102,11 +102,11 @@ Some boards may have 2 MB of SRAM; SYSCFG.CHIPMB reports which (spec 7).
 Defined in [spec 4: video](spec/video.md). In short:
 
 - DVI over HDMI and VGA at the same time. **One mode, 576p:** 720×576 at 50 Hz with a 27 MHz pixel clock, as CEA-861 defines it, so every HDMI TV and monitor takes it; the digital form of PAL. No timing registers. The whole 720×576 is the overscan area; a normal screen is a centred window (for example a PAL Amiga 320×256 at 2× is 640×512 at (40, 32)), with the background colour as the border. Every line is exactly 320 slots
-- **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and palette block. No text layer. 8 sprites, Amiga-style (spec 9); the boot ROM draws its 80×30 console into a 1-plane 640×480 layer, centred at (40, 48)
+- **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and 256-colour palette. No text layer. 8 sprites, Amiga-style (spec 9); the boot ROM draws its 80×30 console into a 1-plane 640×480 layer, centred at (40, 48)
 - Each layer is **planar** (1–8 Amiga-style bitplanes) or **chunky** (1/2/4/8 bits per pixel), with Amiga-style plane pointers (BPLxPT), row stride (BPLSTRIDE) and data registers (BPLxDAT), and no hidden buffers. The copper resets the pointers each frame
 - Whole-number scaling: 1×, 2×, 4× or 8×, across and down separately
 - Video memory is fetched on demand by DMA as the beam scans, in memory cycles 1 and 3 of each slot only (no wide fetch). The budget is a rate: 4 bytes per 100 ns slot, 1.48 bytes per pixel. Layers never use the CPU's cycle
-- 256-entry palette of 24-bit colours, or direct colour (L0 red, L1 green, L2 blue); beam position registers; vertical-blank and line interrupts; a copper (spec 10)
+- A 256-entry palette of 24-bit colours per layer and one for the sprites (or one shared, VIDCON.SHAREPAL), or direct colour (L0 red, L1 green, L2 blue); beam position registers; vertical-blank and line interrupts; a copper (spec 10)
 
 ### D7. Audio
 
@@ -168,7 +168,7 @@ The XC7A35T has 100 blocks of 18 Kb (2 KB each).
 |------|--------|-------|
 | fx68k microcode | 3 | From the trial synthesis (D10) |
 | Boot ROM, 32 KB | 16 | |
-| Video: palette | 2 | Spec 4, section 7: one copy for the CPU and one for the pixels. No line buffers, text screen or font; the plane registers are built from logic |
+| Video: palettes | 2 | Spec 4, section 7: four 256-entry palettes in one 1024 × 24 RAM, dual port. No line buffers, text screen or font; the plane registers are built from logic |
 | USB serial FIFOs | 2 | Spec 14 |
 | Keyboard byte FIFO | 1 | Spec 16 |
 | **Total** | **24 of 100** | |

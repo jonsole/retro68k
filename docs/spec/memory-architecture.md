@@ -36,7 +36,7 @@ The full map is in spec 3, section 1. Memory in short:
 |-------|------|--------|
 | `0x000000`–`0x3FFFFF` | 4 MB | Chip RAM (2 MB boards: `0x000000`–`0x1FFFFF`). At reset the boot ROM overlays address 0 for reads |
 | `0x400000`–`0xDFFFFF` | | Reserved (bus error) |
-| `0xE00000`–`0xE0FFFF` | | Custom registers and palette (`0xE04000`–`0xE043FF`) |
+| `0xE00000`–`0xE0FFFF` | | Custom registers and palettes (`0xE04000`–`0xE04FFF`) |
 | `0xF00000`–`0xF0FFFF` | | System registers |
 | `0xF80000`–`0xF87FFF` | 32 KB | Boot ROM |
 
