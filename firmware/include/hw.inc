@@ -492,10 +492,6 @@ SPR_CTL                      equ $C          ; RW, spec 9/3 (add to SPRn)
 SPR_CTL_BPP_B                equ $C
 SPR_CTL_BPP_W                equ $2
 SPR_CTL_BPP_M                equ $3000
-SPR_CTL_HFLIP_B              equ $E
-SPR_CTL_HFLIP_M              equ $4000
-SPR_CTL_VFLIP_B              equ $F
-SPR_CTL_VFLIP_M              equ $8000
 SPR_CTL_HMAG_B               equ $10
 SPR_CTL_HMAG_W               equ $2
 SPR_CTL_HMAG_M               equ $30000

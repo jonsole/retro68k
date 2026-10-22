@@ -15,7 +15,6 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Size | Any, as a layer's: set by the window. Only the memory budget limits it (section 5) |
 | Colours | 2, 4 or 8 bits per pixel. 2 and 4 bpp: 3 or 15 colours + transparent, from any 16-colour block of the palette; 8 bpp: 255 colours + transparent, the whole palette |
 | Position | Any pixel; clipped at the left, right and bottom edges by the hardware, at the top by software (section 3) |
-| Flip | Horizontal and vertical |
 | Magnify | ×1, ×2 or ×4, across and down separately |
 | Depth | Per sprite: in front of all layers, between any two (in PRIO order), or behind all |
 | Collisions | Sprite–sprite and sprite–layer, per pixel, latched (as the Amiga's CLXDAT) |
@@ -30,7 +29,7 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Pointers | SPRxPT, rewritten by the copper each frame | The same |
 | Position and settings | SPRxPOS, SPRxCTL (HSTART, VSTART, VSTOP): fetched by the DMA from control words in the sprite's data, or written by the CPU/copper | SPRxH, SPRxV (start and stop across and down: a window, as a layer has), SPRxCTL: plain registers, written by the CPU or copper only; the data in memory is image only |
 | Reuse down the screen | The data holds more control words after each sprite | The copper writes the sprite's registers again, after a WAIT |
-| Settings | Position, height | A window (any size), bits per pixel, flips, magnify, depth among the layers, palette block |
+| Settings | Position, height | A window (any size), bits per pixel, magnify, depth among the layers, palette block |
 | Width | 16 pixels (lores) | Any: set by the window |
 | Colours | 3 + transparent; 15 with two attached sprites | 3, 15 or 255 + transparent, every sprite |
 | Pixel format | Two bitplanes | Chunky: 2, 4 or 8 bits per pixel, first pixel in the high bits |
@@ -38,7 +37,7 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Fetch | Two words per sprite per line, in fixed slots in the horizontal blank | Just in time, deadline first; early when cycles are free |
 | Manual mode | Write SPRxDATA/B with DMA off | Push words into SPRxDAT with the sprite's DMA off |
 | Priority | Fixed in pairs against the playfields | Per sprite, any depth among the layers |
-| Flip, magnify | None | Both |
+| Magnify | None | ×1, ×2, ×4 across and down |
 | Collision | CLXDAT | SPRCOLL: per sprite, against the other sprites and each layer |
 
 ## 3. Sprites: pointer, position and settings
@@ -66,8 +65,6 @@ The image's size follows from the window: **source width** = (HSTOP − HSTART) 
 | Bits | Field | Meaning |
 |------|-------|---------|
 | 13–12 | BPP | 0 = 2, 1 = 4, 2 = 8 bits per pixel |
-| 14 | HFLIP | Mirror left to right |
-| 15 | VFLIP | Mirror top to bottom |
 | 17–16 | HMAG | Each source pixel shown 1, 2 or 4 times across (0, 1, 2) |
 | 19–18 | VMAG | Each source line shown on 1, 2 or 4 screen lines (0, 1, 2) |
 | 21–20 | DEPTH | 0 = in front of all layers; 1 = behind the front layer; 2 = behind the middle layer; 3 = behind all layers (in PRIO order) |
@@ -81,16 +78,16 @@ A sprite shows inside its window once per frame. A sprite whose DMA is on (SPRDM
 
 **Reusing a sprite further down the screen**, as Amiga programs do with their control words: after the sprite's last line, the copper WAITs, then writes the sprite's PT, window and CTL for its next use. The new use must start on a later line than the old one ends, and the writes must come after the old use's last line has been shown.
 
-**How the pointer moves.** Each word fetched moves SPRxPT on by 2. At the end of each source line the pointer goes to that line's start + one line (⌈source width × BPP ÷ 16⌉ words); with VFLIP, to that line's start − one line, so the image is fetched bottom first (point SPRxPT at the image's last line). On the repeated lines of VMAG it goes back to the line's start, so the line is fetched again.
+**How the pointer moves.** Each word fetched moves SPRxPT on by 2. At the end of each source line the pointer goes to that line's start + one line (⌈source width × BPP ÷ 16⌉ words). On the repeated lines of VMAG it goes back to the line's start, so the line is fetched again.
 
 ### 3.1 Pixels and colours
 
 Image lines are **chunky**, as chunky layers are: 2, 4 or 8 bits per pixel, packed in words, the first pixel in the highest bits. A value of 0 is transparent. Other values are palette entries: at 8 bpp the value itself; at 2 and 4 bpp, PAL × 16 + the value.
 
-### 3.2 Flip and magnify
+### 3.2 Magnify
 
-- **HFLIP:** the DMA fetches each line's words last first, and the sprite shows each word's pixels in reverse order, so the line is mirrored. The image in memory is unchanged. If the source width does not fill the line's last word, its unused pixels (which come first when mirrored) are skipped.
-- **VFLIP:** the DMA fetches the image's lines bottom first: point SPRxPT at the image's last line, and the pointer steps back a line after each one (section 3).
+There is no flip: for an object that faces either way, store both images.
+
 - **HMAG** repeats each pixel 1, 2 or 4 times across; **VMAG** shows each source line on 1, 2 or 4 screen lines. A repeated line is fetched again (the FIFO cannot replay a line), so VMAG costs memory cycles on every screen line, and HMAG divides the cost across a line (section 5).
 
 ### 3.3 Depth and priority
@@ -185,8 +182,8 @@ Reusing sprite 0 for a second ship lower down, from line 300: after the first sh
 | Item | Resource |
 |------|----------|
 | 8 FIFOs of 32 × 16 bits | Distributed RAM, about 100 LUTs |
-| Fetcher: line addresses (flip, magnify), FIFO fill and deadlines, in the scheduler | About 500 LUTs |
-| 8 pixel units: position, magnify, flip, pixel select | About 800 LUTs |
+| Fetcher: line addresses (magnify), FIFO fill and deadlines, in the scheduler | About 500 LUTs |
+| 8 pixel units: position, magnify, pixel select | About 800 LUTs |
 | Mixing with the layers (depth), collisions, registers | About 400 LUTs |
 | Total | About 1,800–2,200 LUTs; no block RAM |
 
@@ -199,7 +196,7 @@ Reusing sprite 0 for a second ship lower down, from line 300: after the first sh
 
 ## 10. Tests
 
-- **Golden images:** sprites of many window sizes, at every depth and magnify, flipped, clipped at all four edges, reused down the screen, at every DEPTH against layers in different PRIO orders, over transparent layer pixels, compared pixel by pixel with the Python video model extended with sprites.
+- **Golden images:** sprites of many window sizes, at every depth and magnify, clipped at all four edges, reused down the screen, at every DEPTH against layers in different PRIO orders, over transparent layer pixels, compared pixel by pixel with the Python video model extended with sprites.
 - **Collisions:** known overlaps set exactly the expected SPRCOLL bits.
 - **Manual mode:** a sprite fed by the CPU through SPRxDAT; an underrun sets SPRUNDER.
 - **Stress:** sprites stacked over the same pixels with layers of each depth, to measure section 5's table.

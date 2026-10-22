@@ -202,8 +202,6 @@
 `define RM_SPR_V_VSTOP                      26:16
 `define RM_SPR_CTL                          16'h000C
 `define RM_SPR_CTL_BPP                      13:12
-`define RM_SPR_CTL_HFLIP                    14
-`define RM_SPR_CTL_VFLIP                    15
 `define RM_SPR_CTL_HMAG                     17:16
 `define RM_SPR_CTL_VMAG                     19:18
 `define RM_SPR_CTL_DEPTH                    21:20

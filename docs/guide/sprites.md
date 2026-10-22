@@ -4,7 +4,7 @@
 
 **Sprites** are small images that the hardware draws over, or between, the layers, at any position on the screen, without your program touching the layers' memory. Moving a sprite is a matter of writing two registers: nothing has to be drawn, saved or restored. They are the natural choice for anything that moves on its own: a mouse pointer, a player's ship, bullets, a cursor.
 
-retro68k has eight sprites, SPR0 to SPR7. Each one is a little playfield of its own: an image in Chip RAM, which the hardware fetches by DMA while the beam sweeps the screen, and a **window** that says where on the screen the image goes. A sprite can be any size; it can have 3, 15 or 255 colours; it can be mirrored either way and magnified two or four times; and each sprite can be put in front of all the layers, between any two of them, or behind them all. The hardware also reports when sprites touch each other or the layers.
+retro68k has eight sprites, SPR0 to SPR7. Each one is a little playfield of its own: an image in Chip RAM, which the hardware fetches by DMA while the beam sweeps the screen, and a **window** that says where on the screen the image goes. A sprite can be any size; it can have 3, 15 or 255 colours; it can be magnified two or four times; and each sprite can be put in front of all the layers, between any two of them, or behind them all. The hardware also reports when sprites touch each other or the layers.
 
 The chapter covers:
 
@@ -13,7 +13,7 @@ The chapter covers:
 - the window, and how it sets the image's size;
 - positioning, and clipping at the edges of the screen;
 - moving a sprite, and when writes to its registers take effect;
-- flipping and magnifying;
+- magnifying;
 - depth: where each sprite goes among the layers;
 - reusing a sprite further down the screen with the copper;
 - collision detection;
@@ -35,7 +35,7 @@ If you have programmed the Amiga's sprites, the main ideas carry over: eight spr
 | Colours | 3 + transparent; 15 with two attached sprites | 3, 15 or 255 + transparent, every sprite |
 | Pixel format | Two bitplanes per sprite | Chunky: 2, 4 or 8 bits per pixel |
 | Reuse down the screen | More control words after the image | The copper writes the registers again |
-| Flip, magnify | None | Both ways; ×1, ×2, ×4 across and down |
+| Magnify | None | ×1, ×2, ×4 across and down |
 | Priority | Fixed in pairs against the playfields | Per sprite: any depth among the layers |
 | Collisions | CLXDAT, CLXCON | SPRCOLL: each sprite against the others and each layer |
 | Data registers | SPRxDATA/B, one line | A 32-word FIFO per sprite, SPRxDAT |
@@ -50,7 +50,7 @@ If you have programmed the Amiga's sprites, the main ideas carry over: eight spr
 
 ### About this chapter
 
-"Forming a Sprite" goes through the registers in the order you set them and ends with a complete program: a ball bouncing round the screen. The sections after it explain each part in more depth: the image, the window and size, positioning and clipping, moving, flipping and magnifying, and depth. Then come the techniques: reusing a sprite down the screen, and collisions. "Sprite DMA" explains how the hardware fetches sprite images, how much it can fetch, and what happens when it cannot keep up; "Feeding a Sprite by Hand" shows how to do without the DMA. The chapter ends with a summary of the registers.
+"Forming a Sprite" goes through the registers in the order you set them and ends with a complete program: a ball bouncing round the screen. The sections after it explain each part in more depth: the image, the window and size, positioning and clipping, moving, magnifying, and depth. Then come the techniques: reusing a sprite down the screen, and collisions. "Sprite DMA" explains how the hardware fetches sprite images, how much it can fetch, and what happens when it cannot keep up; "Feeding a Sprite by Hand" shows how to do without the DMA. The chapter ends with a summary of the registers.
 
 ---
 
@@ -89,8 +89,6 @@ The window also sets the image's size: there is no separate width or height regi
 | Bits | Field | Meaning |
 |------|-------|---------|
 | 13–12 | BPP | Bits per pixel: 0 = 2, 1 = 4, 2 = 8 |
-| 14 | HFLIP | Mirror left to right |
-| 15 | VFLIP | Mirror top to bottom |
 | 17–16 | HMAG | Magnify across: 0 = ×1, 1 = ×2, 2 = ×4 |
 | 19–18 | VMAG | Magnify down: 0 = ×1, 1 = ×2, 2 = ×4 |
 | 21–20 | DEPTH | 0 = in front of all layers … 3 = behind all layers |
@@ -344,31 +342,19 @@ Call `move1` when the copper is not reading those words: for example, once the b
 
 ---
 
-## Flipping and Magnifying
-
-**HFLIP** mirrors the sprite left to right, and **VFLIP** top to bottom. The image in memory does not change, so one image serves a ship facing either way.
-
-- With **HFLIP**, the hardware fetches each line's words last first and shows each word's pixels in reverse order. If the width does not fill the line's last word, its unused pixels are skipped, so a flipped sprite stays exactly in its window.
-- With **VFLIP**, the hardware fetches the lines bottom first: it steps the pointer **back** a line after each one. Point SPRxPT at the image's **last** line:
-
-  ```asm
-        ; a 32 x 24 sprite at 4 bpp (16 bytes a line), upside down
-        move.l  #(1<<SPR_CTL_BPP_B)|SPR_CTL_VFLIP_M,SPR0+SPR_CTL(a4)
-        move.l  #BALL+23*16,SPR0+SPR_PT(a4)
-  ```
+## Magnifying
 
 **HMAG** shows each source pixel 1, 2 or 4 times across, and **VMAG** shows each source line on 1, 2 or 4 screen lines. Remember to make the window bigger to match: a 32 × 24 image at ×2 by ×2 needs a 64 × 48 window. Magnify costs no more memory across (the same words are spread over more pixels), but a magnified line is fetched again for each screen line it covers, so VMAG does not save memory cycles.
 
-To make a ship turn round as it changes direction, flip it when its direction changes:
-
 ```asm
-        ; d4 = dx: mirror the ship when it moves left
-        move.l  #CTL_SHIP,d0
-        tst.w   d4
-        bpl.s   .right
-        or.l    #SPR_CTL_HFLIP_M,d0
-.right: move.l  d0,SPR0+SPR_CTL(a4)     ; before SPRxPT, as always
+        ; the 32 x 24 ball at x2 by x2: a 64 x 48 window
+        move.l  #((200+64)<<16)|200,SPR0+SPR_H(a4)
+        move.l  #((100+48)<<16)|100,SPR0+SPR_V(a4)
+        move.l  #(1<<SPR_CTL_BPP_B)|(1<<SPR_CTL_HMAG_B)|(1<<SPR_CTL_VMAG_B)|(2<<SPR_CTL_PAL_B),SPR0+SPR_CTL(a4)
+        move.l  #BALL,SPR0+SPR_PT(a4)
 ```
+
+The hardware does not mirror sprites. For an object that faces either way, store both images and point SPRxPT at the one you want.
 
 ---
 
@@ -411,7 +397,7 @@ The rules:
 
 ```asm
 ; Example 4-3: sprite 0 shows three 32 x 24 ships: at lines 100, 200 and
-; 300. Each ship can be a different image, colour or flip.
+; 300. Each ship can be a different image or colour.
 
             include "hw.inc"
             include "copper.inc"
@@ -428,7 +414,7 @@ ships:      CMOVEL  SPR0+SPR_H,(232<<16)|200        ; ship 1
             CWAIT   124,0                           ; ship 1 finished
             CMOVEL  SPR0+SPR_H,(532<<16)|500        ; ship 2
             CMOVEL  SPR0+SPR_V,(224<<16)|200        ; lines 200-223
-            CMOVEL  SPR0+SPR_CTL,CTL_SHIP|SPR_CTL_HFLIP_M     ; facing the other way
+            CMOVEL  SPR0+SPR_CTL,CTL_SHIP|(4<<SPR_CTL_PAL_B)  ; other colours (palette block 7)
             CMOVEL  SPR0+SPR_PT,SHIP
 
             CWAIT   224,0                           ; ship 2 finished
@@ -590,7 +576,7 @@ Offsets in the custom block at `$E00000`.
 | SPRxPT | SPRn + `$00` | RW | The next word of the image (22–1). Write it each frame, last |
 | SPRxH | SPRn + `$04` | RW | HSTART (11–0), HSTOP (27–16), signed; HSTART no lower than −144 |
 | SPRxV | SPRn + `$08` | RW | VSTART (10–0), VSTOP (26–16) |
-| SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), HFLIP (14), VFLIP (15), HMAG (17–16), VMAG (19–18), DEPTH (21–20), PAL (27–24) |
+| SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), HMAG (17–16), VMAG (19–18), DEPTH (21–20), PAL (27–24) |
 | SPRxDAT | SPRn + `$10` | W, R | Write: push a word (15–0) into the FIFO (DMA off). Read: words in the FIFO (5–0) |
 
 SPRn = `$520` + n × `$20`: SPR0 `$520`, SPR1 `$540` … SPR7 `$600`.
@@ -615,5 +601,5 @@ SPREN is clear (DMACON is cleared by every reset), SPRDMA has all eight sprites 
 | `SPR0` … `SPR7` | `$520` … `$600` |
 | `SPR_PT`, `SPR_H`, `SPR_V`, `SPR_CTL`, `SPR_DAT` | `$00`, `$04`, `$08`, `$0C`, `$10` |
 | `SPR0_PT` … `SPR7_DAT` | Each register's full offset |
-| `SPR_CTL_BPP_B`, `SPR_CTL_HFLIP_M`, `SPR_CTL_VFLIP_M`, `SPR_CTL_HMAG_B`, `SPR_CTL_VMAG_B`, `SPR_CTL_DEPTH_B`, `SPR_CTL_PAL_B` | CTL fields (`_B` bit numbers, `_M` masks) |
+| `SPR_CTL_BPP_B`, `SPR_CTL_HMAG_B`, `SPR_CTL_VMAG_B`, `SPR_CTL_DEPTH_B`, `SPR_CTL_PAL_B` | CTL fields (`_B` bit numbers, `_M` masks) |
 | `SPRDMA_SETCLR_M`, `DMACON_SPREN_M`, `VIDSTAT_SPRUNDER_M` | The enables and status |

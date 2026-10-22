@@ -416,10 +416,6 @@
 #define SPR_CTL(n)                         HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_CTL_OFS)
 #define SPR_CTL_BPP_SHIFT                  12
 #define SPR_CTL_BPP_MASK                   0x3000u
-#define SPR_CTL_HFLIP_SHIFT                14
-#define SPR_CTL_HFLIP_MASK                 0x4000u
-#define SPR_CTL_VFLIP_SHIFT                15
-#define SPR_CTL_VFLIP_MASK                 0x8000u
 #define SPR_CTL_HMAG_SHIFT                 16
 #define SPR_CTL_HMAG_MASK                  0x30000u
 #define SPR_CTL_VMAG_SHIFT                 18
