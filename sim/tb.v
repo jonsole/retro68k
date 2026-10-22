@@ -193,8 +193,9 @@ module tb;
         ones_l = ones_l + dut.aud_l;
         ones_r = ones_r + dut.aud_r;
         if (dut.aud.tick_done) begin
-            if (dut.aud.on != 4'd0)
-                $fwrite(af, "%0d %0d %0d %0d\n", dut.aud.out_l, dut.aud.out_r, ones_l, ones_r);
+            if (dut.aud.incl_q != 4'd0 || dut.aud.started != 4'd0)
+                $fwrite(af, "%0d %0d %0d %0d %0d %0d\n", dut.aud.out_l, dut.aud.out_r, ones_l, ones_r,
+                        dut.aud.started, dut.aud.incl_q);
             ones_l = 0;
             ones_r = 0;
         end

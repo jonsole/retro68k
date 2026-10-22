@@ -114,14 +114,25 @@ AUDRATE                      equ $404        ; RW, spec 6/5
 AUDRATE_D_B                  equ $0
 AUDRATE_D_W                  equ $10
 AUDRATE_D_M                  equ $FFFF
-AUDSTAT                      equ $40C        ; W1C, spec 6/5
+AUDSTAT                      equ $40C        ; RW1C, spec 6/5
 AUDSTAT_CH_B                 equ $0
 AUDSTAT_CH_W                 equ $4
 AUDSTAT_CH_M                 equ $F
+AUDSTAT_ACTIVE_B             equ $4
+AUDSTAT_ACTIVE_W             equ $4
+AUDSTAT_ACTIVE_M             equ $F0
 AUDINTEN                     equ $410        ; RW, spec 6/5
 AUDINTEN_CH_B                equ $0
 AUDINTEN_CH_W                equ $4
 AUDINTEN_CH_M                equ $F
+AUDSTART                     equ $414        ; W, spec 6/5
+AUDSTART_CH_B                equ $0
+AUDSTART_CH_W                equ $4
+AUDSTART_CH_M                equ $F
+AUDSTOP                      equ $418        ; W, spec 6/5
+AUDSTOP_CH_B                 equ $0
+AUDSTOP_CH_W                 equ $4
+AUDSTOP_CH_M                 equ $F
 COPCON                       equ $700        ; RW, spec 10/6
 COPCON_EN_B                  equ $0
 COPCON_EN_M                  equ $1
@@ -437,6 +448,8 @@ AUD_CTRL_BITS16_B            equ $1
 AUD_CTRL_BITS16_M            equ $2
 AUD_CTRL_NEAREST_B           equ $2
 AUD_CTRL_NEAREST_M           equ $4
+AUD_CTRL_ONESHOT_B           equ $3
+AUD_CTRL_ONESHOT_M           equ $8
 AUD_LC                       equ $4          ; RW, spec 6/5 (add to AUDn)
 AUD_LC_ADDR_B                equ $0
 AUD_LC_ADDR_W                equ $17

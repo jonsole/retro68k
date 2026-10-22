@@ -3,13 +3,19 @@
 ; PASS. The testbench (+audio) records every output sample; amodel.py
 ; must work out exactly the same ones. Keep the channel set-ups in step
 ; with amodel.py.
+;
+; Also, counting each channel's AUDSTAT bits (the first is its start):
+;   channel 2 is one-shot: it stops by itself at the end of its block
+;   channel 0, at its 4th bit: a new block, then AUDSTART (a restart while playing)
+;   channel 3, at its 3rd bit: DMACON off and straight on again (a restart)
+;   channel 1, at its 6th bit: AUDSTOP
 
             include "hw.inc"
 
 S8          equ     $040000             ; 8-bit samples
 S16         equ     $041000             ; 16-bit samples
 RATE        equ     250                 ; an output sample every 2.5 us
-LOOPS       equ     400
+LOOPS       equ     1000
 
             org ROM
             dc.l    $010000             ; stack
@@ -30,6 +36,7 @@ start:      move.w  #$2700,sr
 .go:        lea     qpos,a1             ; each channel's next queue entry: the second
             moveq   #3,d0
 .qp:        move.l  #1,(a1)+
+            clr.l   16-4(a1)            ; and its count of AUDSTAT bits
             dbra    d0,.qp
             move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|$F,DMACON+2(a4)    ; all four on
 
@@ -46,6 +53,7 @@ start:      move.w  #$2700,sr
             lsl.l   d2,d0
             move.l  d0,AUDSTAT(a4)      ; clear its bit
             bsr     feed
+            bsr     events
 .chn:       addq.l  #1,d2
             cmp.l   #4,d2
             bne.s   .ch
@@ -79,6 +87,37 @@ feed:       movem.l d0-d4/a0-a2,-(sp)
 .none:      movem.l (sp)+,d0-d4/a0-a2
             rts
 
+; d2 = channel, after one of its AUDSTAT bits: count it, and at the
+; counts above, start, stop or restart
+events:     movem.l d0-d1/a1,-(sp)
+            lea     qcnt,a1
+            move.l  d2,d1
+            lsl.l   #2,d1
+            addq.l  #1,0(a1,d1.l)
+            move.l  0(a1,d1.l),d0
+            cmp.l   #0,d2
+            bne.s   .c3
+            cmp.l   #4,d0
+            bne.s   .out
+            move.l  #S8+$400,AUD0+AUD_LC(a4)
+            move.l  #500,AUD0+AUD_LEN(a4)
+            move.l  #1,AUDSTART(a4)
+            bra.s   .out
+.c3:        cmp.l   #3,d2
+            bne.s   .c1
+            cmp.l   #3,d0
+            bne.s   .out
+            move.w  #DMACON_AUD3EN_M,DMACON+2(a4)                  ; off ...
+            move.w  #DMACON_SETCLR_M|DMACON_AUD3EN_M,DMACON+2(a4)  ; ... and on again
+            bra.s   .out
+.c1:        cmp.l   #1,d2
+            bne.s   .out
+            cmp.l   #6,d0
+            bne.s   .out
+            move.l  #2,AUDSTOP(a4)
+.out:       movem.l (sp)+,d0-d1/a1
+            rts
+
 puts:       move.b  (a0)+,d0
             beq.s   .done
 .wait:      move.w  SERSTAT+2(a5),d1
@@ -94,6 +133,7 @@ s_pass:     dc.b    "PASS",13,10,0
             even
 
 qpos        equ     $008000             ; 4 longs: next queue entry per channel
+qcnt        equ     $008010             ; 4 longs: AUDSTAT bits seen per channel
 
 ; offset, value; -1 ends
 setup:      dc.l    AUD0+AUD_CTRL, 0                        ; 8-bit, interpolated
@@ -106,7 +146,7 @@ setup:      dc.l    AUD0+AUD_CTRL, 0                        ; 8-bit, interpolate
             dc.l    AUD1+AUD_LEN,  700
             dc.l    AUD1+AUD_STEP, $2C000                   ; 2.75
             dc.l    AUD1+AUD_VOL,  (20<<16)|64
-            dc.l    AUD2+AUD_CTRL, AUD_CTRL_NEAREST_M       ; 8-bit, nearest
+            dc.l    AUD2+AUD_CTRL, AUD_CTRL_NEAREST_M|AUD_CTRL_ONESHOT_M   ; 8-bit, nearest, one-shot
             dc.l    AUD2+AUD_LC,   S8+$100
             dc.l    AUD2+AUD_LEN,  300
             dc.l    AUD2+AUD_STEP, $10000

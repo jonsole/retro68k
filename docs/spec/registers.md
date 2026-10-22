@@ -135,8 +135,10 @@ Channel n (0–3) at `0x300 + n × 0x10`:
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
 | `0x404` | AUDRATE | RW | 6, 5 |
-| `0x40C` | AUDSTAT | W1C | 6, 5 |
+| `0x40C` | AUDSTAT | R, W1C | 6, 5 |
 | `0x410` | AUDINTEN | RW | 6, 5 |
+| `0x414` | AUDSTART | W | 6, 5 |
+| `0x418` | AUDSTOP | W | 6, 5 |
 
 Channel n (0–3) at `0x440 + n × 0x20`:
 

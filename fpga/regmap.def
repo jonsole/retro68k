@@ -81,10 +81,12 @@ reg 0x344 DMXINTEN RW  11/8  CH=3:0
 
 # Audio (spec 6)
 reg 0x404 AUDRATE    RW  6/5    D=15:0
-reg 0x40C AUDSTAT    W1C 6/5    CH=3:0
+reg 0x40C AUDSTAT    RW1C 6/5   CH=3:0 ACTIVE=7:4
 reg 0x410 AUDINTEN   RW  6/5    CH=3:0
+reg 0x414 AUDSTART   W   6/5    CH=3:0
+reg 0x418 AUDSTOP    W   6/5    CH=3:0
 array AUD 4 0x440 0x20 6/5
-  reg 0x00 CTRL      RW 6/5    BITS16=1 NEAREST=2
+  reg 0x00 CTRL      RW 6/5    BITS16=1 NEAREST=2 ONESHOT=3
   reg 0x04 LC        RW 6/5    ADDR=22:0
   reg 0x08 LEN       RW 6/5    SAMPLES=22:0
   reg 0x0C STEP      RW 6/5    STEP=19:0

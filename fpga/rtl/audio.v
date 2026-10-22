@@ -41,14 +41,24 @@ module audio (
     // ================================================================ registers
     reg  [15:0] rate;
     reg  [3:0]  stat, inten;
-    reg  [1:0]  ctrl [0:3];            // NEAREST (1), BITS16 (0)
+    reg  [2:0]  ctrl [0:3];            // ONESHOT (2), NEAREST (1), BITS16 (0)
     reg  [22:0] lc   [0:3];
     reg  [22:0] len  [0:3];
     reg  [19:0] step [0:3];
     reg  [6:0]  vl   [0:3], vr [0:3];
 
     // Channel state
-    reg  [3:0]  on;
+    reg  [3:0]  on;                    // playing (AUDSTAT.ACTIVE)
+    reg  [3:0]  startp;                // to start at the next output sample
+    reg  [3:0]  en_d;                  // DMACON's enables a clock ago
+    reg  [3:0]  started;               // for the testbench: channels started at the last output sample
+    reg  [3:0]  incl, incl_q;          // ... and played in it
+    wire [3:0]  en   = dmacon[`RM_DMACON_DMAEN] ? dmacon[3:0] : 4'd0;
+    // Starting and stopping act as soon as they are written (spec 6, 4.2)
+    wire        w_start = rb_wr && sel_g && off == `RM_AUDSTART && rb_be[0];
+    wire        w_stop  = rb_wr && sel_g && off == `RM_AUDSTOP  && rb_be[0];
+    wire [3:0]  go   = (en & ~en_d) | (w_start ? rb_wdata[3:0] & en : 4'd0);
+    wire [3:0]  halt = (~en & en_d) | (w_stop ? rb_wdata[3:0] : 4'd0);
     reg  [22:0] b_start [0:3];         // the block being played
     reg  [22:0] b_len   [0:3];
     reg  [38:0] pos     [0:3];         // 23.16 within the block
@@ -107,7 +117,7 @@ module audio (
             stat  <= 4'd0;
             inten <= 4'd0;
             for (i = 0; i < 4; i = i + 1) begin
-                ctrl[i] <= 2'd0; lc[i] <= 23'd0; len[i] <= 23'd0; step[i] <= 20'h10000;
+                ctrl[i] <= 3'd0; lc[i] <= 23'd0; len[i] <= 23'd0; step[i] <= 20'h10000;
                 b_start[i] <= 23'd0; b_len[i] <= 23'd0; pos[i] <= 39'd0;
             end
             vl[0] <= 7'd64; vr[0] <= 7'd0;
@@ -115,6 +125,11 @@ module audio (
             vl[2] <= 7'd0;  vr[2] <= 7'd64;
             vl[3] <= 7'd64; vr[3] <= 7'd0;
             on    <= 4'd0;
+            startp <= 4'd0;
+            en_d  <= 4'd0;
+            started <= 4'd0;
+            incl  <= 4'd0;
+            incl_q <= 4'd0;
             es    <= E_IDLE;
             cnt   <= 16'd0;
             mem_req <= 1'b0;
@@ -125,25 +140,27 @@ module audio (
 
             case (es)
                 E_IDLE: if (tick) begin
-                    // Channels turned on take their registers; turned off, stop
-                    for (i = 0; i < 4; i = i + 1) begin
-                        if (dmacon[`RM_DMACON_DMAEN] && dmacon[i]) begin
-                            if (!on[i]) begin
-                                on[i]      <= 1'b1;
-                                b_start[i] <= lc[i];
-                                b_len[i]   <= len[i];
-                                pos[i]     <= 39'd0;
-                                stat[i]    <= 1'b1;
-                            end
-                        end else on[i] <= 1'b0;
-                    end
+                    // Channels to start take their registers (a block of
+                    // length 0 leaves the channel stopped)
+                    for (i = 0; i < 4; i = i + 1)
+                        if (startp[i]) begin
+                            on[i]      <= (len[i] != 23'd0);
+                            b_start[i] <= lc[i];
+                            b_len[i]   <= len[i];
+                            pos[i]     <= 39'd0;
+                            stat[i]    <= 1'b1;
+                        end
+                    started <= startp;
+                    startp  <= 4'd0;
+                    incl    <= 4'd0;
                     acc_l <= 26'sd0;
                     acc_r <= 26'sd0;
                     ch    <= 2'd0;
                     es    <= E_CH;
                 end
 
-                E_CH: if (on[ch] && b_len[ch] != 23'd0) begin
+                E_CH: if (on[ch]) begin
+                    incl[ch] <= 1'b1;
                     a0 <= pa0;
                     a1 <= pa1;
                     mem_req  <= 1'b1;
@@ -186,13 +203,18 @@ module audio (
                 end
 
                 E_ADV: begin
-                    if (on[ch] && b_len[ch] != 23'd0) begin
-                        if (past) begin
+                    if (on[ch]) begin
+                        if (past && ctrl[ch][2]) begin
+                            // One-shot: the block is done; stop
+                            on[ch]   <= 1'b0;
+                            stat[ch] <= 1'b1;
+                        end else if (past) begin
                             // On into the next block: take the registers again
                             b_start[ch] <= lc[ch];
                             b_len[ch]   <= len[ch];
                             pos[ch]     <= (pwrap[38:16] < len[ch]) ? pwrap : {23'd0, pwrap[15:0]};
                             stat[ch]    <= 1'b1;
+                            if (len[ch] == 23'd0) on[ch] <= 1'b0;
                         end else
                             pos[ch] <= pnext;
                     end
@@ -206,11 +228,22 @@ module audio (
                 E_OUT: begin
                     out_l <= acc_l[23:8];
                     out_r <= acc_r[23:8];
+                    incl_q <= incl;
                     tick_done <= 1'b1;
                     es <= E_IDLE;
                 end
                 default: es <= E_IDLE;
             endcase
+
+            // Starting and stopping (after the engine: a stop wins)
+            en_d <= en;
+            for (i = 0; i < 4; i = i + 1) begin
+                if (go[i])   startp[i] <= 1'b1;
+                if (halt[i]) begin
+                    startp[i] <= 1'b0;
+                    on[i]     <= 1'b0;
+                end
+            end
 
             // Register writes
             if (rb_wr && sel_g) case (off)
@@ -226,7 +259,7 @@ module audio (
             if (rb_wr && sel_c) begin : wr_ch
                 reg [31:0] v;
                 case (off[4:0])
-                    5'h00: if (rb_be[0]) ctrl[chn] <= {rb_wdata[2], rb_wdata[1]};
+                    5'h00: if (rb_be[0]) ctrl[chn] <= rb_wdata[3:1];
                     5'h04: begin v = merge({9'd0, lc[chn]}, rb_wdata, rb_be);  lc[chn]  <= v[22:0]; end
                     5'h08: begin v = merge({9'd0, len[chn]}, rb_wdata, rb_be); len[chn] <= v[22:0]; end
                     5'h0C: begin v = merge({12'd0, step[chn]}, rb_wdata, rb_be); step[chn] <= v[19:0]; end
@@ -241,12 +274,12 @@ module audio (
         rb_rdata <= 32'd0;
         if (rb_rd && sel_g) case (off)
             `RM_AUDRATE:  rb_rdata <= {16'd0, rate};
-            `RM_AUDSTAT:  rb_rdata <= {28'd0, stat};
+            `RM_AUDSTAT:  rb_rdata <= {24'd0, on, stat};
             `RM_AUDINTEN: rb_rdata <= {28'd0, inten};
             default: ;
         endcase
         if (rb_rd && sel_c) case (off[4:0])
-            5'h00: rb_rdata <= {29'd0, ctrl[chn][1], ctrl[chn][0], 1'b0};
+            5'h00: rb_rdata <= {28'd0, ctrl[chn], 1'b0};
             5'h04: rb_rdata <= {9'd0, lc[chn]};
             5'h08: rb_rdata <= {9'd0, len[chn]};
             5'h0C: rb_rdata <= {12'd0, step[chn]};

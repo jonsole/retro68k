@@ -65,8 +65,13 @@
 `define RM_AUDRATE_D                        15:0
 `define RM_AUDSTAT                          16'h040C
 `define RM_AUDSTAT_CH                       3:0
+`define RM_AUDSTAT_ACTIVE                   7:4
 `define RM_AUDINTEN                         16'h0410
 `define RM_AUDINTEN_CH                      3:0
+`define RM_AUDSTART                         16'h0414
+`define RM_AUDSTART_CH                      3:0
+`define RM_AUDSTOP                          16'h0418
+`define RM_AUDSTOP_CH                       3:0
 `define RM_COPCON                           16'h0700
 `define RM_COPCON_EN                        0
 `define RM_COPCON_IRQEN                     1
@@ -180,6 +185,7 @@
 `define RM_AUD_CTRL                         16'h0000
 `define RM_AUD_CTRL_BITS16                  1
 `define RM_AUD_CTRL_NEAREST                 2
+`define RM_AUD_CTRL_ONESHOT                 3
 `define RM_AUD_LC                           16'h0004
 `define RM_AUD_LC_ADDR                      22:0
 `define RM_AUD_LEN                          16'h0008

@@ -127,16 +127,28 @@
 #define AUDRATE                            HW_REG32(CUSTOM_BASE + AUDRATE_OFS)
 #define AUDRATE_D_SHIFT                    0
 #define AUDRATE_D_MASK                     0xFFFFu
-/* AUDSTAT: W1C, spec 6/5 */
+/* AUDSTAT: RW1C, spec 6/5 */
 #define AUDSTAT_OFS                        0x40Cu
 #define AUDSTAT                            HW_REG32(CUSTOM_BASE + AUDSTAT_OFS)
 #define AUDSTAT_CH_SHIFT                   0
 #define AUDSTAT_CH_MASK                    0xFu
+#define AUDSTAT_ACTIVE_SHIFT               4
+#define AUDSTAT_ACTIVE_MASK                0xF0u
 /* AUDINTEN: RW, spec 6/5 */
 #define AUDINTEN_OFS                       0x410u
 #define AUDINTEN                           HW_REG32(CUSTOM_BASE + AUDINTEN_OFS)
 #define AUDINTEN_CH_SHIFT                  0
 #define AUDINTEN_CH_MASK                   0xFu
+/* AUDSTART: W, spec 6/5 */
+#define AUDSTART_OFS                       0x414u
+#define AUDSTART                           HW_REG32(CUSTOM_BASE + AUDSTART_OFS)
+#define AUDSTART_CH_SHIFT                  0
+#define AUDSTART_CH_MASK                   0xFu
+/* AUDSTOP: W, spec 6/5 */
+#define AUDSTOP_OFS                        0x418u
+#define AUDSTOP                            HW_REG32(CUSTOM_BASE + AUDSTOP_OFS)
+#define AUDSTOP_CH_SHIFT                   0
+#define AUDSTOP_CH_MASK                    0xFu
 /* COPCON: RW, spec 10/6 */
 #define COPCON_OFS                         0x700u
 #define COPCON                             HW_REG32(CUSTOM_BASE + COPCON_OFS)
@@ -368,6 +380,8 @@
 #define AUD_CTRL_BITS16_MASK               0x2u
 #define AUD_CTRL_NEAREST_SHIFT             2
 #define AUD_CTRL_NEAREST_MASK              0x4u
+#define AUD_CTRL_ONESHOT_SHIFT             3
+#define AUD_CTRL_ONESHOT_MASK              0x8u
 #define AUD_LC_OFS                         0x4u
 #define AUD_LC(n)                          HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_LC_OFS)
 #define AUD_LC_ADDR_SHIFT                  0
