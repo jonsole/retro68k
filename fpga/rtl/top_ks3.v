@@ -72,6 +72,7 @@ module top_ks3 (
         .dma_req(1'b0), .dma_we(1'b0), .dma_addr(21'd0), .dma_wdata(16'd0), .dma_be(2'b00),
         .dma_ack(), .dma_rvalid(), .dma_rdata(),
         .vid_rgb(rgb), .vid_hsync(hs), .vid_vsync(vs), .vid_de(de),
+        .aud_l(audioext_l_o), .aud_r(audioext_r_o), .aud_m(audioint_o),
         .dbg_sc(), .dbg_halted()
     );
 
@@ -135,8 +136,5 @@ module top_ks3 (
     assign sd_sclk_o    = 1'b0;
     assign sd_mosi_o    = 1'b1;
     assign flash_cs_n_o = 1'b1;          // keep the configuration flash deselected
-    assign audioext_l_o = 1'b0;
-    assign audioext_r_o = 1'b0;
-    assign audioint_o   = 1'b0;
     assign joysel_o     = 1'b0;
 endmodule

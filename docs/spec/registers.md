@@ -134,30 +134,20 @@ Channel n (0–3) at `0x300 + n × 0x10`:
 
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
-| `0x400` | AUDCON | RW | 6, 6 |
-| `0x404` | AUDRATE | RW | 6, 3.1 |
-| `0x408` | AUDVOL | RW | 6, 3.2 |
-| `0x40C` | AUDSTAT | W1C | 6, 6 |
-| `0x410` | AUDINTEN | RW | 6, 6 |
-| `0x414` | AUDCHEND | W1C | 6, 6 |
-| `0x418` | AUDCHINTEN | RW | 6, 6 |
-| `0x420` | STRCON | RW | 6, 5 |
-| `0x424` | STRBASE | RW | 6, 5 |
-| `0x428` | STRLEN | RW | 6, 5 |
-| `0x42C` | STRPOS | R | 6, 5 |
+| `0x404` | AUDRATE | RW | 6, 5 |
+| `0x40C` | AUDSTAT | W1C | 6, 5 |
+| `0x410` | AUDINTEN | RW | 6, 5 |
 
-Channel n (0–15) at `0x440 + n × 0x20`:
+Channel n (0–3) at `0x440 + n × 0x20`:
 
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
-| `+0x00` | CTRL | RW (format bits queued) | 6, 6 |
-| `+0x04` | START | RW (queued) | 6, 4.2 |
-| `+0x08` | LENGTH | RW (queued) | 6, 4.2 |
-| `+0x0C` | LOOPSTART | RW (queued) | 6, 4.2 |
-| `+0x10` | LOOPLEN | RW (queued) | 6, 4.2 |
-| `+0x14` | STEP | RW | 6, 4.3 |
-| `+0x18` | VOL | RW | 6, 6 |
-| `+0x1C` | POS | R | 6, 6 |
+| `+0x00` | CTRL | RW | 6, 5 |
+| `+0x04` | LC | RW | 6, 5 |
+| `+0x08` | LEN | RW | 6, 5 |
+| `+0x0C` | STEP | RW | 6, 5 |
+| `+0x10` | VOL | RW | 6, 5 |
+| `+0x14` | POS | R | 6, 5 |
 
 ### 3.7 Copper (`0xE00700`)
 

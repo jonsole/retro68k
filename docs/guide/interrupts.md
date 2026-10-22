@@ -141,9 +141,9 @@ So an interrupt costs at least 3.2 us before your handler does anything. Keep th
 | 2 | COPPER | 66 | `$108` | 5 | The copper wrote COPINT (with COPCON.IRQEN set) | COPSTAT.IRQ (Chapter 5) |
 | 3 | VIDERR | 67 | `$10C` | 5 | Video problems, such as a layer OVERRUN | VIDSTAT |
 | 4-7 | DMA0-DMA3 | 68-71 | `$110`-`$11C` | 4 | DMA engine channels 0-3 | DMXINT.CH |
-| 8 | AUDSTR | 72 | `$120` | 4 | Audio stream half-way or end | AUDSTAT |
-| 9 | AUDCH | 73 | `$124` | 4 | Audio channel ended or looped | AUDCHEND |
-| 10 | AUDERR | 74 | `$128` | 4 | Audio stream starved | AUDSTAT.STARVED |
+| 8 | – | 72 | `$120` | – | Not used in version 1 | |
+| 9 | AUDIO | 73 | `$124` | 4 | An audio channel took its registers: started, or reached the end of a block | AUDSTAT (with AUDINTEN) |
+| 10 | – | 74 | `$128` | – | Not used in version 1 | |
 | 11-14 | TIMER0-TIMER3 | 75-78 | `$12C`-`$138` | 6 | Timer underflow | TMRn STAT.UNDER |
 | 15 | SERIAL | 79 | `$13C` | 3 | USB serial link | SERIRQ |
 | 16 | SD | 80 | `$140` | 2 | SD card | SDIRQ |
@@ -333,7 +333,7 @@ The defaults put the timers highest, so that an operating system's tick is never
    level 7   NMI (button, USB break)          cannot be masked
    level 6   TIMER0  TIMER1  TIMER2  TIMER3
    level 5   VBLANK  LINE  COPPER  VIDERR
-   level 4   DMA0-3  AUDSTR  AUDCH  AUDERR
+   level 4   DMA0-3  AUDIO
    level 3   SERIAL
    level 2   SD  KEYB
    level 1   SOFT

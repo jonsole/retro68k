@@ -12,6 +12,7 @@ make frame                # also save the screen as build/frame.png (needs Pillo
 make run ARGS=+vcd        # waveform in build/tb.vcd
 make vtest                # video test: random pictures checked pixel by pixel (vtest/)
 make ctest                # copper test: a self-checking ROM, then the frame (ctest/)
+make atest                # audio test: every output sample against a Python model (atest/)
 make run ARGS=+coptrace   # the copper's instructions and register writes
 ```
 

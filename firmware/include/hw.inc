@@ -110,57 +110,18 @@ DMXINTEN                     equ $344        ; RW, spec 11/8
 DMXINTEN_CH_B                equ $0
 DMXINTEN_CH_W                equ $4
 DMXINTEN_CH_M                equ $F
-AUDCON                       equ $400        ; RW, spec 6/6
-AUDCON_EN_B                  equ $0
-AUDCON_EN_M                  equ $1
-AUDRATE                      equ $404        ; RW, spec 6/3.1
+AUDRATE                      equ $404        ; RW, spec 6/5
 AUDRATE_D_B                  equ $0
 AUDRATE_D_W                  equ $10
 AUDRATE_D_M                  equ $FFFF
-AUDVOL                       equ $408        ; RW, spec 6/3.2
-AUDVOL_L_B                   equ $8
-AUDVOL_L_W                   equ $8
-AUDVOL_L_M                   equ $FF00
-AUDVOL_R_B                   equ $0
-AUDVOL_R_W                   equ $8
-AUDVOL_R_M                   equ $FF
-AUDSTAT                      equ $40C        ; W1C, spec 6/6
-AUDSTAT_STRHALF_B            equ $0
-AUDSTAT_STRHALF_M            equ $1
-AUDSTAT_STREND_B             equ $1
-AUDSTAT_STREND_M             equ $2
-AUDSTAT_STARVED_B            equ $2
-AUDSTAT_STARVED_M            equ $4
-AUDINTEN                     equ $410        ; RW, spec 6/6
-AUDINTEN_STRHALF_B           equ $0
-AUDINTEN_STRHALF_M           equ $1
-AUDINTEN_STREND_B            equ $1
-AUDINTEN_STREND_M            equ $2
-AUDINTEN_STARVED_B           equ $2
-AUDINTEN_STARVED_M           equ $4
-AUDCHEND                     equ $414        ; W1C, spec 6/6
-AUDCHEND_CH_B                equ $0
-AUDCHEND_CH_W                equ $10
-AUDCHEND_CH_M                equ $FFFF
-AUDCHINTEN                   equ $418        ; RW, spec 6/6
-AUDCHINTEN_CH_B              equ $0
-AUDCHINTEN_CH_W              equ $10
-AUDCHINTEN_CH_M              equ $FFFF
-STRCON                       equ $420        ; RW, spec 6/5
-STRCON_EN_B                  equ $0
-STRCON_EN_M                  equ $1
-STRBASE                      equ $424        ; RW, spec 6/5
-STRBASE_ADDR_B               equ $0
-STRBASE_ADDR_W               equ $17
-STRBASE_ADDR_M               equ $7FFFFF
-STRLEN                       equ $428        ; RW, spec 6/5
-STRLEN_FRAMES_B              equ $0
-STRLEN_FRAMES_W              equ $10
-STRLEN_FRAMES_M              equ $FFFF
-STRPOS                       equ $42C        ; R, spec 6/5
-STRPOS_FRAME_B               equ $0
-STRPOS_FRAME_W               equ $10
-STRPOS_FRAME_M               equ $FFFF
+AUDSTAT                      equ $40C        ; W1C, spec 6/5
+AUDSTAT_CH_B                 equ $0
+AUDSTAT_CH_W                 equ $4
+AUDSTAT_CH_M                 equ $F
+AUDINTEN                     equ $410        ; RW, spec 6/5
+AUDINTEN_CH_B                equ $0
+AUDINTEN_CH_W                equ $4
+AUDINTEN_CH_M                equ $F
 COPCON                       equ $700        ; RW, spec 10/6
 COPCON_EN_B                  equ $0
 COPCON_EN_M                  equ $1
@@ -464,194 +425,65 @@ DMX3_CHDESC                  equ $330
 DMX3_CHCTRL                  equ $334
 DMX3_CHSTAT                  equ $338
 DMX3_CHERR                   equ $33C
-; AUD0..AUD15: 16 x 32 bytes, spec 6/6
-AUD_NUM                      equ $10
+; AUD0..AUD3: 4 x 32 bytes, spec 6/5
+AUD_NUM                      equ $4
 AUD_SPAN                     equ $20
 AUD0                         equ $440
 AUD1                         equ $460
 AUD2                         equ $480
 AUD3                         equ $4A0
-AUD4                         equ $4C0
-AUD5                         equ $4E0
-AUD6                         equ $500
-AUD7                         equ $520
-AUD8                         equ $540
-AUD9                         equ $560
-AUD10                        equ $580
-AUD11                        equ $5A0
-AUD12                        equ $5C0
-AUD13                        equ $5E0
-AUD14                        equ $600
-AUD15                        equ $620
-AUD_CTRL                     equ $0          ; RW, spec 6/6 (add to AUDn)
-AUD_CTRL_EN_B                equ $0
-AUD_CTRL_EN_M                equ $1
+AUD_CTRL                     equ $0          ; RW, spec 6/5 (add to AUDn)
 AUD_CTRL_BITS16_B            equ $1
 AUD_CTRL_BITS16_M            equ $2
 AUD_CTRL_NEAREST_B           equ $2
 AUD_CTRL_NEAREST_M           equ $4
-AUD_CTRL_OCTAVES_B           equ $4
-AUD_CTRL_OCTAVES_W           equ $2
-AUD_CTRL_OCTAVES_M           equ $30
-AUD_START                    equ $4          ; Q, spec 6/4.2 (add to AUDn)
-AUD_START_ADDR_B             equ $0
-AUD_START_ADDR_W             equ $17
-AUD_START_ADDR_M             equ $7FFFFF
-AUD_LENGTH                   equ $8          ; Q, spec 6/4.2 (add to AUDn)
-AUD_LENGTH_SAMPLES_B         equ $0
-AUD_LENGTH_SAMPLES_W         equ $17
-AUD_LENGTH_SAMPLES_M         equ $7FFFFF
-AUD_LOOPSTART                equ $C          ; Q, spec 6/4.2 (add to AUDn)
-AUD_LOOPSTART_SAMPLES_B      equ $0
-AUD_LOOPSTART_SAMPLES_W      equ $17
-AUD_LOOPSTART_SAMPLES_M      equ $7FFFFF
-AUD_LOOPLEN                  equ $10         ; Q, spec 6/4.2 (add to AUDn)
-AUD_LOOPLEN_SAMPLES_B        equ $0
-AUD_LOOPLEN_SAMPLES_W        equ $17
-AUD_LOOPLEN_SAMPLES_M        equ $7FFFFF
-AUD_STEP                     equ $14         ; RW, spec 6/4.3 (add to AUDn)
+AUD_LC                       equ $4          ; RW, spec 6/5 (add to AUDn)
+AUD_LC_ADDR_B                equ $0
+AUD_LC_ADDR_W                equ $17
+AUD_LC_ADDR_M                equ $7FFFFF
+AUD_LEN                      equ $8          ; RW, spec 6/5 (add to AUDn)
+AUD_LEN_SAMPLES_B            equ $0
+AUD_LEN_SAMPLES_W            equ $17
+AUD_LEN_SAMPLES_M            equ $7FFFFF
+AUD_STEP                     equ $C          ; RW, spec 6/5 (add to AUDn)
 AUD_STEP_STEP_B              equ $0
-AUD_STEP_STEP_W              equ $18
-AUD_STEP_STEP_M              equ $FFFFFF
-AUD_VOL                      equ $18         ; RW, spec 6/6 (add to AUDn)
-AUD_VOL_L_B                  equ $8
-AUD_VOL_L_W                  equ $8
-AUD_VOL_L_M                  equ $FF00
+AUD_STEP_STEP_W              equ $14
+AUD_STEP_STEP_M              equ $FFFFF
+AUD_VOL                      equ $10         ; RW, spec 6/5 (add to AUDn)
+AUD_VOL_L_B                  equ $10
+AUD_VOL_L_W                  equ $7
+AUD_VOL_L_M                  equ $7F0000
 AUD_VOL_R_B                  equ $0
-AUD_VOL_R_W                  equ $8
-AUD_VOL_R_M                  equ $FF
-AUD_POS                      equ $1C         ; R, spec 6/6 (add to AUDn)
-AUD_POS_SAMPLES_B            equ $0
-AUD_POS_SAMPLES_W            equ $17
-AUD_POS_SAMPLES_M            equ $7FFFFF
+AUD_VOL_R_W                  equ $7
+AUD_VOL_R_M                  equ $7F
+AUD_POS                      equ $14         ; R, spec 6/5 (add to AUDn)
+AUD_POS_SAMPLE_B             equ $0
+AUD_POS_SAMPLE_W             equ $17
+AUD_POS_SAMPLE_M             equ $7FFFFF
 AUD0_CTRL                    equ $440
-AUD0_START                   equ $444
-AUD0_LENGTH                  equ $448
-AUD0_LOOPSTART               equ $44C
-AUD0_LOOPLEN                 equ $450
-AUD0_STEP                    equ $454
-AUD0_VOL                     equ $458
-AUD0_POS                     equ $45C
+AUD0_LC                      equ $444
+AUD0_LEN                     equ $448
+AUD0_STEP                    equ $44C
+AUD0_VOL                     equ $450
+AUD0_POS                     equ $454
 AUD1_CTRL                    equ $460
-AUD1_START                   equ $464
-AUD1_LENGTH                  equ $468
-AUD1_LOOPSTART               equ $46C
-AUD1_LOOPLEN                 equ $470
-AUD1_STEP                    equ $474
-AUD1_VOL                     equ $478
-AUD1_POS                     equ $47C
+AUD1_LC                      equ $464
+AUD1_LEN                     equ $468
+AUD1_STEP                    equ $46C
+AUD1_VOL                     equ $470
+AUD1_POS                     equ $474
 AUD2_CTRL                    equ $480
-AUD2_START                   equ $484
-AUD2_LENGTH                  equ $488
-AUD2_LOOPSTART               equ $48C
-AUD2_LOOPLEN                 equ $490
-AUD2_STEP                    equ $494
-AUD2_VOL                     equ $498
-AUD2_POS                     equ $49C
+AUD2_LC                      equ $484
+AUD2_LEN                     equ $488
+AUD2_STEP                    equ $48C
+AUD2_VOL                     equ $490
+AUD2_POS                     equ $494
 AUD3_CTRL                    equ $4A0
-AUD3_START                   equ $4A4
-AUD3_LENGTH                  equ $4A8
-AUD3_LOOPSTART               equ $4AC
-AUD3_LOOPLEN                 equ $4B0
-AUD3_STEP                    equ $4B4
-AUD3_VOL                     equ $4B8
-AUD3_POS                     equ $4BC
-AUD4_CTRL                    equ $4C0
-AUD4_START                   equ $4C4
-AUD4_LENGTH                  equ $4C8
-AUD4_LOOPSTART               equ $4CC
-AUD4_LOOPLEN                 equ $4D0
-AUD4_STEP                    equ $4D4
-AUD4_VOL                     equ $4D8
-AUD4_POS                     equ $4DC
-AUD5_CTRL                    equ $4E0
-AUD5_START                   equ $4E4
-AUD5_LENGTH                  equ $4E8
-AUD5_LOOPSTART               equ $4EC
-AUD5_LOOPLEN                 equ $4F0
-AUD5_STEP                    equ $4F4
-AUD5_VOL                     equ $4F8
-AUD5_POS                     equ $4FC
-AUD6_CTRL                    equ $500
-AUD6_START                   equ $504
-AUD6_LENGTH                  equ $508
-AUD6_LOOPSTART               equ $50C
-AUD6_LOOPLEN                 equ $510
-AUD6_STEP                    equ $514
-AUD6_VOL                     equ $518
-AUD6_POS                     equ $51C
-AUD7_CTRL                    equ $520
-AUD7_START                   equ $524
-AUD7_LENGTH                  equ $528
-AUD7_LOOPSTART               equ $52C
-AUD7_LOOPLEN                 equ $530
-AUD7_STEP                    equ $534
-AUD7_VOL                     equ $538
-AUD7_POS                     equ $53C
-AUD8_CTRL                    equ $540
-AUD8_START                   equ $544
-AUD8_LENGTH                  equ $548
-AUD8_LOOPSTART               equ $54C
-AUD8_LOOPLEN                 equ $550
-AUD8_STEP                    equ $554
-AUD8_VOL                     equ $558
-AUD8_POS                     equ $55C
-AUD9_CTRL                    equ $560
-AUD9_START                   equ $564
-AUD9_LENGTH                  equ $568
-AUD9_LOOPSTART               equ $56C
-AUD9_LOOPLEN                 equ $570
-AUD9_STEP                    equ $574
-AUD9_VOL                     equ $578
-AUD9_POS                     equ $57C
-AUD10_CTRL                   equ $580
-AUD10_START                  equ $584
-AUD10_LENGTH                 equ $588
-AUD10_LOOPSTART              equ $58C
-AUD10_LOOPLEN                equ $590
-AUD10_STEP                   equ $594
-AUD10_VOL                    equ $598
-AUD10_POS                    equ $59C
-AUD11_CTRL                   equ $5A0
-AUD11_START                  equ $5A4
-AUD11_LENGTH                 equ $5A8
-AUD11_LOOPSTART              equ $5AC
-AUD11_LOOPLEN                equ $5B0
-AUD11_STEP                   equ $5B4
-AUD11_VOL                    equ $5B8
-AUD11_POS                    equ $5BC
-AUD12_CTRL                   equ $5C0
-AUD12_START                  equ $5C4
-AUD12_LENGTH                 equ $5C8
-AUD12_LOOPSTART              equ $5CC
-AUD12_LOOPLEN                equ $5D0
-AUD12_STEP                   equ $5D4
-AUD12_VOL                    equ $5D8
-AUD12_POS                    equ $5DC
-AUD13_CTRL                   equ $5E0
-AUD13_START                  equ $5E4
-AUD13_LENGTH                 equ $5E8
-AUD13_LOOPSTART              equ $5EC
-AUD13_LOOPLEN                equ $5F0
-AUD13_STEP                   equ $5F4
-AUD13_VOL                    equ $5F8
-AUD13_POS                    equ $5FC
-AUD14_CTRL                   equ $600
-AUD14_START                  equ $604
-AUD14_LENGTH                 equ $608
-AUD14_LOOPSTART              equ $60C
-AUD14_LOOPLEN                equ $610
-AUD14_STEP                   equ $614
-AUD14_VOL                    equ $618
-AUD14_POS                    equ $61C
-AUD15_CTRL                   equ $620
-AUD15_START                  equ $624
-AUD15_LENGTH                 equ $628
-AUD15_LOOPSTART              equ $62C
-AUD15_LOOPLEN                equ $630
-AUD15_STEP                   equ $634
-AUD15_VOL                    equ $638
-AUD15_POS                    equ $63C
+AUD3_LC                      equ $4A4
+AUD3_LEN                     equ $4A8
+AUD3_STEP                    equ $4AC
+AUD3_VOL                     equ $4B0
+AUD3_POS                     equ $4B4
 PALETTE                      equ $4000       ; RW, spec 4/6.3
 PALETTE_SIZE                 equ $400
 DESCRAM                      equ $6000       ; RW, spec 11/8
@@ -1179,9 +1011,7 @@ INT_DMA0                     equ $4
 INT_DMA1                     equ $5
 INT_DMA2                     equ $6
 INT_DMA3                     equ $7
-INT_AUDSTR                   equ $8
-INT_AUDCH                    equ $9
-INT_AUDERR                   equ $A
+INT_AUDIO                    equ $9
 INT_TIMER0                   equ $B
 INT_TIMER1                   equ $C
 INT_TIMER2                   equ $D
@@ -1198,9 +1028,7 @@ INTB_DMA0                    equ $4          ; bit of source 4 in INTENA, INTPEN
 INTB_DMA1                    equ $5          ; bit of source 5 in INTENA, INTPEND and INTRAW
 INTB_DMA2                    equ $6          ; bit of source 6 in INTENA, INTPEND and INTRAW
 INTB_DMA3                    equ $7          ; bit of source 7 in INTENA, INTPEND and INTRAW
-INTB_AUDSTR                  equ $8          ; bit of source 8 in INTENA, INTPEND and INTRAW
-INTB_AUDCH                   equ $9          ; bit of source 9 in INTENA, INTPEND and INTRAW
-INTB_AUDERR                  equ $A          ; bit of source 10 in INTENA, INTPEND and INTRAW
+INTB_AUDIO                   equ $9          ; bit of source 9 in INTENA, INTPEND and INTRAW
 INTB_TIMER0                  equ $B          ; bit of source 11 in INTENA, INTPEND and INTRAW
 INTB_TIMER1                  equ $C          ; bit of source 12 in INTENA, INTPEND and INTRAW
 INTB_TIMER2                  equ $D          ; bit of source 13 in INTENA, INTPEND and INTRAW

@@ -18,10 +18,10 @@ FX68K := $(ROOT)/fpga/third_party/fx68k
 BUILD := build
 
 RTL_SRC := $(RTL)/timebase.v $(RTL)/cpu_fx68k.v $(RTL)/sram_ctl.v $(RTL)/dmac.v $(RTL)/bus_if.v \
-           $(RTL)/bootrom.v $(RTL)/fifo8.v $(RTL)/sysregs.v $(RTL)/serial.v $(RTL)/intc.v $(RTL)/timers.v $(RTL)/layer_pix.v $(RTL)/bpldma.v $(RTL)/video.v $(RTL)/copper.v $(RTL)/retro68k.v
+           $(RTL)/bootrom.v $(RTL)/fifo8.v $(RTL)/sysregs.v $(RTL)/serial.v $(RTL)/intc.v $(RTL)/timers.v $(RTL)/layer_pix.v $(RTL)/bpldma.v $(RTL)/video.v $(RTL)/copper.v $(RTL)/audio.v $(RTL)/retro68k.v
 SIM_SRC := $(RTL)/platform/sim/oddr.v sram_model.v ft232h_model.v tb.v
 
-.PHONY: vtest ctest all run frame clean
+.PHONY: vtest ctest atest all run frame clean
 all: run
 
 $(BUILD):
@@ -83,6 +83,18 @@ ctest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
 	grep -a "^FAIL\|^PASS" $$d/sim.log || true; \
 	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }; \
 	python3 ctest/ccheck.py $$d
+
+# Audio test (spec 6): four channels, every output sample checked against
+# a Python model (atest/amodel.py), and the DAC streams against the output
+atest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
+	@set -e; d=$(BUILD)/atest; mkdir -p $$d; \
+	$(VASM) -quiet -Fbin -I $(ROOT)/firmware/include -o $$d/atest.bin atest/atest.s; \
+	python3 $(ROOT)/tools/bin2hex.py $$d/atest.bin $$d/atest.hex; \
+	python3 atest/agen.py $$d/ram.hex; \
+	cp $(BUILD)/microrom.mem $(BUILD)/nanorom.mem $$d/; \
+	(cd $$d && $(VVP) -n ../tb.vvp +audio +rom=atest.hex +ram=ram.hex > sim.log); \
+	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }; \
+	python3 atest/amodel.py $$d $$d/ram.hex
 
 clean:
 	rm -rf $(BUILD)

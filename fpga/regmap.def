@@ -80,26 +80,16 @@ reg 0x340 DMXINT   W1C 11/8  CH=3:0
 reg 0x344 DMXINTEN RW  11/8  CH=3:0
 
 # Audio (spec 6)
-reg 0x400 AUDCON     RW  6/6    EN=0
-reg 0x404 AUDRATE    RW  6/3.1  D=15:0
-reg 0x408 AUDVOL     RW  6/3.2  L=15:8 R=7:0
-reg 0x40C AUDSTAT    W1C 6/6    STRHALF=0 STREND=1 STARVED=2
-reg 0x410 AUDINTEN   RW  6/6    fields=AUDSTAT
-reg 0x414 AUDCHEND   W1C 6/6    CH=15:0
-reg 0x418 AUDCHINTEN RW  6/6    CH=15:0
-reg 0x420 STRCON     RW  6/5    EN=0
-reg 0x424 STRBASE    RW  6/5    ADDR=22:0
-reg 0x428 STRLEN     RW  6/5    FRAMES=15:0
-reg 0x42C STRPOS     R   6/5    FRAME=15:0
-array AUD 16 0x440 0x20 6/6
-  reg 0x00 CTRL      RW 6/6    EN=0 BITS16=1 NEAREST=2 OCTAVES=5:4
-  reg 0x04 START     Q  6/4.2  ADDR=22:0
-  reg 0x08 LENGTH    Q  6/4.2  SAMPLES=22:0
-  reg 0x0C LOOPSTART Q  6/4.2  SAMPLES=22:0
-  reg 0x10 LOOPLEN   Q  6/4.2  SAMPLES=22:0
-  reg 0x14 STEP      RW 6/4.3  STEP=23:0
-  reg 0x18 VOL       RW 6/6    L=15:8 R=7:0
-  reg 0x1C POS       R  6/6    SAMPLES=22:0
+reg 0x404 AUDRATE    RW  6/5    D=15:0
+reg 0x40C AUDSTAT    W1C 6/5    CH=3:0
+reg 0x410 AUDINTEN   RW  6/5    CH=3:0
+array AUD 4 0x440 0x20 6/5
+  reg 0x00 CTRL      RW 6/5    BITS16=1 NEAREST=2
+  reg 0x04 LC        RW 6/5    ADDR=22:0
+  reg 0x08 LEN       RW 6/5    SAMPLES=22:0
+  reg 0x0C STEP      RW 6/5    STEP=19:0
+  reg 0x10 VOL       RW 6/5    L=22:16 R=6:0
+  reg 0x14 POS       R  6/5    SAMPLE=22:0
 end
 
 # Copper (spec 10)
@@ -234,9 +224,7 @@ const INT_DMA0   4
 const INT_DMA1   5
 const INT_DMA2   6
 const INT_DMA3   7
-const INT_AUDSTR 8
-const INT_AUDCH  9
-const INT_AUDERR 10
+const INT_AUDIO  9
 const INT_TIMER0 11
 const INT_TIMER1 12
 const INT_TIMER2 13
@@ -253,9 +241,7 @@ const INTB_DMA0   4   "bit of source 4 in INTENA, INTPEND and INTRAW"
 const INTB_DMA1   5   "bit of source 5 in INTENA, INTPEND and INTRAW"
 const INTB_DMA2   6   "bit of source 6 in INTENA, INTPEND and INTRAW"
 const INTB_DMA3   7   "bit of source 7 in INTENA, INTPEND and INTRAW"
-const INTB_AUDSTR 8   "bit of source 8 in INTENA, INTPEND and INTRAW"
-const INTB_AUDCH  9   "bit of source 9 in INTENA, INTPEND and INTRAW"
-const INTB_AUDERR 10  "bit of source 10 in INTENA, INTPEND and INTRAW"
+const INTB_AUDIO  9   "bit of source 9 in INTENA, INTPEND and INTRAW"
 const INTB_TIMER0 11  "bit of source 11 in INTENA, INTPEND and INTRAW"
 const INTB_TIMER1 12  "bit of source 12 in INTENA, INTPEND and INTRAW"
 const INTB_TIMER2 13  "bit of source 13 in INTENA, INTPEND and INTRAW"

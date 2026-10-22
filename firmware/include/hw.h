@@ -122,71 +122,21 @@
 #define DMXINTEN                           HW_REG32(CUSTOM_BASE + DMXINTEN_OFS)
 #define DMXINTEN_CH_SHIFT                  0
 #define DMXINTEN_CH_MASK                   0xFu
-/* AUDCON: RW, spec 6/6 */
-#define AUDCON_OFS                         0x400u
-#define AUDCON                             HW_REG32(CUSTOM_BASE + AUDCON_OFS)
-#define AUDCON_EN_SHIFT                    0
-#define AUDCON_EN_MASK                     0x1u
-/* AUDRATE: RW, spec 6/3.1 */
+/* AUDRATE: RW, spec 6/5 */
 #define AUDRATE_OFS                        0x404u
 #define AUDRATE                            HW_REG32(CUSTOM_BASE + AUDRATE_OFS)
 #define AUDRATE_D_SHIFT                    0
 #define AUDRATE_D_MASK                     0xFFFFu
-/* AUDVOL: RW, spec 6/3.2 */
-#define AUDVOL_OFS                         0x408u
-#define AUDVOL                             HW_REG32(CUSTOM_BASE + AUDVOL_OFS)
-#define AUDVOL_L_SHIFT                     8
-#define AUDVOL_L_MASK                      0xFF00u
-#define AUDVOL_R_SHIFT                     0
-#define AUDVOL_R_MASK                      0xFFu
-/* AUDSTAT: W1C, spec 6/6 */
+/* AUDSTAT: W1C, spec 6/5 */
 #define AUDSTAT_OFS                        0x40Cu
 #define AUDSTAT                            HW_REG32(CUSTOM_BASE + AUDSTAT_OFS)
-#define AUDSTAT_STRHALF_SHIFT              0
-#define AUDSTAT_STRHALF_MASK               0x1u
-#define AUDSTAT_STREND_SHIFT               1
-#define AUDSTAT_STREND_MASK                0x2u
-#define AUDSTAT_STARVED_SHIFT              2
-#define AUDSTAT_STARVED_MASK               0x4u
-/* AUDINTEN: RW, spec 6/6 */
+#define AUDSTAT_CH_SHIFT                   0
+#define AUDSTAT_CH_MASK                    0xFu
+/* AUDINTEN: RW, spec 6/5 */
 #define AUDINTEN_OFS                       0x410u
 #define AUDINTEN                           HW_REG32(CUSTOM_BASE + AUDINTEN_OFS)
-#define AUDINTEN_STRHALF_SHIFT             0
-#define AUDINTEN_STRHALF_MASK              0x1u
-#define AUDINTEN_STREND_SHIFT              1
-#define AUDINTEN_STREND_MASK               0x2u
-#define AUDINTEN_STARVED_SHIFT             2
-#define AUDINTEN_STARVED_MASK              0x4u
-/* AUDCHEND: W1C, spec 6/6 */
-#define AUDCHEND_OFS                       0x414u
-#define AUDCHEND                           HW_REG32(CUSTOM_BASE + AUDCHEND_OFS)
-#define AUDCHEND_CH_SHIFT                  0
-#define AUDCHEND_CH_MASK                   0xFFFFu
-/* AUDCHINTEN: RW, spec 6/6 */
-#define AUDCHINTEN_OFS                     0x418u
-#define AUDCHINTEN                         HW_REG32(CUSTOM_BASE + AUDCHINTEN_OFS)
-#define AUDCHINTEN_CH_SHIFT                0
-#define AUDCHINTEN_CH_MASK                 0xFFFFu
-/* STRCON: RW, spec 6/5 */
-#define STRCON_OFS                         0x420u
-#define STRCON                             HW_REG32(CUSTOM_BASE + STRCON_OFS)
-#define STRCON_EN_SHIFT                    0
-#define STRCON_EN_MASK                     0x1u
-/* STRBASE: RW, spec 6/5 */
-#define STRBASE_OFS                        0x424u
-#define STRBASE                            HW_REG32(CUSTOM_BASE + STRBASE_OFS)
-#define STRBASE_ADDR_SHIFT                 0
-#define STRBASE_ADDR_MASK                  0x7FFFFFu
-/* STRLEN: RW, spec 6/5 */
-#define STRLEN_OFS                         0x428u
-#define STRLEN                             HW_REG32(CUSTOM_BASE + STRLEN_OFS)
-#define STRLEN_FRAMES_SHIFT                0
-#define STRLEN_FRAMES_MASK                 0xFFFFu
-/* STRPOS: R, spec 6/5 */
-#define STRPOS_OFS                         0x42Cu
-#define STRPOS                             HW_REG32(CUSTOM_BASE + STRPOS_OFS)
-#define STRPOS_FRAME_SHIFT                 0
-#define STRPOS_FRAME_MASK                  0xFFFFu
+#define AUDINTEN_CH_SHIFT                  0
+#define AUDINTEN_CH_MASK                   0xFu
 /* COPCON: RW, spec 10/6 */
 #define COPCON_OFS                         0x700u
 #define COPCON                             HW_REG32(CUSTOM_BASE + COPCON_OFS)
@@ -408,50 +358,38 @@
 #define DMX_CHERR(n)                       HW_REG32(CUSTOM_BASE + DMX_AT(n) + DMX_CHERR_OFS)
 #define DMX_CHERR_ADDR_SHIFT               0
 #define DMX_CHERR_ADDR_MASK                0xFFFFFFu
-/* AUD(n): 16 x 32 bytes, spec 6/6 */
-#define AUD_NUM                            16
+/* AUD(n): 4 x 32 bytes, spec 6/5 */
+#define AUD_NUM                            4
 #define AUD_SPAN                           0x20u
 #define AUD_AT(n)                          (0x440u + (n) * AUD_SPAN)
 #define AUD_CTRL_OFS                       0x0u
 #define AUD_CTRL(n)                        HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_CTRL_OFS)
-#define AUD_CTRL_EN_SHIFT                  0
-#define AUD_CTRL_EN_MASK                   0x1u
 #define AUD_CTRL_BITS16_SHIFT              1
 #define AUD_CTRL_BITS16_MASK               0x2u
 #define AUD_CTRL_NEAREST_SHIFT             2
 #define AUD_CTRL_NEAREST_MASK              0x4u
-#define AUD_CTRL_OCTAVES_SHIFT             4
-#define AUD_CTRL_OCTAVES_MASK              0x30u
-#define AUD_START_OFS                      0x4u
-#define AUD_START(n)                       HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_START_OFS)
-#define AUD_START_ADDR_SHIFT               0
-#define AUD_START_ADDR_MASK                0x7FFFFFu
-#define AUD_LENGTH_OFS                     0x8u
-#define AUD_LENGTH(n)                      HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_LENGTH_OFS)
-#define AUD_LENGTH_SAMPLES_SHIFT           0
-#define AUD_LENGTH_SAMPLES_MASK            0x7FFFFFu
-#define AUD_LOOPSTART_OFS                  0xCu
-#define AUD_LOOPSTART(n)                   HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_LOOPSTART_OFS)
-#define AUD_LOOPSTART_SAMPLES_SHIFT        0
-#define AUD_LOOPSTART_SAMPLES_MASK         0x7FFFFFu
-#define AUD_LOOPLEN_OFS                    0x10u
-#define AUD_LOOPLEN(n)                     HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_LOOPLEN_OFS)
-#define AUD_LOOPLEN_SAMPLES_SHIFT          0
-#define AUD_LOOPLEN_SAMPLES_MASK           0x7FFFFFu
-#define AUD_STEP_OFS                       0x14u
+#define AUD_LC_OFS                         0x4u
+#define AUD_LC(n)                          HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_LC_OFS)
+#define AUD_LC_ADDR_SHIFT                  0
+#define AUD_LC_ADDR_MASK                   0x7FFFFFu
+#define AUD_LEN_OFS                        0x8u
+#define AUD_LEN(n)                         HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_LEN_OFS)
+#define AUD_LEN_SAMPLES_SHIFT              0
+#define AUD_LEN_SAMPLES_MASK               0x7FFFFFu
+#define AUD_STEP_OFS                       0xCu
 #define AUD_STEP(n)                        HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_STEP_OFS)
 #define AUD_STEP_STEP_SHIFT                0
-#define AUD_STEP_STEP_MASK                 0xFFFFFFu
-#define AUD_VOL_OFS                        0x18u
+#define AUD_STEP_STEP_MASK                 0xFFFFFu
+#define AUD_VOL_OFS                        0x10u
 #define AUD_VOL(n)                         HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_VOL_OFS)
-#define AUD_VOL_L_SHIFT                    8
-#define AUD_VOL_L_MASK                     0xFF00u
+#define AUD_VOL_L_SHIFT                    16
+#define AUD_VOL_L_MASK                     0x7F0000u
 #define AUD_VOL_R_SHIFT                    0
-#define AUD_VOL_R_MASK                     0xFFu
-#define AUD_POS_OFS                        0x1Cu
+#define AUD_VOL_R_MASK                     0x7Fu
+#define AUD_POS_OFS                        0x14u
 #define AUD_POS(n)                         HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_POS_OFS)
-#define AUD_POS_SAMPLES_SHIFT              0
-#define AUD_POS_SAMPLES_MASK               0x7FFFFFu
+#define AUD_POS_SAMPLE_SHIFT               0
+#define AUD_POS_SAMPLE_MASK                0x7FFFFFu
 #define PALETTE_OFS                        0x4000u
 #define PALETTE_SIZE                       0x400u
 #define PALETTE                            ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + PALETTE_OFS))
@@ -1014,9 +952,7 @@ _Static_assert(sizeof(dmxdesc_t) == 32, "DMXDESC layout");
 #define INT_DMA1                           0x5u
 #define INT_DMA2                           0x6u
 #define INT_DMA3                           0x7u
-#define INT_AUDSTR                         0x8u
-#define INT_AUDCH                          0x9u
-#define INT_AUDERR                         0xAu
+#define INT_AUDIO                          0x9u
 #define INT_TIMER0                         0xBu
 #define INT_TIMER1                         0xCu
 #define INT_TIMER2                         0xDu
@@ -1033,9 +969,7 @@ _Static_assert(sizeof(dmxdesc_t) == 32, "DMXDESC layout");
 #define INTB_DMA1                          0x5u  /* bit of source 5 in INTENA, INTPEND and INTRAW */
 #define INTB_DMA2                          0x6u  /* bit of source 6 in INTENA, INTPEND and INTRAW */
 #define INTB_DMA3                          0x7u  /* bit of source 7 in INTENA, INTPEND and INTRAW */
-#define INTB_AUDSTR                        0x8u  /* bit of source 8 in INTENA, INTPEND and INTRAW */
-#define INTB_AUDCH                         0x9u  /* bit of source 9 in INTENA, INTPEND and INTRAW */
-#define INTB_AUDERR                        0xAu  /* bit of source 10 in INTENA, INTPEND and INTRAW */
+#define INTB_AUDIO                         0x9u  /* bit of source 9 in INTENA, INTPEND and INTRAW */
 #define INTB_TIMER0                        0xBu  /* bit of source 11 in INTENA, INTPEND and INTRAW */
 #define INTB_TIMER1                        0xCu  /* bit of source 12 in INTENA, INTPEND and INTRAW */
 #define INTB_TIMER2                        0xDu  /* bit of source 13 in INTENA, INTPEND and INTRAW */

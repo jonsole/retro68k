@@ -45,7 +45,7 @@ jobs:
         run: make -C sim run ARGS=+dma
 
   copper:
-    name: Copper test
+    name: Copper and audio tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -68,6 +68,8 @@ jobs:
           echo "$PWD/vasm" >> "$GITHUB_PATH"
       - name: Copper test ROM and frame check
         run: make -C sim ctest
+      - name: Audio test, every output sample against the model
+        run: make -C sim atest
 
   ks3-synth:
     name: KS3 synthesis check (Yosys)

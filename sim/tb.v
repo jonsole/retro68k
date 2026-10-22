@@ -185,6 +185,21 @@ module tb;
         ncyc = ncyc + 1;
     end
 
+    // Audio log (+audio): every output sample, and how many 1s each DAC
+    // stream gave during the sample before (audio.txt, for atest/amodel.py)
+    integer af = 0, ones_l = 0, ones_r = 0;
+    initial if ($test$plusargs("audio")) af = $fopen("audio.txt", "w");
+    always @(posedge clk100) if (af != 0) begin
+        ones_l = ones_l + dut.aud_l;
+        ones_r = ones_r + dut.aud_r;
+        if (dut.aud.tick_done) begin
+            if (dut.aud.on != 4'd0)
+                $fwrite(af, "%0d %0d %0d %0d\n", dut.aud.out_l, dut.aud.out_r, ones_l, ones_r);
+            ones_l = 0;
+            ones_r = 0;
+        end
+    end
+
     // Copper trace (+coptrace): its instructions and register writes
     integer ncop = 0, coptrace = 0;
     initial coptrace = $test$plusargs("coptrace");

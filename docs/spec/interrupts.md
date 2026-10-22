@@ -52,8 +52,8 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 | 4 | 68 | DMA0 | DMA engine: job done (spec 11; version 1 has one channel) | 4 |
 | 5–7 | 69–71 | – | Not used in version 1 (were DMA1–DMA3) | 0 (off) |
 | 8 | 72 | – | Not used in version 1 (was AUDSTR; there is no audio stream) | 0 (off) |
-| 9 | 73 | AUDCH | Audio channel ended or looped (AUDCHEND) | 4 |
-| 10 | 74 | AUDERR | Audio STARVED | 4 |
+| 9 | 73 | AUDIO | Audio: a channel took its registers, at its start or the end of a block (AUDSTAT with AUDINTEN, spec 6) | 4 |
+| 10 | 74 | – | Not used in version 1 (was AUDERR) | 0 (off) |
 | 11 | 75 | TIMER0 | Timer 0 underflow | 6 |
 | 12 | 76 | TIMER1 | Timer 1 underflow | 6 |
 | 13 | 77 | TIMER2 | Timer 2 underflow | 6 |
@@ -64,7 +64,7 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 | 18 | 82 | SOFT | Software interrupt (SOFTINT) | 1 |
 | 19–23 | 83–87 | – | Reserved (e.g. mouse, joysticks, accelerator-port pins) | 0 (off) |
 
-The audio channel flags that share one source (AUDCH) are told apart by reading the unit's status register in the handler. Unused sources keep their numbers, so later versions can bring them back without moving the others.
+The audio channel flags that share one source (AUDIO) are told apart by reading the unit's status register in the handler. Unused sources keep their numbers, so later versions can bring them back without moving the others.
 
 **Choosing levels:** the defaults put timers highest (an operating system tick should not be held up by graphics), then video (VBLANK and LINE handlers have to run on time for smooth animation), then audio and DMA, serial, and the slow devices. Software can change any of them, for example raising LINE to level 6 for precise raster effects.
 
