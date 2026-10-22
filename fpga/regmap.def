@@ -84,7 +84,7 @@ reg 0x500 SPRDMA     SC  9/6    SPR=7:0 SETCLR=15
 reg 0x504 SPRCOLL    W1C 9/6    SPR=7:0 L0=15:8 L1=23:16 L2=31:24
 array SPR 8 0x520 0x20 9/6
   reg 0x00 PT        RW 9/6    ADDR=22:1
-  reg 0x04 H         RW 9/3    HSTART=11:0 HSTOP=27:16
+  reg 0x04 H         RW 9/3    HSTART=10:0 HSTOP=26:16
   reg 0x08 V         RW 9/3    VSTART=10:0 VSTOP=26:16
   reg 0x0C CTL       RW 9/3    BPP=13:12 HMAG=17:16 VMAG=19:18 DEPTH=21:20 PAL=27:24
   reg 0x10 DAT       RW 9/6    DATA=15:0
@@ -321,3 +321,13 @@ const COP_CC_HI     6
 const COP_CC_LS     7
 const COP_RET       0x08000000 "CALL bit 27: RET"
 const COP_STACK     8          "stack depth"
+
+# Beam coordinates (spec 4, section 3.3): (0, 0) is the start of the
+# horizontal and vertical blanks; the picture is VID_X0..VID_X0+VID_W-1
+# across and VID_Y0..VID_Y0+VID_H-1 down
+const VID_X0           144 "first picture pixel, in beam pixels"
+const VID_Y0           49 "first picture line, in beam lines"
+const VID_W            720 "picture width"
+const VID_H            576 "picture height"
+const BEAM_W           864 "beam pixels per line"
+const BEAM_H           625 "beam lines per frame"

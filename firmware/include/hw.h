@@ -403,9 +403,9 @@
 #define SPR_H_OFS                          0x4u
 #define SPR_H(n)                           HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_H_OFS)
 #define SPR_H_HSTART_SHIFT                 0
-#define SPR_H_HSTART_MASK                  0xFFFu
+#define SPR_H_HSTART_MASK                  0x7FFu
 #define SPR_H_HSTOP_SHIFT                  16
-#define SPR_H_HSTOP_MASK                   0xFFF0000u
+#define SPR_H_HSTOP_MASK                   0x7FF0000u
 #define SPR_V_OFS                          0x8u
 #define SPR_V(n)                           HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_V_OFS)
 #define SPR_V_VSTART_SHIFT                 0
@@ -1104,5 +1104,11 @@ _Static_assert(sizeof(dmxdesc_t) == 32, "DMXDESC layout");
 #define COP_CC_LS                          0x7u
 #define COP_RET                            0x8000000u  /* CALL bit 27: RET */
 #define COP_STACK                          0x8u  /* stack depth */
+#define VID_X0                             0x90u  /* first picture pixel, in beam pixels */
+#define VID_Y0                             0x31u  /* first picture line, in beam lines */
+#define VID_W                              0x2D0u  /* picture width */
+#define VID_H                              0x240u  /* picture height */
+#define BEAM_W                             0x360u  /* beam pixels per line */
+#define BEAM_H                             0x271u  /* beam lines per frame */
 
 #endif /* RETRO68K_HW_H */

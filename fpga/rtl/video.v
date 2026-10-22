@@ -45,6 +45,14 @@ module video (
     input  wire        disp_rvalid,
     input  wire [15:0] disp_rdata,
 
+    // The sprite fetcher's port (spec 9; the same read data)
+    output wire        spr_req,
+    output wire        spr_urgent,
+    output wire [9:0]  spr_deadline,
+    output wire [21:1] spr_addr,
+    input  wire        spr_ack,
+    input  wire        spr_rvalid,
+
     input  wire        clk_pix,
     input  wire        clk_pix5,       // 5 x clk_pix (135 MHz), edges lined up
     output reg  [23:0] rgb,
@@ -63,6 +71,12 @@ module video (
     localparam [10:0] VSE  = 11'd586;       // sync 5, back porch 39
     localparam [10:0] VTOT = 11'd625;
     localparam        SPOL = 1'b0;          // 1: active-high sync
+    // Beam coordinates (section 3.3): (0, 0) is the start of the horizontal
+    // and vertical blanks, so the picture is pixels BH0-863, lines BV0-624.
+    // Inside, the counters hc and vc stay picture-relative (0 = the first
+    // pixel, the first line).
+    localparam [10:0] BH0  = HTOT - HVIS;   // 144
+    localparam [10:0] BV0  = VTOT - VVIS;   // 49
 
     // ================================================================ registers (100 MHz)
     wire [15:0] off      = {rb_addr[15:2], 2'b00};
@@ -74,8 +88,8 @@ module video (
     wire sel_pal   = in_custom && (off[15:10] == 6'b010000);   // 0x4000-0x43FF
 
     reg  [4:0]  vidcon;                // DIRECT (4), BLANKALL (2), EN (0)
-    reg  [6:0]  vidstat;               // sticky flags; INVBLANK (bit 8) is live, below
-    reg  [6:0]  vidinten;
+    reg  [7:0]  vidstat;               // sticky flags; INVBLANK (bit 8) is live, below
+    reg  [7:0]  vidinten;
     reg  [10:0] lc_v;                  // LINECMP
     reg  [23:0] bgcolor;
     reg  [5:0]  prio;
@@ -100,14 +114,15 @@ module video (
     assign beam_v = s_vc;
     assign beam_h = s_hc;
     reg         p_vb_t, p_line_t;      // toggles: vertical blank started, line compare hit
-    wire        p_invblank = (s_vc >= VVIS);
+    wire        p_invblank = (s_vc < BV0);
 
     function [31:0] merge(input [31:0] old, input [31:0] new, input [3:0] be);
         merge = { be[3] ? new[31:24] : old[31:24], be[2] ? new[23:16] : old[23:16],
                   be[1] ? new[15:8]  : old[15:8],  be[0] ? new[7:0]   : old[7:0] };
     endfunction
 
-    reg  [1:0] vb_s, ln_s;
+    reg  [1:0] vb_s, ln_s, un_s;
+    wire [7:0] p_un;                   // sprites' underrun toggles (pixel side)
     reg  [1:0] ov_s [0:2];
     wire [2:0] ov_t;
     wire       fetch_en = vidcon[0] && dmacon[9] && dmacon[8];
@@ -117,14 +132,14 @@ module video (
     always @(posedge clk) begin
         if (rst) begin
             vidcon   <= 5'd0;
-            vidstat  <= 7'd0;
-            vidinten <= 7'd0;
+            vidstat  <= 8'd0;
+            vidinten <= 8'd0;
             lc_v     <= 11'd0;
             bgcolor  <= 24'd0;
             prio     <= 6'b10_01_00;    // L0 in front, then L1, then L2
             for (i = 0; i < 3; i = i + 1) begin
                 l_ctrl[i] <= 24'd0;
-                l_xs[i] <= 11'd0;  l_xe[i] <= HVIS;  l_ys[i] <= 11'd0;  l_ye[i] <= VVIS;
+                l_xs[i] <= BH0;  l_xe[i] <= HTOT;  l_ys[i] <= BV0;  l_ye[i] <= VTOT;
                 l_sx[i] <= 4'd0;
                 ov_s[i] <= 2'b00;
             end
@@ -140,6 +155,8 @@ module video (
             ln_s <= {ln_s[0], p_line_t};
             if (vb_s[1] != vb_s[0]) vidstat[0] <= 1'b1;
             if (ln_s[1] != ln_s[0]) vidstat[1] <= 1'b1;
+            un_s <= {un_s[0], ^p_un};
+            if (un_s[1] != un_s[0]) vidstat[7] <= 1'b1;          // SPRUNDER
 
             if (rb_wr && sel_lay) begin : wlayer
                 reg [31:0] v;
@@ -157,8 +174,8 @@ module video (
                 reg [31:0] v;
                 case (off)
                     `RM_VIDCON:   begin v = merge({27'd0, vidcon}, rb_wdata, rb_be); vidcon <= {v[4], 1'b0, v[2], 1'b0, v[0]}; end
-                    `RM_VIDSTAT:  if (rb_be[0]) vidstat <= vidstat & ~rb_wdata[6:0];
-                    `RM_VIDINTEN: begin v = merge({25'd0, vidinten}, rb_wdata, rb_be); vidinten <= v[6:0] & 7'h73; end
+                    `RM_VIDSTAT:  if (rb_be[0]) vidstat <= vidstat & ~rb_wdata[7:0];
+                    `RM_VIDINTEN: begin v = merge({24'd0, vidinten}, rb_wdata, rb_be); vidinten <= v[7:0] & 8'hF3; end
                     `RM_LINECMP:  begin v = merge({5'd0, lc_v, 16'd0}, rb_wdata, rb_be); lc_v <= v[26:16]; end
                     `RM_BGCOLOR:  begin v = merge({8'd0, bgcolor}, rb_wdata, rb_be); bgcolor <= v[23:0]; end
                     `RM_PRIO:     begin v = merge({26'd0, prio}, rb_wdata, rb_be); prio <= v[5:0]; end
@@ -181,8 +198,8 @@ module video (
         endcase
         if (rb_rd && sel_glob) case (off)
             `RM_VIDCON:     reg_q <= {27'd0, vidcon};
-            `RM_VIDSTAT:    reg_q <= {23'd0, p_invblank, 1'b0, vidstat};
-            `RM_VIDINTEN:   reg_q <= {25'd0, vidinten};
+            `RM_VIDSTAT:    reg_q <= {23'd0, p_invblank, vidstat};
+            `RM_VIDINTEN:   reg_q <= {24'd0, vidinten};
             `RM_BEAMPOS:    reg_q <= {5'd0, s_vc, 5'd0, s_hc};
             `RM_FRAMECOUNT: reg_q <= {16'd0, s_frames};
             `RM_LINECMP:    reg_q <= {5'd0, lc_v, 16'd0};
@@ -199,10 +216,10 @@ module video (
     assign line_tick  = lt_s[2] != lt_s[1];
     assign frame_tick = vb_s[1] != vb_s[0];
 
-    wire [6:0] irqflags = vidstat & vidinten;
+    wire [7:0] irqflags = vidstat & vidinten;
     assign irq_vblank = irqflags[0];
     assign irq_line   = irqflags[1];
-    assign irq_viderr = |irqflags[6:4];
+    assign irq_viderr = |irqflags[7:4];
 
     // ================================================================ palette
     // Kept twice, written together from the CPU side (100 MHz, 32-bit with
@@ -233,7 +250,7 @@ module video (
     always @(posedge clk) pal_hit <= rb_rd && sel_pal;
 
     wire [31:0] dma_q;
-    assign rb_rdata = reg_q | dma_q | (pal_hit ? {8'd0, pal_qa[23:0]} : 32'd0);
+    assign rb_rdata = reg_q | dma_q | spr_q | (pal_hit ? {8'd0, pal_qa[23:0]} : 32'd0);
 
     // ================================================================ pixel domain
     reg [1:0] rst_p;
@@ -253,6 +270,11 @@ module video (
     wire vlast = (vc == VTOT - 1'b1);
     wire [10:0] hn = hlast ? 11'd0 : hc + 1'b1;
     wire [10:0] vn = hlast ? (vlast ? 11'd0 : vc + 1'b1) : vc;
+    // The beam in beam coordinates: a beam line starts with its horizontal blank
+    wire        inhb = (hc >= HVIS);
+    wire [10:0] bh = inhb ? hc - HVIS : hc + BH0;
+    wire [10:0] bv = inhb ? ((vc >= VVIS - 1'b1) ? vc - (VVIS - 1'b1) : vc + BV0 + 1'b1)
+                          : ((vc >= VVIS) ? vc - VVIS : vc + BV0);
 
     reg [5:0]  prio_l;                 // PRIO and BGCOLOR, taken at the start of each line (section 5.4)
     reg [23:0] bg_l;
@@ -268,24 +290,39 @@ module video (
                 bg_l   <= bgcolor;
             end
         end
-        p_hc <= hc;
-        p_vc <= vc;
+        p_hc <= bh;
+        p_vc <= bv;
         if (prst) begin
             p_vb_t   <= 1'b0;
             p_line_t <= 1'b0;
             p_frames <= 16'd0;
         end else if (en_p) begin
-            if (hc == 11'd0 && vc == VVIS) begin
+            if (bh == 11'd0 && bv == 11'd0) begin   // the frame starts: (0, 0)
                 p_vb_t   <= ~p_vb_t;
                 p_frames <= p_frames + 1'b1;
             end
-            if (hc == 11'd0 && vc == lc_v) p_line_t <= ~p_line_t;
+            if (bh == 11'd0 && bv == lc_v) p_line_t <= ~p_line_t;
         end
     end
 
     // ---- settings for the next line, worked out in the horizontal blank
     // (clocks HVIS to HVIS + 2), then handed to the DMA and the layer units
     wire [10:0] next_line = vlast ? 11'd0 : vc + 1'b1;
+    // The windows (in beam coordinates) on the picture: clamped to it, then picture-relative
+    function [10:0] tox(input [10:0] v);
+        tox = (v < BH0) ? 11'd0 : (v > HTOT) ? HVIS : v - BH0;
+    endfunction
+    function [10:0] toy(input [10:0] v);
+        toy = (v < BV0) ? 11'd0 : (v > VTOT) ? VVIS : v - BV0;
+    endfunction
+    wire [10:0] w_xs [0:2], w_xe [0:2], w_ys [0:2], w_ye [0:2];
+    genvar gw;
+    generate for (gw = 0; gw < 3; gw = gw + 1) begin : wins
+        assign w_xs[gw] = tox(l_xs[gw]);
+        assign w_xe[gw] = (tox(l_xe[gw]) < tox(l_xs[gw])) ? tox(l_xs[gw]) : tox(l_xe[gw]);
+        assign w_ys[gw] = toy(l_ys[gw]);
+        assign w_ye[gw] = toy(l_ye[gw]);
+    end endgenerate
     reg  [2:0]  b_vsub [0:2];          // screen lines shown of this source line
     reg  [2:0]  b_act, b_adv;
     reg  [3:0]  n_pos0 [0:2];
@@ -317,16 +354,16 @@ module video (
             // 1: which layers show on the next line, and whether their pointers move on after it
             for (n = 0; n < 3; n = n + 1) begin
                 vmax = 3'd7 >> (2'd3 - l_ctrl[n][9:8]);
-                vs_n = (next_line == l_ys[n] || b_vsub[n] == vmax) ? 3'd0 : b_vsub[n] + 1'b1;
+                vs_n = (next_line == w_ys[n] || b_vsub[n] == vmax) ? 3'd0 : b_vsub[n] + 1'b1;
                 b_act[n] <= en_p && l_ctrl[n][0] && next_line < VVIS &&
-                            next_line >= l_ys[n] && next_line < l_ye[n];
+                            next_line >= w_ys[n] && next_line < w_ye[n];
                 b_adv[n] <= (vs_n == vmax);
-                if (next_line >= l_ys[n] && next_line < l_ye[n]) b_vsub[n] <= vs_n;
+                if (next_line >= w_ys[n] && next_line < w_ye[n]) b_vsub[n] <= vs_n;
             end
         end else if (hc == HVIS + 1'b1) begin
             // 2: first pixel, groups to fetch
             for (n = 0; n < 3; n = n + 1) begin
-                w      = l_xe[n] - l_xs[n];
+                w      = w_xe[n] - w_xs[n];
                 srcpix = (w + (3'd7 >> (2'd3 - l_ctrl[n][7:6]))) >> l_ctrl[n][7:6];
                 // a group is 16 source pixels in either format
                 fine = l_sx[n];
@@ -344,8 +381,8 @@ module video (
                 f_planes[n] <= l_ctrl[n][1] ? l_ctrl[n][18:16] : (3'd1 << l_ctrl[n][3:2]) - 1'b1;
                 f_chunky[n] <= !l_ctrl[n][1];
                 f_hs[n]     <= l_ctrl[n][7:6];
-                c_xs[n]     <= l_xs[n];
-                c_xe[n]     <= l_xe[n];
+                c_xs[n]     <= w_xs[n];
+                c_xe[n]     <= w_xe[n];
                 c_planar[n] <= l_ctrl[n][1];
                 c_lb[n]     <= l_ctrl[n][3:2];
                 c_transp[n] <= l_ctrl[n][4];
@@ -373,6 +410,69 @@ module video (
         .dat(dat), .fill_t(fill_t), .take_t(take_t),
         .req(disp_req), .urgent(disp_urgent), .deadline(disp_deadline), .addr(disp_addr), .ack(disp_ack), .rvalid(disp_rvalid), .rdata(disp_rdata)
     );
+
+    // ---- sprites (spec 9): the fetcher and FIFOs (100 MHz), and a unit per sprite
+    wire [31:0] spr_q;
+    wire [79:0] sp_hs, sp_xe;
+    wire [87:0] sp_vs, sp_ve;
+    wire [15:0] sp_lb, sp_hmag, sp_depth;
+    wire [7:0]  sp_dma;
+    wire [31:0] sp_pal;
+    wire [39:0] sp_ra;
+    wire [127:0] sp_rd;
+    wire [47:0] sp_wpg, sp_rpg;
+    wire [7:0]  sp_fl, sp_fla;
+    reg  [31:0] coll_acc, coll_line;
+    reg         coll_t;
+    sprites spr (
+        .clk(clk), .rst(rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be), .rb_rdata(spr_q),
+        .dmacon(dmacon), .vblank(frame_tick), .beam_v(s_vc), .beam_h(s_hc),
+        .mem_req(spr_req), .mem_addr(spr_addr), .mem_deadline(spr_deadline), .mem_urgent(spr_urgent),
+        .mem_ack(spr_ack), .mem_rvalid(spr_rvalid), .mem_rdata(disp_rdata),
+        .p_hs(sp_hs), .p_xe(sp_xe), .p_vs(sp_vs), .p_ve(sp_ve), .p_lb(sp_lb),
+        .p_hmag(sp_hmag), .p_depth(sp_depth), .p_pal(sp_pal), .p_dma(sp_dma),
+        .fifo_ra(sp_ra), .fifo_rd(sp_rd), .wp_g(sp_wpg), .rp_g(sp_rpg), .flush_t(sp_fl), .flush_ack_t(sp_fla),
+        .coll_line(coll_line), .coll_t(coll_t)
+    );
+
+    // A sprite's line is a beam line: from the start of its horizontal blank
+    // (beam pixel 0); its settings are taken at beam pixel 863 of the line before
+    wire [10:0] ny = (bv == VTOT - 1'b1) ? 11'd0 : bv + 1'b1;
+    reg  [7:0]  c_sact, c_sdma;
+    reg  [9:0]  c_shs [0:7], c_sxe [0:7];
+    reg  [1:0]  c_slb [0:7], c_smag [0:7], c_sdep [0:7];
+    reg  [3:0]  c_spal [0:7];
+    always @(posedge clk_pix) if (hc == HVIS - 1'b1 || !en_p) begin : sset
+        integer n;
+        for (n = 0; n < 8; n = n + 1) begin
+            c_sact[n]  <= en_p && ny >= sp_vs[11*n +: 11] && ny < sp_ve[11*n +: 11];
+            c_shs[n]   <= sp_hs[10*n +: 10];
+            c_sxe[n]   <= sp_xe[10*n +: 10];
+            c_slb[n]   <= sp_lb[2*n +: 2];
+            c_smag[n]  <= sp_hmag[2*n +: 2];
+            c_sdep[n]  <= sp_depth[2*n +: 2];
+            c_spal[n]  <= sp_pal[4*n +: 4];
+            c_sdma[n]  <= sp_dma[n];
+        end
+    end
+
+    wire [9:0]  st_now = bh[9:0];
+    wire [7:0]  s_op;
+    wire [7:0]  s_idx [0:7];
+    genvar sg;
+    generate for (sg = 0; sg < 8; sg = sg + 1) begin : sprs
+        wire [5:0] rpb;
+        assign sp_ra[5*sg +: 5] = rpb[4:0];
+        sprite_pix u (
+            .clk_pix(clk_pix), .en(en_p), .t(st_now),
+            .act(c_sact[sg]), .hs(c_shs[sg]), .xe(c_sxe[sg]), .lb(c_slb[sg]),
+            .hmag(c_smag[sg]), .pal(c_spal[sg]), .dma(c_sdma[sg]),
+            .head(sp_rd[16*sg +: 16]), .rp(rpb), .rp_g(sp_rpg[6*sg +: 6]), .wp_g(sp_wpg[6*sg +: 6]),
+            .flush_t(sp_fl[sg]), .flush_ack_t(sp_fla[sg]),
+            .opaque(s_op[sg]), .idx(s_idx[sg]), .underrun_t(p_un[sg])
+        );
+    end endgenerate
 
     // ---- layer units: their output is stage 1
     wire [2:0] bl_op;
@@ -423,26 +523,63 @@ module video (
         assign depth[g] = c_planar[g] ? {1'b0, c_planes[g]} + 4'd1 : 4'd1 << c_lb[g];
     end endgenerate
 
+    // Collisions (spec 9, section 6): gathered over a line, handed to the
+    // 100 MHz side at the end of it
+    always @(posedge clk_pix) begin : collide
+        integer n, k;
+        reg [3:0] c;
+        reg [31:0] h;
+        c = 4'd0;
+        for (n = 0; n < 8; n = n + 1) c = c + s_op[n];
+        h = 32'd0;
+        if (c > 4'd1) h[7:0] = s_op;
+        for (k = 0; k < 3; k = k + 1) if (bl_op[k]) h[8*(k+1) +: 8] = s_op;
+        if (!vis_d[0]) h = 32'd0;                // on the picture only
+        if (!en_p) begin
+            coll_acc <= 32'd0;
+            coll_t   <= 1'b0;
+        end else if (hc == HVIS + 11'd8) begin
+            coll_line <= coll_acc | h;
+            coll_acc  <= 32'd0;
+            coll_t    <= ~coll_t;
+        end else
+            coll_acc <= coll_acc | h;
+    end
+
     always @(posedge clk_pix) begin
         vis_d <= {vis_d[1:0], vis0};
         hs_d  <= {hs_d[1:0], hs0};
         vs_d  <= {vs_d[1:0], vs0};
-        // 2: the front-most opaque layer (section 4.8); PRIO value 3 names no layer
+        // 2: the front-most opaque layer or sprite (section 4.8; spec 9, 3.3).
+        // From the front: sprites of DEPTH 0, the front layer, DEPTH 1, the
+        // middle layer, DEPTH 2, the back layer, DEPTH 3. PRIO value 3 names
+        // no layer. Among sprites, the lower number is in front.
         begin : pix
-            integer p;
-            reg       any;
-            reg [7:0] fix;
+            integer p, n;
+            reg       any, sany;
+            reg [7:0] fix, sfix;
             reg [1:0] l;
             any = 1'b0;
             fix = 8'd0;
-            for (p = 2; p >= 0; p = p - 1) begin
-                l = prio_l[2*p +: 2];
-                if (l != 2'd3 && bl_op[l]) begin any = 1'b1; fix = bl_idx[l]; end
+            for (p = 3; p >= 0; p = p - 1) begin
+                // sprites of DEPTH p (behind layer p - 1 in PRIO order)
+                for (n = 7; n >= 0; n = n - 1)
+                    if (s_op[n] && c_sdep[n] == p) begin any = 1'b1; fix = s_idx[n]; end
+                if (p > 0) begin
+                    l = prio_l[2*(p-1) +: 2];
+                    if (l != 2'd3 && bl_op[l]) begin any = 1'b1; fix = bl_idx[l]; end
+                end
             end
+            // the front-most sprite, for direct colour
+            sany = 1'b0;
+            sfix = 8'd0;
+            for (n = 7; n >= 0; n = n - 1)
+                if (s_op[n]) begin sany = 1'b1; sfix = s_idx[n]; end
             opaque2 <= any;
-            pidx2   <= fix;
-            // Direct colour: on every visible pixel; a layer not showing gives 0
-            direct2 <= vidcon[4];
+            pidx2   <= vidcon[4] ? sfix : fix;
+            // Direct colour: on every visible pixel; a layer not showing gives
+            // 0; sprites are in front, in palette colours
+            direct2 <= vidcon[4] && !sany;
             if (vidcon[4]) opaque2 <= 1'b1;
             for (p = 0; p < 3; p = p + 1) ch2[p] <= widen(bl_raw[p], depth[p]);
         end

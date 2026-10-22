@@ -44,8 +44,8 @@ v_tmr       equ VARS+24             ; long: timer 0 interrupts seen
 
 CON         equ $030000             ; the console: 640 x 480, 1 bit per pixel
 CON_LINE    equ 640/8               ; bytes per line
-CON_X       equ (720-640)/2         ; where the console sits on the screen
-CON_Y       equ (576-480)/2
+CON_X       equ VID_X0+(VID_W-640)/2 ; where the console sits (beam coordinates)
+CON_Y       equ VID_Y0+(VID_H-480)/2
 CON_COLS    equ 80
 CON_ROWS    equ 30                  ; of 16 lines
 BITMAP      equ $020000             ; the test picture for layer 1
@@ -53,8 +53,8 @@ BM_W        equ 64                  ; 64 x 32 pixels, 4 interleaved planes:
 BM_H        equ 32                  ; each line is plane 0 (8 bytes), plane 1, plane 2, plane 3
 BM_PL       equ 4
 BM_LINE     equ BM_W/8              ; bytes per plane line
-BM_X        equ 400                 ; shown 2x at (400, 300)
-BM_Y        equ 300
+BM_X        equ VID_X0+400          ; shown 2x at picture (400, 300)
+BM_Y        equ VID_Y0+300
 COPLIST     equ $03A000             ; the copper list (after the console)
 
             org ROM                 ; $F80000; also seen at 0 while the reset overlay is on

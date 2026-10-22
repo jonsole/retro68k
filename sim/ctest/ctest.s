@@ -8,7 +8,8 @@
 ;     loop, CALL/RET two deep, MOVR through X with X+, a COPINT
 ;   - in the picture: colour 0 changes at beam positions, for ccheck.py to
 ;     check in the frame: (100,200) red, (100,500) green, lines 200-209 a
-;     new colour at pixel 360 on each line, (300,0) blue
+;     new colour at pixel 360 on each line, (300,0) blue (picture
+;     coordinates: line, pixel; the WAITs add VID_Y0 and VID_X0)
 ;   - then it saves X, Y and the flags, and goes on with list 2
 ; List 2 (background, COPCON.RESUME): a long counting loop that runs across
 ;   vertical blanks; each time a pass of RUNS counts is done it adds 1 to R4.
@@ -22,7 +23,6 @@
 
 RAMLIST     equ     $020000
 ZEROS       equ     $030000             ; 90 bytes of 0: one line of layer 0
-HBLANK      equ     720
 RUNS        equ     24000               ; counts per background pass
 FRAMES      equ     5
 
@@ -51,8 +51,8 @@ start:      move.w  #$2700,sr
             move.l  #ZEROS,L0+L_BPL0PT(a4)
             move.l  #0,L0+L_BPLSTRIDE(a4)
             move.w  #L_BPLDMA_SETCLR_M|1,L0+L_BPLDMA+2(a4)
-            move.l  #(0<<16)|720,L0+L_WINX(a4)
-            move.l  #(0<<16)|576,L0+L_WINY(a4)
+            move.l  #(VID_X0<<16)|(VID_X0+VID_W),L0+L_WINX(a4)
+            move.l  #(VID_Y0<<16)|(VID_Y0+VID_H),L0+L_WINY(a4)
             move.l  #L_CTRL_EN_M,L0+L_CTRL(a4)
 
             ; the copper
@@ -266,20 +266,20 @@ loop1:      CADDI   CY,3
             ; each colour's high half before the WAIT (held), its low half
             ; after it: the whole colour changes exactly at the position
             CMOVE   PALETTE,$00FF
-            CWAIT   100,200
+            CWAIT   VID_Y0+100,VID_X0+200
             CMOVE   PALETTE+2,$0000             ; red
             CMOVE   PALETTE,$0000
-            CWAIT   100,500
+            CWAIT   VID_Y0+100,VID_X0+500
             CMOVE   PALETTE+2,$FF00             ; green
-            CWAIT   199,HBLANK
+            CWAIT   VID_Y0+200,0                ; the blank before picture line 200
             CLDI    CY,$0010
-loop2:      CWAITP  360
+loop2:      CWAITP  VID_X0+360
             CMOVR   PALETTE+2,CY                ; green and blue = Y, red kept (0)
             CADDI   CY,$0808
-            CSKIP   209,400
+            CSKIP   VID_Y0+209,VID_X0+400
             CJUMP   RAMLIST+(loop2-clist)
             CMOVE   PALETTE,$0000
-            CWAIT   300,0
+            CWAIT   VID_Y0+300,VID_X0+0
             CMOVE   PALETTE+2,$00FF             ; blue
 
             ; ---- on to list 2, with its registers back

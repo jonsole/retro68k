@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reference model of the video (spec 4): renders a frame from the video
+"""Reference model of the video (spec 4) and the sprites (spec 9): renders a frame from the video
 state the testbench dumped and the Chip RAM contents, and compares it pixel
 by pixel with the frame the simulation showed.
 
@@ -26,7 +26,7 @@ def load_ram(path):
 
 
 def load_state(d):
-    regs, layers, bpt, pdma, dat = {}, [], {}, {}, {}
+    regs, layers, bpt, pdma, dat, sprites = {}, [], {}, {}, {}, []
     for line in open(d + "/vstate_regs.txt"):
         f = line.split()
         if f[0] == "layer":
@@ -38,10 +38,12 @@ def load_state(d):
             pdma[int(f[1])] = int(f[2])
         elif f[0] == "dat":
             dat[int(f[1])] = int(f[2])
+        elif f[0] == "sprite":
+            sprites.append(dict(zip(f[2::2], (int(x) if x.isdigit() else 0 for x in f[3::2]))))
         else:
             regs[f[0]] = int(f[1])
     pal = [int(l, 16) & 0xFFFFFF for l in open(d + "/vstate_pal.hex")]
-    regs["pdma"], regs["dat"] = pdma, dat
+    regs["pdma"], regs["dat"], regs["sprites"] = pdma, dat, sprites
     return regs, layers, bpt, pal
 
 
@@ -62,6 +64,9 @@ def widen(v, d):
     return r
 
 
+X0, Y0 = 144, 49                                  # the picture's first pixel and line, in beam coordinates
+
+
 def render(regs, layers, bpt, pal, ram):
     W, H = regs["hvis"], regs["vvis"]
     direct = (regs["vidcon"] >> 4) & 1
@@ -76,7 +81,12 @@ def render(regs, layers, bpt, pal, ram):
         en, planar, lb, transp = c & 1, (c >> 1) & 1, (c >> 2) & 3, (c >> 4) & 1
         hs, vs, palofs, planes = (c >> 6) & 3, (c >> 8) & 3, (c >> 12) & 15, ((c >> 16) & 7) + 1
         mod = L["mod"] - 0x10000 if L["mod"] & 0x8000 else L["mod"]
-        xs, xe, ys, ye, sx = L["xs"], L["xe"], L["ys"], L["ye"], L["sx"]
+        # the window, from beam coordinates (spec 4, section 3.3) to the picture's, clamped to it
+        cx = lambda v: min(max(v - X0, 0), W)
+        cy = lambda v: min(max(v - Y0, 0), H)
+        xs, ye_, sx = cx(L["xs"]), None, L["sx"]
+        xe = max(cx(L["xe"]), xs)
+        ys, ye = cy(L["ys"]), cy(L["ye"])
         nplanes = planes if planar else 1
         bpp = 1 if planar else 1 << lb
         depth = planes if planar else bpp
@@ -116,27 +126,90 @@ def render(regs, layers, bpt, pal, ram):
                         ptr[p] = wadd(ptr[p], mod)          # BPLSTRIDE: from the line's start
             out[y][n] = (row, depth)
 
+    spr = render_sprites(regs, ram, W, H)        # [y][x] = list of (n, idx, depth), front first
+    coll = 0
     img = []
     for y in range(H):
         for x in range(W):
+            here = spr[y][x]
+            # collisions (spec 9, section 6)
+            if len(here) > 1:
+                for n, _, _ in here:
+                    coll |= 1 << n
+            for l in range(3):
+                if out[y][l][0][x][0]:
+                    for n, _, _ in here:
+                        coll |= 1 << (8 * (l + 1) + n)
             if blankall and not direct:
                 img.append(regs["bg"])
             elif direct:
+                if here:
+                    img.append(pal[here[0][1]])           # sprites in front, palette colours
+                    continue
                 rgb = 0
                 for n in range(3):
                     row, d = out[y][n]
                     rgb = (rgb << 8) | widen(row[x][2], d)
                 img.append(rgb)
             else:
+                # back to front: DEPTH 3 sprites, back layer, DEPTH 2, middle, DEPTH 1, front, DEPTH 0
                 col = regs["bg"]
-                for p in (2, 1, 0):                      # back to front
-                    l = (prio >> (2 * p)) & 3
-                    if l < 3:
-                        op, idx, _ = out[y][l][0][x]
-                        if op:
+                for p in (3, 2, 1, 0):
+                    for n, idx, dep in reversed(here):
+                        if dep == p:
                             col = pal[idx]
+                    if p > 0:
+                        l = (prio >> (2 * (p - 1))) & 3
+                        if l < 3:
+                            op, idx, _ = out[y][l][0][x]
+                            if op:
+                                col = pal[idx]
                 img.append(col)
+    regs["coll_model"] = coll
     return W, H, img
+
+
+def render_sprites(regs, ram, W, H):
+    """Each visible pixel: the opaque sprites there, lowest number first."""
+    word = lambda a: ram.get((a & 0x7FFFFF) >> 1, 0)
+    sgn = lambda v: v - 4096 if v & 0x800 else v
+    grid = [[[] for _ in range(W)] for _ in range(H)]
+    for n, S in enumerate(regs["sprites"]):
+        if not S["dma"]:
+            continue
+        # beam coordinates: the line is beam pixels 0-863, the picture 144-863
+        hs, he = min(S["hs"], 864) - X0, S["he"] - X0
+        hs_c, xe = hs, max(min(he, 720), hs)
+        vs, ve = S["vs"] - Y0, min(S["ve"], 625) - Y0
+        lb = S["bpp"] + 1
+        bpp, ppw, mag = 1 << lb, 16 >> lb, 1 << S["hmag"]
+        srcf = (he - hs + mag - 1) // mag if he > hs else 0
+        srcs = (xe - hs_c + mag - 1) // mag if xe > hs_c else 0
+        wf = (srcf * bpp + 15) // 16
+        wv = min((srcs * bpp + 15) // 16, wf) if srcs else 0
+        if wv == 0 or vs >= ve:
+            continue
+        stride = 2 * wf
+        for y in range(max(vs, 0), ve):
+            sl = (y - vs) >> S["vmag"]
+            start = S["pt"] + sl * stride
+            seq = []
+            for k in range(wv):
+                a = start + 2 * k
+                w = word(a)
+                px = [(w >> (16 - bpp * (i + 1))) & (bpp_mask(bpp)) for i in range(ppw)]
+                seq += px
+            for x in range(max(hs_c, 0), min(xe, W)):
+                i = (x - hs_c) >> S["hmag"]
+                v = seq[i] if i < len(seq) else 0
+                if v:
+                    idx = v if bpp == 8 else (S["pal"] << 4) | (v & 15)
+                    grid[y][x].append((n, idx, S["depth"]))
+    return grid
+
+
+def bpp_mask(b):
+    return (1 << b) - 1
 
 
 def main():
@@ -154,8 +227,11 @@ def main():
                 if errors < 10:
                     print("vmodel: pixel (%d, %d) is %06x, expected %06x" % (i % W, i // W, got[i], want[i]))
                 errors += 1
-    if (regs["vidstat"] >> 4) & 7:
-        print("vmodel: OVERRUN set: VIDSTAT %x" % regs["vidstat"])
+    if (regs["vidstat"] >> 4) & 15:
+        print("vmodel: OVERRUN or SPRUNDER set: VIDSTAT %x" % regs["vidstat"])
+        errors += 1
+    if "sprcoll" in regs and regs["sprites"] and regs["sprcoll"] != regs["coll_model"]:
+        print("vmodel: SPRCOLL is %08x, expected %08x" % (regs["sprcoll"], regs["coll_model"]))
         errors += 1
     if len(sys.argv) > 3:
         try:

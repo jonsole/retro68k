@@ -179,13 +179,16 @@ Reusing sprite 0 for a second ship lower down, from line 300: after the first sh
 
 ## 8. FPGA resources
 
-| Item | Resource |
-|------|----------|
-| 8 FIFOs of 32 × 16 bits | Distributed RAM, about 100 LUTs |
-| Fetcher: line addresses (magnify), FIFO fill and deadlines, in the scheduler | About 500 LUTs |
-| 8 pixel units: position, magnify, pixel select | About 800 LUTs |
-| Mixing with the layers (depth), collisions, registers | About 400 LUTs |
-| Total | About 1,800–2,200 LUTs; no block RAM |
+Measured with Yosys (synth_xilinx, XC7A35T):
+
+| Item | LUTs |
+|------|------|
+| sprites.v: registers, sizes, fetcher, deadlines, 8 FIFOs of 32 × 16 bits (distributed RAM) | About 2,000 |
+| 8 pixel units (sprite_pix.v) | About 90 each, 730 in all |
+| Mixing with the layers (depth), collisions (video.v) | A few hundred |
+| Total | About 3,000; no block RAM |
+
+To keep it small, the per-sprite state lives in distributed RAM, worked on one sprite a clock: the registers as written, the place in the image (pointer, line start, words and lines left), and the sizes worked out from the window (one shared calculator visits a sprite each clock). Only what the pixel side needs all at once at a line's start is in flip-flops.
 
 ## 9. Open points
 

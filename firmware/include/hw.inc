@@ -476,11 +476,11 @@ SPR_PT_ADDR_W                equ $16
 SPR_PT_ADDR_M                equ $7FFFFE
 SPR_H                        equ $4          ; RW, spec 9/3 (add to SPRn)
 SPR_H_HSTART_B               equ $0
-SPR_H_HSTART_W               equ $C
-SPR_H_HSTART_M               equ $FFF
+SPR_H_HSTART_W               equ $B
+SPR_H_HSTART_M               equ $7FF
 SPR_H_HSTOP_B                equ $10
-SPR_H_HSTOP_W                equ $C
-SPR_H_HSTOP_M                equ $FFF0000
+SPR_H_HSTOP_W                equ $B
+SPR_H_HSTOP_M                equ $7FF0000
 SPR_V                        equ $8          ; RW, spec 9/3 (add to SPRn)
 SPR_V_VSTART_B               equ $0
 SPR_V_VSTART_W               equ $B
@@ -1216,3 +1216,9 @@ COP_CC_HI                    equ $6
 COP_CC_LS                    equ $7
 COP_RET                      equ $8000000    ; CALL bit 27: RET
 COP_STACK                    equ $8          ; stack depth
+VID_X0                       equ $90         ; first picture pixel, in beam pixels
+VID_Y0                       equ $31         ; first picture line, in beam lines
+VID_W                        equ $2D0        ; picture width
+VID_H                        equ $240        ; picture height
+BEAM_W                       equ $360        ; beam pixels per line
+BEAM_H                       equ $271        ; beam lines per frame

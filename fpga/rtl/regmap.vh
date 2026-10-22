@@ -195,8 +195,8 @@
 `define RM_SPR_PT                           16'h0000
 `define RM_SPR_PT_ADDR                      22:1
 `define RM_SPR_H                            16'h0004
-`define RM_SPR_H_HSTART                     11:0
-`define RM_SPR_H_HSTOP                      27:16
+`define RM_SPR_H_HSTART                     10:0
+`define RM_SPR_H_HSTOP                      26:16
 `define RM_SPR_V                            16'h0008
 `define RM_SPR_V_VSTART                     10:0
 `define RM_SPR_V_VSTOP                      26:16
@@ -573,5 +573,11 @@
 `define RM_COP_CC_LS                        32'h00000007
 `define RM_COP_RET                          32'h08000000
 `define RM_COP_STACK                        32'h00000008
+`define RM_VID_X0                           32'h00000090
+`define RM_VID_Y0                           32'h00000031
+`define RM_VID_W                            32'h000002D0
+`define RM_VID_H                            32'h00000240
+`define RM_BEAM_W                           32'h00000360
+`define RM_BEAM_H                           32'h00000271
 
 `endif

@@ -334,6 +334,13 @@ module tb;
     integer bi;
     always @(posedge clk100) if (dut.vid.line_go && dut.vid.vc == dut.vid.VTOT - 1)
         for (bi = 0; bi < 24; bi = bi + 1) frame_bpt[bi] = dut.vid.dma.pt[bi];
+    // Sprite pointers as the CPU or copper last wrote them (they move as fetched)
+    reg [22:0] frame_spt [0:7];
+    integer si;
+    initial for (si = 0; si < 8; si = si + 1) frame_spt[si] = 23'd0;
+    always @(posedge clk100) if (dut.rb_wr && dut.rb_addr[23:16] == 8'hE0 && {dut.rb_addr[15:2], 2'b00} >= 16'h0520
+                                 && {dut.rb_addr[15:2], 2'b00} < 16'h0620 && dut.rb_addr[4:2] == 3'd0)
+        frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5] = dut.rb_wdata[22:0];
     task write_state;
         integer f, i, n;
         begin
@@ -348,6 +355,14 @@ module tb;
             for (n = 0; n < 24; n = n + 1) $fwrite(f, "bpt %0d %0d\n", n, frame_bpt[n]);
             for (n = 0; n < 3; n = n + 1)  $fwrite(f, "bpldma %0d %0d\n", n, dut.vid.dma.pm[n]);
             for (n = 0; n < 24; n = n + 1) $fwrite(f, "dat %0d %0d\n", n, dut.vid.dma.dr[n]);
+            // Sprites (spec 9)
+            for (n = 0; n < 8; n = n + 1)
+                $fwrite(f, "sprite %0d hs %0d he %0d vs %0d ve %0d bpp %0d hmag %0d vmag %0d depth %0d pal %0d pt %0d dma %0d\n", n,
+                        dut.vid.spr.m_h[n] & 11'h7FF, dut.vid.spr.m_h[n] >> 11, dut.vid.spr.m_v[n] & 11'h7FF, dut.vid.spr.m_v[n] >> 11,
+                        dut.vid.spr.m_c[n] & 3, (dut.vid.spr.m_c[n] >> 2) & 3, (dut.vid.spr.m_c[n] >> 4) & 3,
+                        (dut.vid.spr.m_c[n] >> 6) & 3, dut.vid.spr.m_c[n] >> 8,
+                        frame_spt[n], dut.vid.spr.active[n]);
+            $fwrite(f, "sprcoll %0d\n", dut.vid.spr.coll);
             $fclose(f);
             f = $fopen("vstate_pal.hex", "w");
             for (i = 0; i < 256; i = i + 1) $fwrite(f, "%h\n", dut.vid.pal[i]);
@@ -441,6 +456,9 @@ module tb;
                 if (!$test$plusargs("rom=")) check_bitmap;
             end
             report;
+            if ($test$plusargs("sprdbg"))
+                $display("---- sprites: %0d acks, %0d words back, %0d FIFO writes, %0d opaque pixels",
+                         spr_acks, spr_rv, spr_fw, spr_px);
             if (serial_test)
                 $display("---- serial: %0d errors; RESETWHY after the command: %h", serial_errors, dut.resetwhy);
             if (serial_test && dut.resetwhy !== 8'h10) serial_errors = serial_errors + 1;
@@ -448,6 +466,43 @@ module tb;
             else $display("TEST FAILED");
             $finish;
         end
+    end
+
+    // Sprite debug counters (+sprdbg)
+    integer spr_acks = 0, spr_rv = 0, spr_fw = 0, spr_px = 0;
+    always @(posedge clk100) begin
+        if (dut.spr_ack) spr_acks = spr_acks + 1;
+        if (dut.spr_rvalid) spr_rv = spr_rv + 1;
+        if (|dut.vid.spr.dma_wr) spr_fw = spr_fw + 1;
+    end
+    always @(posedge dut.vid.clk_pix) if (|dut.vid.s_op) spr_px = spr_px + 1;
+    always @(posedge clk100) if ($test$plusargs("sprdbg") && dut.vid.frame_tick)
+        $display("%t frame: alive %b flushing %b fresh %b want %b pk_v %b req %b wp0 %0d infl0 %0d dl0 %0d",
+                 $realtime, dut.vid.spr.alive, dut.vid.spr.flushing, dut.vid.spr.fresh, dut.vid.spr.want,
+                 dut.vid.spr.pk_v, dut.vid.spr.mem_req, dut.vid.spr.wp[0], dut.vid.spr.infl[0], dut.vid.spr.dl[0]);
+    always @(posedge clk100) if ($test$plusargs("sprdbg") && dut.vid.spr.fd_go)
+        $display("%t flush done %0d: wv %0d nl %0d", $realtime, dut.vid.spr.fd, dut.vid.spr.f_wv, dut.vid.spr.nl[dut.vid.spr.fd]);
+
+    reg xseen = 0;
+    always @(posedge clk100) if ($test$plusargs("xstop") && !xseen && !dut.vid.spr.rst && (^{dut.spr_req, dut.spr_ack, dut.spr_urgent} === 1'bx || (dut.spr_req && ^dut.spr_deadline === 1'bx))) begin : xdump
+        integer q;
+        xseen = 1;
+        $display("%t X in want %b", $realtime, dut.vid.spr.want);
+        for (q = 0; q < 8; q = q + 1)
+            $display("  spr %0d: infl %b cnt %b wp %b rp_s2 %b alive %b flushing %b", q, dut.vid.spr.infl[q], dut.vid.spr.cnt[q],
+                     dut.vid.spr.wp[q], dut.vid.spr.rp_s2[q], dut.vid.spr.alive[q], dut.vid.spr.flushing[q]);
+        $display("  q_h %b q_t %b q_s %b %b %b %b rvalid %b ack %b req %b issue %b pk %b",
+                 dut.vid.spr.q_h, dut.vid.spr.q_t, dut.vid.spr.q_s[0], dut.vid.spr.q_s[1], dut.vid.spr.q_s[2], dut.vid.spr.q_s[3],
+                 dut.vid.spr.mem_rvalid, dut.vid.spr.mem_ack, dut.vid.spr.mem_req, dut.vid.spr.issue, dut.vid.spr.pk);
+        $display("  req_s %b deadline %b urgent %b dl_new %b rr %b bt %b btr %b beam_h %b dl %b %b %b %b %b %b %b %b",
+                 dut.vid.spr.req_s, dut.spr_deadline, dut.spr_urgent, dut.vid.spr.dl_new, dut.vid.spr.rr, dut.vid.spr.bt, dut.vid.spr.btr,
+                 dut.vid.spr.beam_h, dut.vid.spr.dl[0], dut.vid.spr.dl[1], dut.vid.spr.dl[2], dut.vid.spr.dl[3],
+                 dut.vid.spr.dl[4], dut.vid.spr.dl[5], dut.vid.spr.dl[6], dut.vid.spr.dl[7]);
+        $display("  sched: win %b next_cycle %b start %b cpu %b bpl %b/%b dl %b spr %b aud %b cop %b pri %b blt %b port %b",
+                 dut.sched.win, dut.sched.next_cycle, dut.sched.start_next, dut.sched.cpu_req, dut.sched.bpl_req, dut.sched.bpl_urgent,
+                 dut.sched.bpl_deadline, dut.sched.spr_req, dut.sched.aud_req, dut.sched.cop_req, dut.sched.cop_pri,
+                 dut.sched.blt_req, dut.sched.port_req);
+        $finish;
     end
 
     integer tmo;

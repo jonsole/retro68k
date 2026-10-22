@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Picture data for the video test (vtest.s): random words in Chip RAM.
 
-    vgen.py OUT.hex [--direct]
+    vgen.py OUT.hex [--direct | --sprites]
 
 Writes a $readmemh file of 16-bit words (with @word-address lines) for the
 testbench's +ram= option. The data is random, so every pixel of every layer
@@ -15,7 +15,8 @@ import sys
 def main():
     out = sys.argv[1]
     direct = "--direct" in sys.argv
-    rnd = random.Random(68000 + direct)
+    sprites = "--sprites" in sys.argv
+    rnd = random.Random(68000 + direct + 2 * sprites)
     mem = {}                                   # word address -> value
 
     def fill(start, nbytes, zero_bytes=0.0):
@@ -25,7 +26,11 @@ def main():
                 b.append(0 if rnd.random() < zero_bytes else rnd.randrange(256))
             mem[a // 2] = (b[0] << 8) | b[1]
 
-    if not direct:
+    if sprites:
+        fill(0x100000, 180 * 288 + 64, 0.3)    # L0: 4 bpp, rows of 180 bytes
+        fill(0x140000, 3 * 40 * 300 + 64, 0.3) # L1: 3 planes of 300 rows of 40 bytes
+        fill(0x180000, 0x9000, 0.3)            # the sprite images
+    elif not direct:
         fill(0x100000, 0x10000)                # L0: 4 bpp, rows of 200 bytes, wrapping in this 64 KB block
         fill(0x140000, 5 * 48 * 300 + 64)      # L1: 5 planes of 300 rows of 48 bytes
         fill(0x1A0000, 96 * 33 + 64, 0.3)      # L2: 8 bpp, 33 rows of 96 bytes, 30% zeros

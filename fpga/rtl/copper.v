@@ -84,10 +84,11 @@ module copper (
     wire s_int  = wr && off == `RM_COPINT  && rb_be[1:0] != 2'b00;
     wire s_sp   = wr && off == `RM_COPSP   && rb_be[1:0] != 2'b00;
 
-    // ================================================================ beam, in frame order
-    // Lines 576-624 (the vertical blank) come first, then 0-575
+    // ================================================================ beam
+    // Beam coordinates (spec 4, section 3.3): the frame starts at line 0, the
+    // start of the vertical blank, so lines only go up through a frame
     function [11:0] fo(input [10:0] v);
-        fo = (v >= VVIS) ? {1'b0, v - VVIS} : {1'b0, v} + 12'd49;
+        fo = {1'b0, v};
     endfunction
     wire [11:0] b_fo = fo(beam_v);
 

@@ -176,6 +176,9 @@ module retro68k #(
 
     // ---------------------------------------------------------------- memory
     wire        disp_req, disp_urgent, disp_ack, disp_rvalid;
+    wire        spr_req, spr_urgent, spr_ack, spr_rvalid;
+    wire [21:1] spr_addr;
+    wire [9:0]  spr_deadline;
     wire [21:1] disp_addr;
     wire [9:0]  disp_deadline;
     wire        aud_req, aud_ack, aud_rvalid;
@@ -183,8 +186,8 @@ module retro68k #(
     wire        cop_req, cop_ack, cop_rvalid;
     wire [21:1] cop_addr;
     wire [1:0]  cop_pri;
-    // The DMA scheduler (spec 5): who gets each memory cycle. Sprites and the
-    // DMA engine are still to come; their channels are tied off.
+    // The DMA scheduler (spec 5): who gets each memory cycle. The DMA engine
+    // is still to come; its channel is tied off.
     wire        m_start, m_go, m_go_we, m_rvalid_any;
     wire [2:0]  m_cycle, m_go_tag, m_rtag;
     wire [21:1] m_go_addr;
@@ -196,7 +199,7 @@ module retro68k #(
         .cpu_ack(m_ack), .cpu_rvalid(m_rvalid),
         .bpl_req(disp_req), .bpl_addr(disp_addr), .bpl_deadline(disp_deadline), .bpl_urgent(disp_urgent),
         .bpl_ack(disp_ack), .bpl_rvalid(disp_rvalid),
-        .spr_req(1'b0), .spr_addr(21'd0), .spr_deadline(10'h3FF), .spr_urgent(1'b0), .spr_ack(), .spr_rvalid(),
+        .spr_req(spr_req), .spr_addr(spr_addr), .spr_deadline(spr_deadline), .spr_urgent(spr_urgent), .spr_ack(spr_ack), .spr_rvalid(spr_rvalid),
         .aud_req(aud_req), .aud_addr(aud_addr), .aud_ack(aud_ack), .aud_rvalid(aud_rvalid),
         .cop_req(cop_req), .cop_addr(cop_addr), .cop_pri(cop_pri), .cop_ack(cop_ack), .cop_rvalid(cop_rvalid),
         .blt_req(1'b0), .blt_we(1'b0), .blt_addr(21'd0), .blt_wdata(16'd0), .blt_be(2'b00), .blt_ack(), .blt_rvalid(),
@@ -255,8 +258,10 @@ module retro68k #(
         .rb_rdata(rd_vid),
         .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
         .line_tick(line_tick), .frame_tick(frame_tick), .beam_v(beam_v), .beam_h(beam_h),
-        .dmacon(dmacon), .disp_req(disp_req), .disp_urgent(disp_urgent), .disp_addr(disp_addr),
+        .dmacon(dmacon), .disp_req(disp_req), .disp_urgent(disp_urgent), .disp_deadline(disp_deadline), .disp_addr(disp_addr),
         .disp_ack(disp_ack), .disp_rvalid(disp_rvalid), .disp_rdata(mem_rdata),
+        .spr_req(spr_req), .spr_urgent(spr_urgent), .spr_deadline(spr_deadline), .spr_addr(spr_addr),
+        .spr_ack(spr_ack), .spr_rvalid(spr_rvalid),
         .clk_pix(clk_pix), .clk_pix5(clk_pix5), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
     );
 
