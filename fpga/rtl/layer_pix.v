@@ -16,6 +16,7 @@
 // Scaling repeats each source pixel 1, 2, 4 or 8 times.
 module layer_pix (
     input  wire         clk_pix,
+    input  wire         clk_pix5,      // 5 x clk_pix, edges lined up (same MMCM): for the fast synchroniser
     input  wire         en,            // video on
     input  wire [10:0]  hc,            // beam, and the next pixel's position
     input  wire [10:0]  hn,
@@ -44,8 +45,11 @@ module layer_pix (
     output reg  [7:0]   raw,           // the pixel value itself (direct colour)
     output reg          overrun_t      // toggles when a group was missing
 );
+    // "Full" from the 100 MHz side, through two flip-flops at 135 MHz rather
+    // than 27: about 15-22 ns instead of up to 111 ns (spec 4, section 5.6).
+    // The second stage is then read by the pixel side as a related clock.
     reg  [1:0]  fill_s;
-    always @(posedge clk_pix) fill_s <= {fill_s[0], fill_t};
+    always @(posedge clk_pix5) fill_s <= {fill_s[0], fill_t};
     wire        avail  = fill_s[1] != take_t;
     wire        in_win = active && (hc >= xs) && (hc < xe);
 

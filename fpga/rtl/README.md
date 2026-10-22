@@ -10,7 +10,7 @@ Written (phase 2, version 1):
 | `timebase.v` | 100 MHz phase counters: position in the 50 ns grid and in the 100 ns slot | 1, 5 |
 | `cpu_fx68k.v` | fx68k at 40 MHz with alternating phase enables (a 20 MHz 68000) | 1 |
 | `bus_if.v` | 68000 bus interface: fixed-point clock crossing, decoding, early /DTACK, posted writes, bus errors, 16-bit-halves register rules | 1, 3 |
-| `sram_ctl.v` | SRAM controller: 5 memory cycles per slot, cycle 0 for the CPU, cycles 1-2 for the display | 5 |
+| `sram_ctl.v` | SRAM controller: 5 memory cycles per slot, cycle 0 for the CPU, cycles 1 and 3 for the display | 5 |
 | `bootrom.v` | 32 KB boot ROM in block RAM | 7 |
 | `sysregs.v` | System control registers | 7 |
 | `serial.v` | USB serial: FT232H async FIFO interface, 2 KB FIFOs, control commands | 14 |

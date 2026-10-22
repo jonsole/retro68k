@@ -10,6 +10,7 @@ module retro68k #(
     input  wire        clk100,
     input  wire        clk40,
     input  wire        clk_pix,       // 27 MHz pixel clock (576p), asynchronous to clk100
+    input  wire        clk_pix5,      // 135 MHz, 5 x clk_pix with edges lined up (same MMCM)
     input  wire        por100,        // power-on reset; last seen high on a slot boundary
     input  wire        por40,         // the same, in the 40 MHz domain
     input  wire        btn_reset_n,   // debounced
@@ -216,7 +217,7 @@ module retro68k #(
         .line_tick(line_tick), .frame_tick(frame_tick),
         .dmacon(dmacon), .disp_req(disp_req), .disp_addr(disp_addr),
         .disp_ack(disp_ack), .disp_rvalid(disp_rvalid), .disp_rdata(mem_rdata),
-        .clk_pix(clk_pix), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
+        .clk_pix(clk_pix), .clk_pix5(clk_pix5), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
     );
 
     // ---------------------------------------------------------------- timers (spec 12)

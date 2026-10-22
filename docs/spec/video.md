@@ -11,7 +11,7 @@ Status: **v1 scope**
 - **No hidden buffers.** Each plane has just its data register and its shift register, as on the Amiga. The DMA loads the data registers just in time; the copper or CPU can load them too.
 - **Fetch is automatic:** the hardware works out when and what to fetch from each layer's window, so there are no fetch start and stop registers (the Amiga's DDFSTRT/DDFSTOP).
 - **Direct colour:** the three layers can be joined into one direct-colour picture, one layer per channel (red, green, blue), up to 24 bits per pixel.
-- **Every scan line is exactly 320 memory slots** (32 µs), because the pixel clock and the memory clock come from the same oscillator, so the display's DMA repeats the same way on every line. The display uses only its own memory cycles (spec 5), so it never slows the CPU.
+- **The video clock is separate from the system clock.** The pixel clock has its own MMCM, and everything between the two sides goes through synchronisers and handshakes, so other video modes need only a different pixel clock. The display uses only its own memory cycles (spec 5), so it never slows the CPU.
 
 ## 2. Comparison with the Amiga (OCS/ECS)
 
@@ -43,7 +43,9 @@ The KS3 build makes its clocks from the board's 50 MHz oscillator with two MMCMs
 
 Both MMCMs run from the same oscillator, so the frequencies are exact: one 576p line (864 pixels at 27 MHz) is exactly 32 µs, which is 3200 system clocks or **320 memory slots**. The phase between the pixel clock and the system clock is fixed once the MMCMs have locked, but it is not known, so the design treats them as **asynchronous clock domains**: events cross as toggles through two flip-flops, the data registers cross under the full/taken handshake (section 5.1), the beam position is sampled until two samples agree, and the layer settings are copied once per line.
 
-In simulation the pixel clock is a free-running 27 MHz clock with an odd phase against the system clocks.
+Nothing in the design relies on the 320-slot coincidence or on the phase, so a later mode can use any pixel clock MMCM 2 can make (for example 25.175 MHz for exact 640×480, 74.25 MHz for 720p), at build time or through the MMCM's reconfiguration port. The display's bandwidth stays 40 MB/s, so the budget per pixel (section 5.2) scales with the pixel rate: 1.48 bytes per pixel at 27 MHz, about 0.54 at 74.25 MHz. Section 5.6 has the crossing timing.
+
+In simulation the pixel clock is a free-running 27 MHz clock with an odd phase against the system clocks, so the phase sweeps through every value along each line.
 
 **VGA:** the ADV7125 takes 8 bits per colour over 4 pins at double rate. It shows the same picture and timing as HDMI.
 
@@ -184,7 +186,7 @@ With VIDCON.DIRECT set, the palette and priority are not used. Every visible pix
 - **A group is always 16 source pixels.** Planar: one word from each plane, plane p in BPLpDAT. Chunky with b bits per pixel: b consecutive words from BPL0PT; the first (leftmost pixels) goes in BPL(b−1)DAT and the last in BPL0DAT. So every layer has 16 pixels of time in hand, whatever its format.
 - **When a group is complete:** the DMA fills a group's data registers from the highest down, and the group is complete when the last of them arrives (BPL0DAT, unless plane 0's DMA is off; section 5.5). For a layer with no DMA, the CPU or copper writes the data registers, and its write of BPL0DAT completes the group.
 - The shifters take all of a layer's data registers at once. They take the line's first group as soon as it is complete, in the horizontal blank, so the second group is already in the data registers when the window starts (as the Amiga fetches ahead of the display window). After that they take the next group each time the current one is used up (every 16 source pixels). Each take empties the data registers, and the DMA fetches the next group.
-- The display owns **memory cycles 1 and 2 of every slot**: 4 bytes every 100 ns (spec 5, section 4.3). It never touches the CPU's cycle 0.
+- The display owns **memory cycles 1 and 3 of every slot** (40 and 60 ns apart): 4 bytes every 100 ns (spec 5, section 4.3). It never touches the CPU's cycle 0.
 - **Order:** the layers that want a word take turns, one word each, so a layer never waits for more than one word from each of the others. With a given screen setup, the fetch pattern is the same on every line and every frame.
 - **Start and stop:** at the start of the horizontal blank, each layer whose window covers the next line gets its first group fetched; the number of groups on the line comes from the window width, scale and fine scroll. Nothing is fetched outside the windows.
 - With vertical scaling, each source line is fetched again for every screen line it appears on.
@@ -199,7 +201,7 @@ A layer needs `bits per pixel ÷ 8 ÷ HS` bytes per screen pixel (for planar, bi
 |--------------|-----------------|-------|
 | One 8bpp layer at 1× | 1.0 | Yes |
 | 5 planes at 2× (PAL Amiga 32 colours) | 0.31 | Yes |
-| 6 planes + 6 planes at 2× (two 64-colour playfields) + 8 planes at 2× | 1.25 | Yes |
+| 6 planes + 6 planes at 2× (two 64-colour playfields) + 4 planes at 2× | 1.0 | Yes (16 planes in step, section 5.6) |
 | 8bpp layer + 4bpp layer at 1× | 1.5 | **No** (just over) |
 | Direct colour 16-bit (5/6/5) at 2× across | 1.0 | Yes |
 | Direct colour 24-bit at 1× | 3.0 | **No** |
@@ -208,7 +210,7 @@ A layer needs `bits per pixel ÷ 8 ÷ HS` bytes per screen pixel (for planar, bi
 
 Windows help: a status bar below a game area, not on top of it, adds nothing on the lines where the game area is shown.
 
-Each layer has one group of time in hand (its data registers). Near the budget, very deep layers at 1× are the first to run short.
+Each layer has one group of time in hand (its data registers). There is also a **turnaround limit** on deep layers at 1×; see section 5.6.
 
 ### 5.3 When a layer runs short
 
@@ -234,6 +236,35 @@ As on the Amiga, any plane can be fed by the CPU or copper instead of by DMA, so
 - **A layer with no planes on** (or with DMACON.BPLEN or DMAEN off) does no DMA. The CPU or copper writes all its data registers, and a write of BPL0DAT completes each group (section 5.1).
 - **Chunky layers:** bit 0 turns the whole layer's DMA on or off; the other bits are ignored.
 - With fewer planes fetched, the layer costs less: count only the planes with DMA on in the budget (section 5.2).
+
+### 5.6 Clock crossings and turnaround
+
+The pixel side (27 MHz) and the memory side (100 MHz) are asynchronous (section 3.1). The crossing does not change the display's **bandwidth**: it still owns memory cycles 1 and 3 of every slot, 40 MB/s. What it costs is **latency**, in the handshake that moves each group:
+
+| Step | Time |
+|------|------|
+| The shifters take a group; the memory side sees "taken" (two flip-flops at 100 MHz, plus the phase) | up to 30 ns |
+| The DMA asks, and waits for the next display cycle (cycles 1 and 3, 40 and 60 ns apart) | 10–70 ns |
+| The group's words, two per 100 ns slot | about 50 ns each after the first |
+| The last word: SRAM read to BPLxDAT | 50 ns |
+| "Full" reaches the pixel side: two flip-flops at 135 MHz (the HDMI clock, 5 × the pixel clock, edges lined up), then the pixel side reads it as a related clock | 7–22 ns |
+| **Fixed part** | **about 80–170 ns** |
+
+The next group must be complete before the current one is used up: 16 source pixels, which is 593 ns at 1×, 1185 ns at 2×. Two design choices keep the fixed part short: the "full" synchroniser runs at 135 MHz rather than at the 27 MHz pixel clock (two 27 MHz flip-flops would cost up to 111 ns), and the display's two memory cycles are spread out in the slot (cycles 1 and 3) rather than side by side, so a request never waits more than 60 ns for one.
+
+**Turnaround limit.** Layers whose windows start at the same place, with the same scroll and scale, use up their groups at the same pixel, so all their words are wanted at once. Measured in simulation at 576p, full width, every layer planar:
+
+| Layers | Planes in step | Bytes per pixel | Result |
+|--------|----------------|-----------------|--------|
+| 8 planes at 1×, alone | 8 | 1.0 | Fits |
+| 5 + 4, 5 + 5, 8 + 2 at 1× | 9–10 | 1.13–1.25 | Fits |
+| 8 + 3, 6 + 5 at 1× | 11 | 1.38 | Runs short |
+| 8 + 8 at 2× | 16 | 1.0 | Fits |
+| A 1× layer of 6–8 planes with a deep layer at 2× or 4× | – | – | Runs short (see below) |
+
+So: **at 1×, at most 10 planes (or chunky words) in step**; at 2× and more, the bandwidth budget (section 5.2) is the limit in practice.
+
+The layers take turns one word each (section 5.1), so a deep layer at 2× gets as many turns as a layer at 1×, although its deadline is twice as far away. A deep 1× layer next to a deep 2× layer therefore runs short even though both fit the budget. Keep deep layers at 1× alone, or give the other layers few planes (open point V3). Planes with their DMA off (section 5.5) don't count. Layers whose groups start on different pixels (different fine scroll, or windows starting at different x) share the time better.
 
 ## 6. Registers
 
@@ -289,6 +320,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 | # | Item |
 |---|------|
 | V1 | Check in Vivado that the clock-domain crossings are all covered (asynchronous clock groups) and the pixel pipeline meets timing |
+| V3 | Order the layers' fetches by deadline (for example, layers at a smaller scale first) instead of taking turns, so that a deep 1× layer can share with deep 2× layers (section 5.6) |
 | V2 | Plain DVI has no info packets. Add the HDMI AVI InfoFrame (576p, 4:3, "underscanned", IT content) so TVs neither crop the picture nor treat it as video; needs the HDMI data-island encoder (with HDMI audio, later) |
 
 ## 9. Tests
@@ -303,7 +335,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 ## 10. Later versions
 
 - More layers, fractional scaling and shrinking
-- Programmable timing and more modes (640×480, 720p)
+- More modes (exact 640×480, 720p, 1024×768): a different pixel clock from MMCM 2, at build time or by reconfiguring it; the rest of the design is ready for it
 - Wide fetch (memory cycle 3 for the display)
 - Sprites (spec 9, on hold)
 - EHB and HAM modes, a 1024-entry palette, tile-map layers

@@ -83,7 +83,7 @@ The full list is in spec 7, section 8.
 
 Defined in [spec 5: memory architecture](spec/memory-architecture.md). In short:
 
-- **Amiga-style slots.** SRAM time is cut into 100 ns slots of 5 memory cycles (20 ns, 2 bytes each). **Cycle 0 of every slot belongs to the CPU**; cycles 1–2 to the display fetch; cycle 3 to audio and peripherals; cycle 4 is the free pool for the copper and the DMA engine. Cycles their owner doesn't use, including the CPU's, go to the free pool too.
+- **Amiga-style slots.** SRAM time is cut into 100 ns slots of 5 memory cycles (20 ns, 2 bytes each). **Cycle 0 of every slot belongs to the CPU**; cycles 1 and 3 to the display fetch; cycle 2 to audio and peripherals; cycle 4 is the free pool for the copper and the DMA engine. Cycles their owner doesn't use, including the CPU's, go to the free pool too.
 - **The 20 MHz CPU never waits** for Chip RAM. There is no HIGH ("blitter nasty") DMA mode and no urgent fetch, so nothing takes the CPU's cycle.
 - **Chip RAM** = the 4 MB SRAM, shared with DMA. 100 MB/s in total.
 
@@ -105,7 +105,7 @@ Defined in [spec 4: video](spec/video.md). In short:
 - **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and palette block. No text layer and no sprites (spec 9 is on hold); the boot ROM draws its 80×30 console into a 1-plane 640×480 layer, centred at (40, 48)
 - Each layer is **planar** (1–8 Amiga-style bitplanes) or **chunky** (1/2/4/8 bits per pixel), with Amiga-style plane pointers (BPLxPT), modulo (BPLMOD) and data registers (BPLxDAT), and no hidden buffers. The copper resets the pointers each frame
 - Whole-number scaling: 1×, 2×, 4× or 8×, across and down separately
-- Video memory is fetched on demand by DMA as the beam scans, in memory cycles 1 and 2 of each slot only (no wide fetch). The budget is a rate: 4 bytes per 100 ns slot, 1.48 bytes per pixel. Layers never use the CPU's cycle
+- Video memory is fetched on demand by DMA as the beam scans, in memory cycles 1 and 3 of each slot only (no wide fetch). The budget is a rate: 4 bytes per 100 ns slot, 1.48 bytes per pixel. Layers never use the CPU's cycle
 - 256-entry palette of 24-bit colours, or direct colour (L0 red, L1 green, L2 blue); beam position registers; vertical-blank and line interrupts; a copper (spec 10)
 
 ### D7. Audio

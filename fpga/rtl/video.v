@@ -42,6 +42,7 @@ module video (
     input  wire [15:0] disp_rdata,
 
     input  wire        clk_pix,
+    input  wire        clk_pix5,       // 5 x clk_pix (135 MHz), edges lined up
     output reg  [23:0] rgb,
     output reg         hsync,
     output reg         vsync,
@@ -380,7 +381,7 @@ module video (
     genvar g;
     generate for (g = 0; g < 3; g = g + 1) begin : lay
         layer_pix u (
-            .clk_pix(clk_pix), .en(en_p), .hc(hc), .hn(hn), .line_start(hc == HVIS), .ready(buf_ready),
+            .clk_pix(clk_pix), .clk_pix5(clk_pix5), .en(en_p), .hc(hc), .hn(hn), .line_start(hc == HVIS), .ready(buf_ready),
             .active(c_act[g]), .xs(c_xs[g]), .xe(c_xe[g]), .planar(c_planar[g]), .lb(c_lb[g]),
             .planes(c_planes[g]), .hs(c_hs[g]), .pos0(c_pos0[g]), .transp(c_transp[g]),
             .palofs(c_palofs[g]),

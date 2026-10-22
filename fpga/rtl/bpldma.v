@@ -15,7 +15,7 @@
 // the DMA fetches the next group. Full and taken cross between the clock
 // domains as toggles (fill_t here, take_t there).
 //
-// The DMA uses the display's memory cycles (1 and 2 of each slot). The
+// The DMA uses the display's memory cycles (1 and 3 of each slot). The
 // layers that want a word take turns, one word each (round robin), so no
 // layer waits for more than one word from each of the others.
 //

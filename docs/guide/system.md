@@ -153,7 +153,7 @@ The memory chip can do one 16-bit read or write every 20 ns. That is one **memor
      |<------------------------------------------------->|
      +----------+----------+----------+----------+----------+
      | cycle 0  | cycle 1  | cycle 2  | cycle 3  | cycle 4  |
-     |   CPU    | display  | display  |   DMA    |   DMA    |
+     |   CPU    | display  |   DMA    | display  |   DMA    |
      +----------+----------+----------+----------+----------+
      0         20         40         60         80        100 ns
 
@@ -163,8 +163,8 @@ The memory chip can do one 16-bit read or write every 20 ns. That is one **memor
 | Cycle | Owner |
 |-------|-------|
 | 0 | The CPU. If the CPU does not need it, other DMA may use it |
-| 1, 2 | Display fetch for the bitmap layers. If the display does not need them, other DMA may use them |
-| 3, 4 | Other DMA: later the audio, copper and DMA engine |
+| 1, 3 | Display fetch for the bitmap layers, spread out across the slot. If the display does not need them, other DMA may use them |
+| 2, 4 | Other DMA: later the audio (2), copper and DMA engine (4) |
 
 Every scan line is a whole number of slots, and the slot count starts again at each line. So every DMA user gets its cycles at the same beam position on every line, as on the Amiga.
 
@@ -199,7 +199,7 @@ The specification allows two exceptions for later blocks: a DMA engine job that 
 |------|-----------|
 | All memory cycles | 100 MB/s (5 × 2 bytes per 100 ns) |
 | CPU | Up to 10 MB/s: one 16-bit access per 200 ns bus cycle |
-| Display (cycles 1 and 2) | Up to 40 MB/s |
+| Display (cycles 1 and 3) | Up to 40 MB/s |
 | Everything else | The rest: cycles 3 and 4, and any cycle its owner leaves unused |
 
 Static RAM needs no refresh, so no cycles are lost to it.

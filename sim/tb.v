@@ -37,18 +37,32 @@ module tb;
     wire        clk_pix;
     wire [23:0] rgb;
     wire        hs, vs, de;
-    // The 576p pixel clock: 27 MHz (37.037 ns), free-running, with no fixed
-    // phase to the 100 MHz clock, as from the KS3's second MMCM
-    reg clk_pix_r = 1'b0;
-    initial begin
-        #3.1;                           // an odd phase against the system clocks
-        forever begin #18.518 clk_pix_r = 1'b1; #18.519 clk_pix_r = 1'b0; end
+    // The 576p clocks, as from the KS3's second MMCM: 135 MHz (HDMI, and the
+    // fast synchroniser) and 27 MHz = 135 / 5 with its edges on the 135 MHz
+    // ones; free-running, with no fixed phase to the 100 MHz clock. Edges are
+    // placed at exact times (n x 1/270 MHz) so the 1 ps rounding never drifts.
+    reg clk_pix_r = 1'b0, clk_pix5 = 1'b0;
+    initial begin : pixclocks
+        integer n, k;
+        real t;
+        k = 0;
+        n = 0;
+        forever begin
+            n = n + 1;
+            t = 3.1 + n * (1000.0 / 270.0);          // an odd phase against the system clocks
+            #(t - $realtime);
+            clk_pix5 = ~clk_pix5;
+            if (clk_pix5) begin
+                if (k == 0) clk_pix_r = 1'b1;
+                k = (k == 4) ? 0 : k + 1;
+            end else if (k == 3) clk_pix_r = 1'b0;   // 2.5 fast periods after the rise
+        end
     end
     assign clk_pix = clk_pix_r;
 
     retro68k #(.ROM_INIT("boot.hex")) dut (
         .clk100(clk100), .clk40(clk40), .por100(por), .por40(por),
-        .clk_pix(clk_pix),
+        .clk_pix(clk_pix), .clk_pix5(clk_pix5),
         .vid_rgb(rgb), .vid_hsync(hs), .vid_vsync(vs), .vid_de(de),
         .btn_reset_n(1'b1), .buttons(2'b00),
         .sram_a(a), .sram_ce_n(ce_n), .sram_ub_n(ub_n), .sram_lb_n(lb_n),

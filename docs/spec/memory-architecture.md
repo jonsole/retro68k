@@ -14,7 +14,7 @@ The SRAM is fast enough to give the CPU its own memory cycle in **every** slot, 
 | Memory cycle | 20 ns = 2 clocks at 100 MHz: one 16-bit read or write at any address (byte writes with /UB and /LB) |
 | Slot | 100 ns = 5 memory cycles (numbered 0–4) = 2 CPU clocks at 20 MHz |
 | CPU | Cycle 0 of every slot. Never waits for Chip RAM |
-| DMA | Cycles 1–2: display fetch. Cycle 3: audio and peripherals. Cycle 4: the free pool for the copper and the DMA engine. The free pool also gets cycle 0 whenever the CPU isn't using it |
+| DMA | Cycles 1 and 3: display fetch (spread out, so a waiting fetch never waits long). Cycle 2: audio and peripherals. Cycle 4: the free pool for the copper and the DMA engine. The free pool also gets cycle 0 whenever the CPU isn't using it |
 | Beam lock | Every scan line is a whole number of slots; the slot counter restarts each line, so DMA happens at the same beam positions on every line |
 | Total bandwidth | 100 MB/s (5 × 2 bytes per 100 ns) |
 | Refresh | None needed (SRAM) |
@@ -80,17 +80,17 @@ Each 100 ns slot holds 5 memory cycles:
 |-------|-------|-------|
 | **0** | **CPU** | The Amiga's "even" cycle. If the CPU doesn't need it in this slot, it goes to the free pool |
 | 1 | Display fetch | Layers (spec 4, section 5). If no layer needs it, it goes to the free pool |
-| 2 | Display fetch | Layers, as cycle 1 |
-| 3 | Audio and peripherals | Audio channels (spec 6). In version 1 nothing else uses it; unused cycles go to the free pool |
+| 2 | Audio and peripherals | Audio channels (spec 6). In version 1 nothing else uses it; unused cycles go to the free pool |
+| 3 | Display fetch | Layers, as cycle 1. The display's two cycles are 40 and 60 ns apart, not side by side, so a fetch that has just missed one waits at most 60 ns for the next (spec 4, section 5.6) |
 | 4 | Free pool | Copper and DMA engine (section 6) |
 
 ### 4.4 Bandwidth
 
 - Total: 5 cycles × 2 bytes per 100 ns = **100 MB/s**.
 - CPU: a 68000 at 20 MHz makes at most one access per bus cycle (200 ns), so it uses cycle 0 in at most every other slot: up to **10 MB/s**. Its other cycle 0s go to the free pool.
-- Display fetch: **40 MB/s** (cycles 1–2). There is no wide fetch in version 1.
-- Audio and peripherals: **20 MB/s** (cycle 3), far more than 4 channels of 8-bit samples need.
-- Free pool (copper, DMA engine): cycle 4 (20 MB/s), plus the cycle 0s the CPU leaves, the cycle 3s audio leaves and the display cycles no layer needs: typically 50–65 MB/s.
+- Display fetch: **40 MB/s** (cycles 1 and 3). There is no wide fetch in version 1.
+- Audio and peripherals: **20 MB/s** (cycle 2), far more than 4 channels of 8-bit samples need.
+- Free pool (copper, DMA engine): cycle 4 (20 MB/s), plus the cycle 0s the CPU leaves, the cycle 2s audio leaves and the display cycles no layer needs: typically 50–65 MB/s.
 
 ## 5. CPU access
 
@@ -123,8 +123,8 @@ Each cycle has one owner, which always comes first:
 | Cycle | First | Then |
 |-------|-------|------|
 | 0 | **CPU** | Free pool |
-| 1–2 | Display fetch | Free pool |
-| 3 | Audio (and, in later versions, peripherals) | Free pool |
+| 1, 3 | Display fetch | Free pool |
+| 2 | Audio (and, in later versions, peripherals) | Free pool |
 | 4 | Free pool | – |
 
 **Free-pool cycles**, in order:
@@ -140,8 +140,8 @@ Every slot of every line has the same owners (section 4.3), so the allocation pe
 | Owner | Cycle | Cycles per line (576p, 320 slots) | Bandwidth |
 |-------|-------|-----------------------------------|-----------|
 | CPU | 0 | 320 | 20 MB/s of cycles; the CPU uses at most 10 MB/s |
-| Display fetch | 1–2 | 640 | 40 MB/s |
-| Audio and peripherals | 3 | 320 | 20 MB/s |
+| Display fetch | 1, 3 | 640 | 40 MB/s |
+| Audio and peripherals | 2 | 320 | 20 MB/s |
 | Free pool | 4 | 320 | 20 MB/s, plus the cycles other owners leave |
 
 If an owner doesn't need its cycle (the CPU is between accesses, no layer is fetching, no audio channel needs a word), the cycle goes to the free pool.
@@ -151,11 +151,11 @@ If an owner doesn't need its cycle (the CPU is between accesses, no layer is fet
 | Owner | Needs | Gets |
 |-------|-------|------|
 | Display (layers) | Depends on the layers | 1280 bytes per line: 1.48 bytes per pixel (864 pixels per line, spec 4, section 5.2) |
-| Audio, 4 channels of 8-bit samples | One word (2 samples) per channel at a time, as on the Amiga | Cycle 3: 20 MB/s |
+| Audio, 4 channels of 8-bit samples | One word (2 samples) per channel at a time, as on the Amiga | Cycle 2: 20 MB/s |
 | Copper | 2 cycles per instruction | The free pool, first |
 | DMA engine | – | The rest of the free pool: about 50–65 MB/s of memory cycles, depending on the screen (spec 11) |
 
-During vertical blanking (49 of the 625 lines) there is no display fetch, so cycles 1–2 go to the free pool too. In the horizontal blank (144 of the 864 pixels) the display fetches only the first two groups of each layer's next line.
+During vertical blanking (49 of the 625 lines) there is no display fetch, so cycles 1 and 3 go to the free pool too. In the horizontal blank (144 of the 864 pixels) the display fetches only the first two groups of each layer's next line.
 
 ### 7.2 No line buffers
 

@@ -3,8 +3,9 @@
 // A 100 ns slot holds 5 memory cycles of 20 ns (2 clocks at 100 MHz).
 // Owners (spec 5, section 4.3):
 //   cycle 0     CPU; when the CPU doesn't use it, the DMA port
-//   cycles 1-2  display fetch; when the display doesn't need them, the DMA port
-//   cycle 3     the DMA port (audio and peripherals later)
+//   cycles 1, 3 display fetch (spread out: 40 and 60 ns apart); when the
+//               display doesn't need them, the DMA port
+//   cycle 2     the DMA port (audio and peripherals later)
 //   cycle 4     the DMA port
 // The DMA port stands in for the free-pool users still to come (copper,
 // audio, DMA engine) and is used by the tests.
@@ -72,7 +73,7 @@ module sram_ctl (
     wire       next_is_cycle0 = (sc == 4'd9);
 
     // Who gets the cycle that starts at the next edge
-    wire next_is_disp = (sc == 4'd1) || (sc == 4'd3);   // cycles 1 and 2
+    wire next_is_disp = (sc == 4'd1) || (sc == 4'd5);   // cycles 1 and 3
     wire cpu_wins  = next_is_cycle0 && cpu_req;
     wire disp_wins = next_is_disp && disp_req;
     wire dma_wins  = !cpu_wins && !disp_wins && dma_req;

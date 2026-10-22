@@ -61,7 +61,7 @@ module top_ks3 (
     wire        hs, vs, de;
 
     retro68k #(.ROM_INIT("boot.hex")) sys (
-        .clk100(clk100), .clk40(clk40), .clk_pix(clk_pix),
+        .clk100(clk100), .clk40(clk40), .clk_pix(clk_pix), .clk_pix5(clk_pix5),
         .por100(por), .por40(por),
         .btn_reset_n(!btn_q[0]), .buttons(btn_q[2:1]),
         .sram_a(a), .sram_ce_n(ce_n), .sram_ub_n(ub_n), .sram_lb_n(lb_n),
