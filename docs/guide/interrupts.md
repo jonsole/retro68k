@@ -138,7 +138,7 @@ So an interrupt costs at least 3.2 us before your handler does anything. Keep th
 |--------|------|--------|----------------|---------------|------------|------------|
 | 0 | VBLANK | 64 | `$100` | 5 | Video: start of vertical blanking | VIDSTAT.VBLANK |
 | 1 | LINE | 65 | `$104` | 5 | Video: line compare (LINECMP) | VIDSTAT.LINE |
-| 2 | COPPER | 66 | `$108` | 5 | Copper IRQ instruction or error | VIDSTAT (see the copper chapter) |
+| 2 | COPPER | 66 | `$108` | 5 | The copper wrote COPINT (with COPCON.IRQEN set) | COPSTAT.IRQ (Chapter 5) |
 | 3 | VIDERR | 67 | `$10C` | 5 | Video problems, such as a layer OVERRUN | VIDSTAT |
 | 4-7 | DMA0-DMA3 | 68-71 | `$110`-`$11C` | 4 | DMA engine channels 0-3 | DMXINT.CH |
 | 8 | AUDSTR | 72 | `$120` | 4 | Audio stream half-way or end | AUDSTAT |

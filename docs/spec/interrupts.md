@@ -47,7 +47,7 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 |--------|------------------|------|------|---------------|
 | 0 | 64 | VBLANK | Video: start of vertical blanking (VIDSTAT.VBLANK) | 5 |
 | 1 | 65 | LINE | Video: line compare (VIDSTAT.LINE) | 5 |
-| 2 | 66 | – | Not used in version 1 (was COPPER; the v1 copper has no IRQ instruction and no errors) | 0 (off) |
+| 2 | 66 | COPPER | The copper: COPSTAT.IRQ (raised by a write to COPINT) with COPCON.IRQEN; cleared by writing 1 to COPSTAT.IRQ (spec 10) | 5 |
 | 3 | 67 | VIDERR | Video: a layer ran short (VIDSTAT.OVERRUN, spec 4, section 5.3) | 5 |
 | 4 | 68 | DMA0 | DMA engine: job done (spec 11; version 1 has one channel) | 4 |
 | 5–7 | 69–71 | – | Not used in version 1 (were DMA1–DMA3) | 0 (off) |

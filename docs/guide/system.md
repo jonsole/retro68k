@@ -50,7 +50,7 @@ The board has no LEDs or switches for the computer to use. Start-up progress is 
 | Interrupts | The interrupt controller, levels, vectors, NMI, the software interrupt |
 | Timers | The time counter, the four timers and the watchdog |
 
-Several more blocks are specified and will get their own chapters when they are built: the **copper**, the **DMA engine and blitter**, **audio**, the **keyboard**, the **SD card** and the **I2C bus** (real-time clock and monitor detection). This guide does not describe their registers yet. You will see their names in a few places, such as the DMACON register, so that you know where they will fit.
+The **copper** has its own chapter (Chapter 5), written against its spec ahead of the hardware. Several more blocks are specified and will get their own chapters when they are built: the **DMA engine and blitter**, **audio**, the **keyboard** and the **SD card**. This guide does not describe their registers yet. You will see their names in a few places, such as the DMACON register, so that you know where they will fit.
 
 ### Conventions in This Guide
 
@@ -191,7 +191,7 @@ A 68000 bus cycle takes 4 CPU clocks, 200 ns: two slots. The CPU needs at most o
 
 So the CPU normally runs **with no wait states** from Chip RAM, ROM and registers alike. The display, and later the audio and normal DMA, use their own cycles and any the CPU leaves. As on the Amiga, a bitplane fetch that would otherwise be late takes the CPU's cycle 0 (and a copper set to "nasty" priority may too); that Chip RAM access then waits one slot, 2 CPU clocks. Screens well inside the budget almost never do this; heavy ones slow the CPU a little on the lines that need it. ROM and register accesses never wait.
 
-The specification allows two exceptions for later blocks: a DMA engine job that you mark as high priority, and an urgent copper fetch, may borrow the CPU's cycle 0. Each borrowed cycle costs the CPU one slot (2 clocks). Neither block is built yet, and in the current build the CPU is never made to wait.
+Later blocks add one more case: a copper set to "nasty" priority (COPCON.PRI = 2) may take cycle 0 too. Each taken cycle costs the CPU one slot (2 clocks).
 
 ### Bandwidth
 

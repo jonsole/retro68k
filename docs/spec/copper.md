@@ -10,7 +10,7 @@ The copper is a small coprocessor that follows the beam, as on the Amiga: it run
 |------|-------|
 | Program | A list of 32-bit instructions in Chip RAM, restarted from COP1LC at the start of every vertical blank |
 | Instructions | MOVE, WAIT, SKIP (as the Amiga), plus JUMP and STOP |
-| Can write | The custom register block only (`0xE00000`–`0xE07FFF`): all video, DMA and copper registers and the palette. Not the system block |
+| Can write | The custom register block only (`0xE00000`–`0xE07FFF`, the reach of a MOVE's 15-bit offset): every register there and the palette. Not the system block |
 | Beam position | Full range (11-bit line and pixel), pixel exact |
 | Memory | Its own DMA channel in the scheduler (spec 5, section 6): best effort, cycle 4 and any cycle nobody else wants; COPCON.PRI can raise it (section 5) |
 | Prefetch | The next instruction, so the MOVE after a WAIT runs as soon as the WAIT is over |
@@ -26,7 +26,7 @@ The copper is a small coprocessor that follows the beam, as on the Amiga: it run
 | Waiting for the blitter | BFD bit in WAIT | The same: the BLT bit waits until the DMA engine is idle too |
 | Lists | COP1LC, COP2LC; strobes COPJMP1, COPJMP2; list 1 restarts each frame | The same |
 | Jumping | A MOVE to COPJMP2 | JUMP to any address; the strobes still work |
-| End of list | WAIT for an impossible position ($FFFFFFFE) | STOP (the Amiga way works too) |
+| End of list | WAIT for an impossible position ($FFFFFFFE) | STOP, or a WAIT for line 2047 (the Amiga's $FFFFFFFE itself is a reserved pattern here: it stops too, but sets COPSTAT.ERR) |
 | Interrupt | A MOVE to INTREQ | A MOVE to COPINT |
 | Protection | CDANG guards the low registers | The copper can't reach the system block at all |
 | Speed | One instruction per 8 low-resolution pixels or so | Waits are pixel exact; a MOVE after a WAIT is prefetched |
@@ -53,8 +53,8 @@ Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kin
 
 | Instruction | Does |
 |-------------|------|
-| **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. The copper follows the halves rule (spec 3, section 2) with its own latch: a high-half write is held until its low half follows, so a 32-bit register is written whole. 16-bit registers (palette entries' halves, BPLxDAT, BPLMOD, DMACON) need one MOVE, to their low half |
-| **WAIT** | Waits until the beam has reached the position (frame order, section 3). With **P** set (pixel only), the line is ignored: it waits until the pixel position is reached on the current line, or on the next line if it has already passed. With **B** set, it also waits until the DMA engine (spec 11) is idle |
+| **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. The copper follows the halves rule (spec 3, section 2) with its own latch, separate from the CPU's: a high-half write is held until a low-half write to the same register, which writes both halves at once, so a 32-bit register is written whole. Other instructions (other MOVEs, WAITs) may come in between; a high-half write to another register replaces the held one. A low-half write on its own keeps the register's current high half. 16-bit registers (BPLxDAT, BPLMOD, DMACON, the strobes) need one MOVE, to their low half |
+| **WAIT** | Waits until the beam has reached the position (frame order, section 3): it ends on the position itself. A position the beam never reaches (pixel 864 or more, line 625 or more) waits until the next frame. With **P** set (pixel only), the line is ignored: it waits until the pixel position is reached on the current line, or on the next line if it has already passed. With **B** set, it also waits until the DMA engine (spec 11) is idle: no job running or waiting to start, including one a MOVE just before started |
 | **SKIP** | If the beam has reached the position, skips the next instruction. With P set, compares the pixel position only |
 | **JUMP** | Continues at the address |
 | **STOP** | Stops until the next frame (or a COPJMP strobe). A WAIT for line 2047 does the same, as on the Amiga |
@@ -67,7 +67,7 @@ Unused bit patterns are reserved; the copper treats them as STOP and sets COPSTA
 
 - **Beam position:** the copper compares against the beam position seen on the memory side (spec 4, section 3.1), a few clocks behind the pixel clock. A WAIT ends within about one pixel of its position.
 - **MOVE after a WAIT:** the next instruction is already fetched, so the write happens 10–20 ns after the WAIT ends. Writes that follow need their own fetches.
-- **Fetches:** each instruction is two 16-bit words. The copper's channel is best effort: cycle 4 of every slot, plus any cycle nobody else wants (spec 5, section 6), so at least 20 MB/s: one instruction every 200 ns or better, about 5 pixels at 576p, and much faster in the blanking.
+- **Fetches:** each instruction is two 16-bit words. At PRI 0 the copper's channel is best effort: it gets cycle 4 and any other cycle nobody else wants (spec 5, section 6), which is usually plenty but not guaranteed on a busy screen. At PRI 1 cycle 4 is its own: at least 20 MB/s, one instruction every 200 ns or better (about 5 pixels at 576p), and much faster in the blanking.
 - **Priority (COPCON.PRI):** a list that must make many writes quickly can raise the copper's priority:
 
   | PRI | The copper gets |
@@ -95,7 +95,11 @@ Offsets in the custom register block at `0xE00000`.
 | `0x718` | COPSTAT | RW1C | WAITING (0), STOPPED (1), ERR (2), IRQ (3) | ERR (a reserved instruction) and IRQ (set by COPINT) are sticky: write 1 to clear |
 | `0x71C` | COPINT | W | – | Strobe: sets COPSTAT.IRQ. Meant to be written by the copper itself |
 
-**Interrupt:** source COPPER (2) in the interrupt controller (spec 13) is COPSTAT.IRQ with COPCON.IRQEN, with its own vector. The handler clears it by writing 1 to COPSTAT.IRQ.
+**Strobes** (COPJMP1, COPJMP2, COPINT) act on any write that reaches their low half (a MOVE to the low half, or a CPU MOVE.W to address + 2, or MOVE.L).
+
+**Starting:** after reset COPCON, COP1LC, COP2LC and COPSTAT are 0. With COPCON.EN, DMACON.COPEN and DMAEN all set, the copper starts from COP1LC at the next vertical blank; a write to COPJMP1 starts it at once. Clearing any of them stops it at once; setting them again starts it at the next vertical blank (or COPJMP1).
+
+**Interrupt:** source COPPER (2) in the interrupt controller (spec 13) is COPSTAT.IRQ with COPCON.IRQEN, with its own vector; default level 5. The handler clears it by writing 1 to COPSTAT.IRQ.
 
 **Double-buffered lists:** build next frame's list in a second buffer, then write its address to COP1LC. The copper picks it up at the next vertical blank, so a half-built list is never run.
 
@@ -116,7 +120,7 @@ Resetting a 4-plane layer's pointers each frame and making a colour bar on lines
     STOP
 ```
 
-A palette entry is a 32-bit register (`0x00RRGGBB`), so a colour change is two MOVEs: the high half (red) first, then the low half (green and blue), which writes the entry at once. To change only green and blue, one MOVE to the low half is enough: the held high half is the entry's current value.
+A palette entry is a 32-bit register (`0x00RRGGBB`), so a colour change is two MOVEs: the high half (red) first, then the low half (green and blue), which writes the entry at once. To change only green and blue, one MOVE to the low half is enough: it keeps the entry's current red. Because the high half is held until the low half, a list can MOVE the high half before a WAIT and the low half after it, so that the whole 24-bit colour changes exactly at the WAIT.
 
 A per-line effect without unrolling (a raster bar that moves one colour per line), using a pixel-only WAIT and a loop:
 
