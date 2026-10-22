@@ -161,29 +161,38 @@ STRPOS                       equ $42C        ; R, spec 6/5
 STRPOS_FRAME_B               equ $0
 STRPOS_FRAME_W               equ $10
 STRPOS_FRAME_M               equ $FFFF
-COPCON                       equ $700        ; RW, spec 10/7
+COPCON                       equ $700        ; RW, spec 10/6
 COPCON_EN_B                  equ $0
 COPCON_EN_M                  equ $1
-COPLC                        equ $704        ; RW, spec 10/7
-COPLC_ADDR_B                 equ $0
-COPLC_ADDR_W                 equ $17
-COPLC_ADDR_M                 equ $7FFFFF
-COPJMP                       equ $708        ; W, spec 10/7
-COPPC                        equ $70C        ; R, spec 10/7
-COPPC_ADDR_B                 equ $0
-COPPC_ADDR_W                 equ $17
-COPPC_ADDR_M                 equ $7FFFFF
-COPSTAT                      equ $710        ; RW1C, spec 10/7
+COPCON_IRQEN_B               equ $1
+COPCON_IRQEN_M               equ $2
+COPCON_PRI_B                 equ $4
+COPCON_PRI_W                 equ $2
+COPCON_PRI_M                 equ $30
+COP1LC                       equ $704        ; RW, spec 10/6
+COP1LC_ADDR_B                equ $2
+COP1LC_ADDR_W                equ $15
+COP1LC_ADDR_M                equ $7FFFFC
+COP2LC                       equ $708        ; RW, spec 10/6
+COP2LC_ADDR_B                equ $2
+COP2LC_ADDR_W                equ $15
+COP2LC_ADDR_M                equ $7FFFFC
+COPJMP1                      equ $70C        ; W, spec 10/6
+COPJMP2                      equ $710        ; W, spec 10/6
+COPPC                        equ $714        ; R, spec 10/6
+COPPC_ADDR_B                 equ $2
+COPPC_ADDR_W                 equ $15
+COPPC_ADDR_M                 equ $7FFFFC
+COPSTAT                      equ $718        ; RW1C, spec 10/6
 COPSTAT_WAITING_B            equ $0
 COPSTAT_WAITING_M            equ $1
 COPSTAT_STOPPED_B            equ $1
 COPSTAT_STOPPED_M            equ $2
 COPSTAT_ERR_B                equ $2
 COPSTAT_ERR_M                equ $4
-COPERR                       equ $714        ; R, spec 10/7
-COPERR_ADDR_B                equ $0
-COPERR_ADDR_W                equ $17
-COPERR_ADDR_M                equ $7FFFFF
+COPSTAT_IRQ_B                equ $3
+COPSTAT_IRQ_M                equ $8
+COPINT                       equ $71C        ; W, spec 10/6
 ; L0..L2: 3 x 128 bytes, spec 4/6.2
 L_NUM                        equ $3
 L_SPAN                       equ $80
@@ -1180,21 +1189,13 @@ DMX_KIND_NONE                equ $2
 DMX_KIND_VALUE               equ $3
 DMX_PORT_SD                  equ $0
 DMX_PORT_SERIAL              equ $1
-COP_EXT                      equ $80000000   ; bit 31: 0 = MOVE, 1 = other instruction
-COP_OP_SHIFT                 equ $1B
-COP_OP_MOVEN                 equ $0
-COP_OP_ADD                   equ $1
-COP_OP_WAIT                  equ $2
-COP_OP_WAITH                 equ $3
-COP_OP_SKIP                  equ $4
-COP_OP_JUMP                  equ $5
-COP_OP_CALL                  equ $6
-COP_OP_RET                   equ $7
-COP_OP_SETC                  equ $8
-COP_OP_DBNZ                  equ $9
-COP_OP_IRQ                   equ $A
-COP_OP_WAITDMX               equ $B
-COP_OP_STOP                  equ $F
-COP_MOVE_REG_SHIFT           equ $10
+COP_EXT                      equ $80000000   ; bit 31: 0 = MOVE, 1 = WAIT, SKIP, JUMP or STOP
+COP_OP_SHIFT                 equ $1C         ; bits 30-28: the instruction
+COP_OP_WAIT                  equ $0
+COP_OP_SKIP                  equ $1
+COP_OP_JUMP                  equ $2
+COP_OP_STOP                  equ $3
+COP_PIXONLY                  equ $8000000    ; bit 27: WAIT/SKIP compare the pixel position only
+COP_BLT                      equ $8000       ; bit 15: WAIT also waits for the DMA engine to be idle
 COP_V_SHIFT                  equ $10
 COP_H_SHIFT                  equ $0

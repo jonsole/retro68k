@@ -103,12 +103,14 @@ array AUD 16 0x440 0x20 6/6
 end
 
 # Copper (spec 10)
-reg 0x700 COPCON  RW   10/7  EN=0
-reg 0x704 COPLC   RW   10/7  ADDR=22:0
-reg 0x708 COPJMP  W    10/7
-reg 0x70C COPPC   R    10/7  ADDR=22:0
-reg 0x710 COPSTAT RW1C 10/7  WAITING=0 STOPPED=1 ERR=2
-reg 0x714 COPERR  R    10/7  ADDR=22:0
+reg 0x700 COPCON  RW   10/6  EN=0 IRQEN=1 PRI=5:4
+reg 0x704 COP1LC  RW   10/6  ADDR=22:2
+reg 0x708 COP2LC  RW   10/6  ADDR=22:2
+reg 0x70C COPJMP1 W    10/6
+reg 0x710 COPJMP2 W    10/6
+reg 0x714 COPPC   R    10/6  ADDR=22:2
+reg 0x718 COPSTAT RW1C 10/6  WAITING=0 STOPPED=1 ERR=2 IRQ=3
+reg 0x71C COPINT  W    10/6
 
 # Memory areas in the custom block
 area PALETTE 0x4000 0x0400 RW 4/6.3
@@ -275,22 +277,14 @@ const DMX_KIND_VALUE 3
 const DMX_PORT_SD     0
 const DMX_PORT_SERIAL 1
 
-# Copper instructions (spec 10, section 4.2)
-const COP_EXT        0x80000000 "bit 31: 0 = MOVE, 1 = other instruction"
-const COP_OP_SHIFT   27
-const COP_OP_MOVEN   0
-const COP_OP_ADD     1
-const COP_OP_WAIT    2
-const COP_OP_WAITH   3
-const COP_OP_SKIP    4
-const COP_OP_JUMP    5
-const COP_OP_CALL    6
-const COP_OP_RET     7
-const COP_OP_SETC    8
-const COP_OP_DBNZ    9
-const COP_OP_IRQ     10
-const COP_OP_WAITDMX 11
-const COP_OP_STOP    15
-const COP_MOVE_REG_SHIFT 16
-const COP_V_SHIFT        16
-const COP_H_SHIFT        0
+# Copper instructions (spec 10, section 4)
+const COP_EXT       0x80000000 "bit 31: 0 = MOVE, 1 = WAIT, SKIP, JUMP or STOP"
+const COP_OP_SHIFT  28         "bits 30-28: the instruction"
+const COP_OP_WAIT   0
+const COP_OP_SKIP   1
+const COP_OP_JUMP   2
+const COP_OP_STOP   3
+const COP_PIXONLY   0x08000000 "bit 27: WAIT/SKIP compare the pixel position only"
+const COP_BLT       0x00008000 "bit 15: WAIT also waits for the DMA engine to be idle"
+const COP_V_SHIFT   16
+const COP_H_SHIFT   0

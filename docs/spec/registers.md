@@ -163,12 +163,14 @@ Channel n (0–15) at `0x440 + n × 0x20`:
 
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
-| `0x700` | COPCON | RW | 10, 7 |
-| `0x704` | COPLC | RW | 10, 7 |
-| `0x708` | COPJMP | W | 10, 7 |
-| `0x70C` | COPPC | R | 10, 7 |
-| `0x710` | COPSTAT | R, W1C | 10, 7 |
-| `0x714` | COPERR | R | 10, 7 |
+| `0x700` | COPCON | RW | 10, 6 |
+| `0x704` | COP1LC | RW | 10, 6 |
+| `0x708` | COP2LC | RW | 10, 6 |
+| `0x70C` | COPJMP1 | W | 10, 6 |
+| `0x710` | COPJMP2 | W | 10, 6 |
+| `0x714` | COPPC | R | 10, 6 |
+| `0x718` | COPSTAT | R, W1C | 10, 6 |
+| `0x71C` | COPINT | W | 10, 6 |
 
 ## 4. System block (`0xF00000`)
 

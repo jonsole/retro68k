@@ -187,26 +187,38 @@
 #define STRPOS                             HW_REG32(CUSTOM_BASE + STRPOS_OFS)
 #define STRPOS_FRAME_SHIFT                 0
 #define STRPOS_FRAME_MASK                  0xFFFFu
-/* COPCON: RW, spec 10/7 */
+/* COPCON: RW, spec 10/6 */
 #define COPCON_OFS                         0x700u
 #define COPCON                             HW_REG32(CUSTOM_BASE + COPCON_OFS)
 #define COPCON_EN_SHIFT                    0
 #define COPCON_EN_MASK                     0x1u
-/* COPLC: RW, spec 10/7 */
-#define COPLC_OFS                          0x704u
-#define COPLC                              HW_REG32(CUSTOM_BASE + COPLC_OFS)
-#define COPLC_ADDR_SHIFT                   0
-#define COPLC_ADDR_MASK                    0x7FFFFFu
-/* COPJMP: W, spec 10/7 */
-#define COPJMP_OFS                         0x708u
-#define COPJMP                             HW_REG32(CUSTOM_BASE + COPJMP_OFS)
-/* COPPC: R, spec 10/7 */
-#define COPPC_OFS                          0x70Cu
+#define COPCON_IRQEN_SHIFT                 1
+#define COPCON_IRQEN_MASK                  0x2u
+#define COPCON_PRI_SHIFT                   4
+#define COPCON_PRI_MASK                    0x30u
+/* COP1LC: RW, spec 10/6 */
+#define COP1LC_OFS                         0x704u
+#define COP1LC                             HW_REG32(CUSTOM_BASE + COP1LC_OFS)
+#define COP1LC_ADDR_SHIFT                  2
+#define COP1LC_ADDR_MASK                   0x7FFFFCu
+/* COP2LC: RW, spec 10/6 */
+#define COP2LC_OFS                         0x708u
+#define COP2LC                             HW_REG32(CUSTOM_BASE + COP2LC_OFS)
+#define COP2LC_ADDR_SHIFT                  2
+#define COP2LC_ADDR_MASK                   0x7FFFFCu
+/* COPJMP1: W, spec 10/6 */
+#define COPJMP1_OFS                        0x70Cu
+#define COPJMP1                            HW_REG32(CUSTOM_BASE + COPJMP1_OFS)
+/* COPJMP2: W, spec 10/6 */
+#define COPJMP2_OFS                        0x710u
+#define COPJMP2                            HW_REG32(CUSTOM_BASE + COPJMP2_OFS)
+/* COPPC: R, spec 10/6 */
+#define COPPC_OFS                          0x714u
 #define COPPC                              HW_REG32(CUSTOM_BASE + COPPC_OFS)
-#define COPPC_ADDR_SHIFT                   0
-#define COPPC_ADDR_MASK                    0x7FFFFFu
-/* COPSTAT: RW1C, spec 10/7 */
-#define COPSTAT_OFS                        0x710u
+#define COPPC_ADDR_SHIFT                   2
+#define COPPC_ADDR_MASK                    0x7FFFFCu
+/* COPSTAT: RW1C, spec 10/6 */
+#define COPSTAT_OFS                        0x718u
 #define COPSTAT                            HW_REG32(CUSTOM_BASE + COPSTAT_OFS)
 #define COPSTAT_WAITING_SHIFT              0
 #define COPSTAT_WAITING_MASK               0x1u
@@ -214,11 +226,11 @@
 #define COPSTAT_STOPPED_MASK               0x2u
 #define COPSTAT_ERR_SHIFT                  2
 #define COPSTAT_ERR_MASK                   0x4u
-/* COPERR: R, spec 10/7 */
-#define COPERR_OFS                         0x714u
-#define COPERR                             HW_REG32(CUSTOM_BASE + COPERR_OFS)
-#define COPERR_ADDR_SHIFT                  0
-#define COPERR_ADDR_MASK                   0x7FFFFFu
+#define COPSTAT_IRQ_SHIFT                  3
+#define COPSTAT_IRQ_MASK                   0x8u
+/* COPINT: W, spec 10/6 */
+#define COPINT_OFS                         0x71Cu
+#define COPINT                             HW_REG32(CUSTOM_BASE + COPINT_OFS)
 /* L(n): 3 x 128 bytes, spec 4/6.2 */
 #define L_NUM                              3
 #define L_SPAN                             0x80u
@@ -1014,22 +1026,14 @@ _Static_assert(sizeof(dmxdesc_t) == 32, "DMXDESC layout");
 #define DMX_KIND_VALUE                     0x3u
 #define DMX_PORT_SD                        0x0u
 #define DMX_PORT_SERIAL                    0x1u
-#define COP_EXT                            0x80000000u  /* bit 31: 0 = MOVE, 1 = other instruction */
-#define COP_OP_SHIFT                       0x1Bu
-#define COP_OP_MOVEN                       0x0u
-#define COP_OP_ADD                         0x1u
-#define COP_OP_WAIT                        0x2u
-#define COP_OP_WAITH                       0x3u
-#define COP_OP_SKIP                        0x4u
-#define COP_OP_JUMP                        0x5u
-#define COP_OP_CALL                        0x6u
-#define COP_OP_RET                         0x7u
-#define COP_OP_SETC                        0x8u
-#define COP_OP_DBNZ                        0x9u
-#define COP_OP_IRQ                         0xAu
-#define COP_OP_WAITDMX                     0xBu
-#define COP_OP_STOP                        0xFu
-#define COP_MOVE_REG_SHIFT                 0x10u
+#define COP_EXT                            0x80000000u  /* bit 31: 0 = MOVE, 1 = WAIT, SKIP, JUMP or STOP */
+#define COP_OP_SHIFT                       0x1Cu  /* bits 30-28: the instruction */
+#define COP_OP_WAIT                        0x0u
+#define COP_OP_SKIP                        0x1u
+#define COP_OP_JUMP                        0x2u
+#define COP_OP_STOP                        0x3u
+#define COP_PIXONLY                        0x8000000u  /* bit 27: WAIT/SKIP compare the pixel position only */
+#define COP_BLT                            0x8000u  /* bit 15: WAIT also waits for the DMA engine to be idle */
 #define COP_V_SHIFT                        0x10u
 #define COP_H_SHIFT                        0x0u
 
