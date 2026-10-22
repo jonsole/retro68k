@@ -1,202 +1,151 @@
 # Spec 10: Copper
 
-Status: **draft for review**
-
-The copper is a tiny processor that follows the beam. It runs a list of instructions from Chip RAM: wait until the beam reaches a position, then write hardware registers. This changes the display part-way down (or across) the screen, with no CPU work and exact timing: split screens, colour gradients, reusing sprites lower down, changing scroll per line, starting DMA jobs at a set moment.
+Status: **v1 scope**
 
 ## 1. Summary
 
+The copper is a small coprocessor that follows the beam, as on the Amiga: it runs a list of instructions from Chip RAM every frame and writes custom registers at chosen beam positions. It changes colours partway down the screen, resets the bitplane pointers for each frame, opens split screens, and so on, without the CPU.
+
 | Item | Value |
 |------|-------|
-| Program | A list of **4-byte** instructions in Chip RAM, restarted every frame |
-| Instructions | MOVE, MOVEN (several registers), ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX, STOP |
-| Can write | The custom register block: all registers, the palette, sprite table and descriptor RAM. Not the system area, and not the text screen or font (start a DMA job for those) |
-| Wait precision | One pixel, in any video mode |
-| Write speed | One instruction per 10 ns from its queue: up to 16 instructions (8 full 32-bit registers) in under a pixel at 640×480, right after a WAIT |
-| Memory use | A 64-byte prefetch queue; typically a few memory cycles per line. Urgent only when the queue runs low |
-| Frame start | The list restarts from COPLC at the start of vertical blanking, in time to set up line 0 |
+| Program | A list of 32-bit instructions in Chip RAM, restarted from COP1LC at the start of every vertical blank |
+| Instructions | MOVE, WAIT, SKIP (as the Amiga), plus JUMP and STOP |
+| Can write | The custom register block only (`0xE00000`–`0xE07FFF`): all video, DMA and copper registers and the palette. Not the system block |
+| Beam position | Full range (11-bit line and pixel), pixel exact |
+| Memory | Its own DMA channel in the scheduler (spec 5, section 6): best effort, cycle 4 and any cycle nobody else wants |
+| Prefetch | The next instruction, so the MOVE after a WAIT runs as soon as the WAIT is over |
+| Interrupt | A MOVE to COPINT raises the copper's interrupt (source COPPER) |
 
 ## 2. Comparison with the Amiga
 
-| Feature | Amiga copper | retro68k copper |
-|---------|--------------|-----------------|
-| Instructions | MOVE, WAIT, SKIP | MOVE, MOVEN, ADD, WAIT, WAITH, SKIP, JUMP, CALL/RET, loops, IRQ, WAITDMX, STOP |
-| Instruction size | 4 bytes | 4 bytes |
-| Register writes | 16-bit, one per 4 lores pixels at best | 16-bit halves, with 32-bit registers updated all at once; up to 16 writes in under a pixel after a WAIT |
-| Wait precision | 4 lores pixels across, 1 line down | 1 pixel, 1 line |
-| Loops | Only by SKIP tricks | Two loop counters, subroutines |
-| Gradients | One MOVE per line with a new value each time | ADD changes a register by a fixed amount, so a gradient is a 3-instruction loop |
-| Wait for the blitter | WAIT's blitter-finished bit | WAITDMX: wait for chosen DMA engine channels |
-| Lists | COP1LC restarted each frame, COP2LC by strobe | COPLC each frame; JUMP and CALL anywhere |
+| | Amiga | retro68k v1 |
+|--|-------|-------------|
+| Instructions | MOVE, WAIT, SKIP, 32 bits each | The same, plus JUMP and STOP |
+| MOVE | 16-bit data to a custom register | The same: 16-bit data to a register half; a 32-bit register (a BPLxPT) takes two MOVEs, high half first |
+| WAIT/SKIP position | 8-bit line (wraps after line 255), horizontal in steps of 4 low-resolution pixels, with compare masks | 11-bit line and pixel, pixel exact. No masks: a **pixel-only** WAIT repeats an effect on every line |
+| Waiting for the blitter | BFD bit in WAIT | The same: the BLT bit waits until the DMA engine is idle too |
+| Lists | COP1LC, COP2LC; strobes COPJMP1, COPJMP2; list 1 restarts each frame | The same |
+| Jumping | A MOVE to COPJMP2 | JUMP to any address; the strobes still work |
+| End of list | WAIT for an impossible position ($FFFFFFFE) | STOP (the Amiga way works too) |
+| Interrupt | A MOVE to INTREQ | A MOVE to COPINT |
+| Protection | CDANG guards the low registers | The copper can't reach the system block at all |
+| Speed | One instruction per 8 low-resolution pixels or so | Waits are pixel exact; a MOVE after a WAIT is prefetched |
 
-## 3. Beam position and frame order
+## 3. Frame order
 
-- The copper compares against `vline` and `hpixel` (spec 4, section 3.6). It checks every 100 MHz clock, so it can hit any pixel.
-- **Frame order:** each frame's list starts at the beginning of vertical blanking (`vline` = VVISIBLE). The copper therefore sees the lines in this order: the blanking lines VVISIBLE … VTOTAL−1 first, then the visible lines 0 … VVISIBLE−1. WAIT and SKIP compare positions in this order. Software still writes real line numbers. For example, in a 640×480 @ 60 frame, WAIT 500,0 comes before WAIT 0,0.
-- This gives the copper all of vertical blanking to set up the first visible line, which needs its layer registers written before line −1, in other words during blanking (spec 4, section 5.6), and its sprites before line 0's selection point (spec 9, section 5.1).
+The list restarts from COP1LC at the start of each **vertical blank**, line 576, so its writes for the coming picture (plane pointers, colours) land before that picture's first line is fetched. Beam positions in WAIT and SKIP therefore count in **frame order**: lines 576–624 (the vertical blank) come first, then lines 0–575 of the picture.
+
+- A WAIT for a picture line (0–575) waits for that line of the coming picture.
+- A WAIT for a blanking line (576–624) waits in the blank before it.
+- A position the beam has already passed in this frame satisfies a WAIT at once and makes a SKIP skip.
 
 ## 4. Instructions
 
-### 4.1 Registers as 16-bit halves
+Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kind:
 
-Registers are 32 bits wide, but the copper (like the 68000, whose data bus is 16 bits) writes them **16 bits at a time**. A register at offset `r` has its high half at `r` and its low half at `r + 2` (big-endian, as the 68000 stores it).
+```
+ MOVE   0 | register offset (30-16, even)          | data (15-0)
+ WAIT   1 | 000 | P | line (26-16)        | B | 0000 | pixel (10-0)
+ SKIP   1 | 001 | P | line (26-16)        | 0 | 0000 | pixel (10-0)
+ JUMP   1 | 010 | 0000 0 | address (22-2), bits 1-0 = 0
+ STOP   1 | 011 | 0 ...
+```
 
-**The low-half write updates the whole register at once:**
+| Instruction | Does |
+|-------------|------|
+| **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. The copper follows the halves rule (spec 3, section 2) with its own latch: a high-half write is held until its low half follows, so a 32-bit register is written whole. 16-bit registers (palette entries' halves, BPLxDAT, BPLMOD, DMACON) need one MOVE, to their low half |
+| **WAIT** | Waits until the beam has reached the position (frame order, section 3). With **P** set (pixel only), the line is ignored: it waits until the pixel position is reached on the current line, or on the next line if it has already passed. With **B** set, it also waits until the DMA engine (spec 11) is idle |
+| **SKIP** | If the beam has reached the position, skips the next instruction. With P set, compares the pixel position only |
+| **JUMP** | Continues at the address |
+| **STOP** | Stops until the next frame (or a COPJMP strobe). A WAIT for line 2047 does the same, as on the Amiga |
 
-- A write to the high half is held, not applied.
-- The next write to the low half of the same register writes both halves together.
-- A low-half write on its own keeps the register's current high half.
+Unused bit patterns are reserved; the copper treats them as STOP and sets COPSTAT.ERR.
 
-So a 32-bit value never shows half-changed, even for a moment. This matters for colours, pointers and positions. The same rule applies to CPU writes (spec 3): the 68000's MOVE.L writes the high word first, except in the −(An) addressing mode, so ordinary code needs no care. DMA jobs write all 32 bits at once.
-
-Many registers only need one half written, for example scroll values, small counts and enable bits in the low half.
-
-### 4.2 Encoding
-
-Every instruction is **one 32-bit word** in Chip RAM, 4-byte aligned. Bit 31 tells MOVE apart from the rest, as on the Amiga.
-
-**MOVE** (bit 31 = 0):
-
-| Bits | Meaning |
-|------|---------|
-| 30–16 | Register half to write: (offset in the custom block) ÷ 2, so `0x0000`–`0x7FFF` covers the whole 64 KB block |
-| 15–0 | Value |
-
-**Other instructions** (bit 31 = 1, opcode in bits 30–27):
-
-| Opcode | Name | Operands | Does |
-|--------|------|----------|------|
-| 0 | MOVEN | count 26–15, register half 14–0 | Write the next `count` 16-bit values (1–4095), which follow this instruction, to consecutive register halves. Padded to a multiple of 4 bytes. For loading many registers or palette entries |
-| 1 | ADD | register half 26–12, delta 11–0 (signed) | That half = half + delta (−2048 … +2047), wrapping round within the 16 bits. For gradients and steady changes |
-| 2 | WAIT | v 26–16, h 10–0 | Wait until the beam is at or past (v, h) in frame order |
-| 3 | WAITH | h 10–0 | Wait until the next time the beam reaches pixel h: on this line if not yet passed, otherwise on the next line |
-| 4 | SKIP | v 26–16, h 10–0 | Skip the next instruction if the beam is at or past (v, h) |
-| 5 | JUMP | address 22–0 | Continue at address |
-| 6 | CALL | address 22–0 | Continue at address; remember the return point (up to 4 deep) |
-| 7 | RET | – | Return from CALL |
-| 8 | SETC | counter 26, n 15–0 | Set loop counter 0 or 1 to n |
-| 9 | DBNZ | counter 26, address 22–0 | Decrease the counter; if it is not 0, continue at address |
-| 10 | IRQ | – | Raise the copper interrupt |
-| 11 | WAITDMX | channels 3–0 | Wait until the chosen DMA engine channels are idle |
-| 15 | STOP | – | Do nothing more until the next frame |
-
-Opcodes 12–14 are reserved. An unknown opcode, a misaligned list, or a register outside the custom block stops the copper and sets ERR (section 7).
-
-An assembler can offer **MOVE.L reg, value** as a shorthand for the two MOVEs (high half, then low half): 8 bytes, the same as a 32-bit value needs anyway.
-
-### 4.3 What register writes do
-
-Register writes have exactly the same effect as CPU writes, including their timing rules (layers latch before each line, sprites at their selection and fetch points, palette at once). The copper can write the whole custom register block at `0xE00000`–`0xE0FFFF`: every register, the palette, sprite table and descriptor RAM. It cannot write the system area (interrupts, timers, serial). It cannot write the text screen and font either, which are outside the block, but it can start a DMA job to do that.
+**Loops:** SKIP and JUMP make loops that end at a beam position. For example, to repeat a block of MOVEs on every line until line 400: `loop: WAIT P 0, 0` … MOVEs … `SKIP 400, 0` / `JUMP loop`.
 
 ## 5. Timing
 
-- **Execution:** the copper runs one instruction per 100 MHz clock (10 ns) while its queue has instructions. That is less than half a pixel at 640×480.
-- **After a WAIT:** the queue had the whole wait to fill, so up to **16 instructions** (for example 8 full 32-bit registers) run back to back straight after the WAIT, always with the same timing.
-- **Palette changes mid-line:** a palette write takes effect at a fixed number of pixels after the WAIT that comes before it. The exact delay (a few pixels) depends on the pixel pipeline and will be given per video mode in the register map. It never changes, so colour bars and split colours line up the same way every time.
-- **Long runs:** more than 16 instructions in a row are limited by fetching: each instruction is 2 memory cycles (two 16-bit words), so about 1–2 instructions per 100 ns slot from the free pool, more when urgent.
+- **Beam position:** the copper compares against the beam position seen on the memory side (spec 4, section 3.1), a few clocks behind the pixel clock. A WAIT ends within about one pixel of its position.
+- **MOVE after a WAIT:** the next instruction is already fetched, so the write happens 10–20 ns after the WAIT ends. Writes that follow need their own fetches.
+- **Fetches:** each instruction is two 16-bit words. The copper's channel is best effort: cycle 4 of every slot, plus any cycle nobody else wants (spec 5, section 6), so at least 20 MB/s: one instruction every 200 ns or better, about 5 pixels at 576p, and much faster in the blanking.
+- **When writes take effect:** as for the CPU (spec 4, section 5.4): the palette at once (a colour change shows within about 1–2 pixels of the WAIT position), layer settings from the next line, BPLxPT, BPLMOD and BPLxDAT at once.
+- **Register bus:** the copper and the CPU share the register bus; the copper goes first, so a CPU register access may wait one clock.
 
-## 6. Memory cycles
+## 6. Registers
 
-The copper reads its list one 16-bit word per memory cycle (2 cycles per instruction) into a **64-byte prefetch queue** (16 instructions).
+Offsets in the custom register block at `0xE00000`.
 
-- **Normally** it uses free-pool cycles, after sprites and audio and before the DMA engine (spec 5, section 6). Most lists need only a few cycles per line.
-- **When the queue is less than half full,** the copper becomes **urgent** and may also take the CPU's cycle 0. This keeps its timing exact even when wide fetch has taken spare cycles. Each cycle it takes from the CPU costs the CPU 2 clocks, as for sprites.
-- A dense list (dozens of instructions per line) can slow the CPU a little, as the copper could on the Amiga. A typical list (a WAIT and a few MOVEs on some lines) costs the CPU almost nothing.
-- While waiting with a full queue, the copper uses no memory cycles.
+| Offset | Name | Access | Bits | Description |
+|--------|------|--------|------|-------------|
+| `0x700` | COPCON | RW | EN (0), IRQEN (1) | Copper on (DMACON.DMAEN and COPEN must also be set); COPINT raises the interrupt |
+| `0x704` | COP1LC | RW | 22–2 | First list: restarted at every vertical blank |
+| `0x708` | COP2LC | RW | 22–2 | Second list |
+| `0x70C` | COPJMP1 | W | – | Strobe: restart at COP1LC now |
+| `0x710` | COPJMP2 | W | – | Strobe: continue at COP2LC now |
+| `0x714` | COPPC | R | 22–2 | The instruction being run |
+| `0x718` | COPSTAT | RW1C | WAITING (0), STOPPED (1), ERR (2), IRQ (3) | ERR (a reserved instruction) and IRQ (set by COPINT) are sticky: write 1 to clear |
+| `0x71C` | COPINT | W | – | Strobe: sets COPSTAT.IRQ. Meant to be written by the copper itself |
 
-## 7. Registers
+**Interrupt:** source COPPER (2) in the interrupt controller (spec 13) is COPSTAT.IRQ with COPCON.IRQEN, with its own vector. The handler clears it by writing 1 to COPSTAT.IRQ.
 
-Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addresses.
+**Double-buffered lists:** build next frame's list in a second buffer, then write its address to COP1LC. The copper picks it up at the next vertical blank, so a half-built list is never run.
 
-| Offset | Name | Bits | Description |
-|--------|------|------|-------------|
-| `0x700` | COPCON | EN (0) | Copper on (DMACON.COPEN must also be set) |
-| `0x704` | COPLC | 22–0 | Start of the list (4-byte aligned), used from the next frame. Writing it switches lists cleanly at the frame boundary |
-| `0x708` | COPJMP | – | Write: restart at COPLC now, without waiting for the next frame |
-| `0x70C` | COPPC | 22–0 | Read: address of the instruction being run |
-| `0x710` | COPSTAT | WAITING (0), STOPPED (1), ERR (2) | ERR is sticky, write 1 to clear |
-| `0x714` | COPERR | 22–0 | Address of the instruction that caused an error |
+## 7. Examples
 
-**Interrupts:** the IRQ instruction and ERR set COPIRQ in VIDSTAT (bit 13), with its enable in VIDINTEN. This is the COPPER source in the interrupt controller (spec 13), with its own vector. Default level 5.
-
-**Double-buffered lists:** software builds next frame's list in a second buffer and writes its address to COPLC. The copper switches at the start of the next vertical blanking, so a half-built list is never run.
-
-## 8. Examples
-
-`MOVE.L` below is the assembler shorthand for two MOVEs (section 4.2).
-
-**Split screen:** a different picture below line 300.
+Resetting a 4-plane layer's pointers each frame and making a colour bar on lines 100–107 (`L1`, `BPLxPT` and `PALETTE` as in `hw.inc`):
 
 ```
-        WAIT   299, 0                  ; during line 299, before line 300's latch
-        MOVE.L L0.PTR, picture2        ; 2 instructions, applied together
-        STOP
+    MOVE  L1+L_BPL0PT,   picture>>16          ; high half (held) ...
+    MOVE  L1+L_BPL0PT+2, picture & $FFFF      ; ... low half: BPL0PT written whole
+    ...                                       ; the same for BPL1PT-BPL3PT
+    WAIT  100, 0
+    MOVE  PALETTE,   $00FF                    ; colour 0, high half: red = $FF (held) ...
+    MOVE  PALETTE+2, $0000                    ; ... low half: green, blue = 0: colour 0 is red
+    WAIT  108, 0
+    MOVE  PALETTE,   $0000                    ; back to black
+    MOVE  PALETTE+2, $0000
+    STOP
 ```
 
-(Layer registers latch at the start of horizontal blanking before each line, spec 4, section 5.6. Writing during line 299 changes line 300.)
+A palette entry is a 32-bit register (`0x00RRGGBB`), so a colour change is two MOVEs: the high half (red) first, then the low half (green and blue), which writes the entry at once. To change only green and blue, one MOVE to the low half is enough: the held high half is the entry's current value.
 
-**Sky gradient:** background colour gets 1 step bluer on each of 200 lines. BGCOLOR is `0x00RRGGBB`, so blue is the low byte of its low half.
-
-```
-        MOVE.L BGCOLOR, 0x000020
-        SETC   0, 200
-loop:   WAITH  0                       ; start of the next line
-        ADD    BGCOLOR+2, 1            ; low half: blue + 1
-        DBNZ   0, loop
-        STOP
-```
-
-5 instructions plus the 2-instruction MOVE.L: 28 bytes for the whole gradient.
-
-**Colour bar across part of a line:**
+A per-line effect without unrolling (a raster bar that moves one colour per line), using a pixel-only WAIT and a loop:
 
 ```
-        WAIT   100, 200
-        MOVE.L PALETTE+4, 0xFF0000     ; colour 1 turns red from about pixel 200
-        WAIT   100, 400
-        MOVE.L PALETTE+4, 0x0000FF     ; blue from about pixel 400
+    WAIT  50, 0
+loop:
+    WAIT  P 0, 700                            ; near the end of every line
+    MOVE  BGCOLOR+2, ...                      ; next line's background
+    SKIP  300, 0                              ; past line 300: leave the loop
+    JUMP  loop
+    STOP
 ```
 
-**Reusing a sprite lower down** (more than 64 sprites per frame): sprite 5 is shown on lines 100–240, then again from line 245 with a different image. The new values must be written after the old sprite's last fetch (on line 240) and before the new sprite's selection point for line 245, which is during line 244 (spec 9, section 5.1). Leaving a few lines' gap makes that easy:
+The assembler macros for these (`CMOVE`, `CWAIT`, `CSKIP`, `CJUMP`, `CSTOP`) are in `firmware/include/copper.inc`.
 
-```
-        WAIT   242, 0
-        MOVEN  6, SPR5.POS             ; POS, PTR, SIZE of table entry 5: six 16-bit halves
-               (x), (y=245), image2 high, image2 low, size2 high, size2 low
-```
-
-**Start a DMA job at a set moment,** for example redrawing a status bar right after the beam has passed it:
-
-```
-        WAIT   40, 0
-        MOVE.L DMX2.CHDESC, statusbar_job
-        MOVE   DMX2.CHCTRL+2, START    ; low half only
-```
-
-## 9. FPGA resources
+## 8. FPGA resources
 
 | Item | Resource |
 |------|----------|
-| Prefetch queue (64 bytes), call stack, 2 counters, high-half holding register | Logic |
-| Decoder, beam compare, register-bus writer | Estimate 400–700 LUTs |
-| Block RAM | None |
+| Program counter, one prefetched instruction, the high-half latch, beam compare | Logic, about 300–400 LUTs |
 
-## 10. Open points
+## 9. Open points
 
 | # | Item |
 |---|------|
-| C1 | Indirect moves from a table in Chip RAM (e.g. a different palette value per line from a list), if ADD is not enough |
-| C2 | The exact pixel delay for palette and BGCOLOR writes after a WAIT, per video mode |
-| C3 | Whether a second copper (e.g. one for the display, one for sprites) would be useful |
-| C4 | WAIT masks (as on the Amiga) for repeating patterns; loops may already cover this |
+| C1 | Whether a 32-bit MOVEL (an 8-byte instruction) is worth adding, to set a pointer in one instruction |
+| C2 | Exact pixel delay from a WAIT to a palette change, measured on the board |
 
-## 11. Tests
+## 10. Tests
 
-- **Frame order:** WAITs in the blanking lines run before WAITs on visible lines; the list restarts at each vertical blanking.
-- **Precision:** WAIT on many (v, h) positions in every video preset; a palette write lands on the same pixel every frame.
-- **Latching:** a layer write during line L−1 changes line L; a sprite write before the selection point changes that line.
-- **Instructions:** every opcode, MOVEN with odd counts and padding, ADD wrap within 16 bits, nested CALL to depth 4, both counters, SKIP before and after its position.
-- **Halves:** a high-half write alone changes nothing; the low-half write applies both at once; a low-half write alone keeps the high half; the same rules for CPU writes.
-- **Errors:** unknown opcode, a write to the system area, deeper than 4 calls: the copper stops, ERR and COPERR set, interrupt raised.
-- **Busy system:** with the CPU flat out in Chip RAM and wide fetch on, a list with 16 instructions after each WAIT still keeps exact timing; measure the CPU cycles taken.
-- **COPLC switch:** changing COPLC mid-frame takes effect only at the next vertical blanking.
+- **Golden images:** copper lists that change colours mid-line and per line, reset plane pointers, and open a split screen (new BPLxPT at a line), compared with the Python video model extended with a copper model.
+- **Frame order:** WAITs on blanking lines and picture lines; SKIP and JUMP loops ending at a line.
+- **Halves:** a 32-bit register written by two MOVEs is never seen half-written; the CPU's own halves are not disturbed.
+- **Strobes and lists:** COPJMP1/2 and COP1LC double buffering.
+- **COPINT:** raises the interrupt once per write.
+
+## 11. Later versions
+
+- MOVEL (open point C1), CALL/RET, an ADD instruction
+- WAIT with compare masks, if anything needs them
+- A second copper
