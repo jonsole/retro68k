@@ -17,7 +17,7 @@ This chapter covers:
 
 - what a copper instruction is, and the instruction formats;
 - writing registers with MOVE: 16-bit halves, 32-bit pointers and palette colours;
-- waiting for a beam position with WAIT, and the frame order in which the copper counts positions;
+- waiting for a beam position with WAIT, in beam coordinates;
 - the pixel-only WAIT, for effects that repeat on every line;
 - loops with SKIP and JUMP;
 - the copper's own registers: X and Y, arithmetic and conditions, storage registers, and subroutines;
@@ -40,10 +40,10 @@ If you have written Amiga copper lists, you will feel at home. The instructions 
 | Instructions | MOVE, WAIT, SKIP, 32 bits each | The same, plus JUMP and STOP |
 | Registers | None: the copper writes constants only | X and Y, with ADD, SUB, AND, OR, CMP and a conditional SKIP; 8 storage registers; CALL and RET |
 | MOVE | 16 bits of data to a custom register | The same: 16 bits to one half of a 32-bit register. A pointer takes two MOVEs, high half first |
-| Beam position | 8-bit line (wraps after line 255), across in steps of 4 low-resolution pixels | 11-bit line and pixel, **pixel exact**, over the whole frame |
+| Beam position | 8-bit line (wraps after line 255), across in steps of 4 low-resolution pixels | 11-bit line and pixel, **pixel exact**, over the whole frame, in beam coordinates |
 | Compare masks | Mask bits in WAIT and SKIP | No masks. A **pixel-only** WAIT ignores the line, so an effect repeats on every line |
 | Waiting for the blitter | BFD bit clear: WAIT also waits for the blitter | B bit set: WAIT also waits for the DMA engine |
-| Lists | COP1LC, COP2LC; strobes COPJMP1, COPJMP2; list 1 restarts each frame | The same. List 1 restarts at the start of the vertical blank |
+| Lists | COP1LC, COP2LC; strobes COPJMP1, COPJMP2; list 1 restarts each frame | The same. List 1 restarts at the start of the frame, beam line 0 (the start of the vertical blank) |
 | Jumping | A MOVE to COPJMP2 | JUMP to any address; the strobes still work |
 | End of list | WAIT for an impossible position (`$FFFFFFFE`) | STOP, or a WAIT for line 2047 |
 | Interrupting the CPU | A MOVE to INTREQ | A MOVE to COPINT |
@@ -56,7 +56,7 @@ If you have written Amiga copper lists, you will feel at home. The instructions 
 - In ordinary code **a4 holds CUSTOM** (`$E00000`) and **a5 holds SYSTEM** (`$F00000`), as in the other chapters.
 - In a copper list, a register is named by its **offset in the custom block**, exactly as `hw.inc` gives it: `BGCOLOR`, `L0+L_BPL0PT`, `PALETTE+5*4`. No base register is involved, because the copper can write only the custom block.
 - Copper instructions are written with the macros (`CMOVE`, `CMOVEL`, `CWAIT`, `CWAITP`, `CWAITB`, `CSKIP`, `CSKIPP`, `CJUMP`, `CSTOP`, and those of "The Copper's Registers and Arithmetic"). In the text, the instructions themselves are written MOVE, WAIT and so on.
-- `HBLANK` is defined in the examples as 720, the first pixel of the horizontal blank.
+- Positions in WAIT and SKIP are **beam coordinates** (see "The beam position" below). The examples use `VID_X0` (144) and `VID_Y0` (49) from `hw.inc`, the first picture pixel and line: picture line L is beam line `VID_Y0+L`, and pixel 0 of a line is the start of its horizontal blank. In the text, a line or pixel of the screen ("line 100") is a picture position unless it is called a beam line or beam pixel; WAIT and SKIP operands are always beam positions.
 
 ### About this chapter
 
@@ -184,7 +184,7 @@ A palette entry is a 32-bit register, `$00RRGGBB`, at `PALETTE + 4 × n`. The hi
           CMOVE   PALETTE+1*4+2,$FF00     ; colour 1: green $FF, blue $00, red kept
   ```
 
-Palette writes take effect at once, from the next pixel, so the copper can change a colour in the middle of a line. BGCOLOR is read at the start of each line, so a change shows from the next line. "Copper Timing" gives the details.
+Palette writes take effect at once, from the next pixel, so the copper can change a colour in the middle of a line. BGCOLOR is read at the start of each line's picture, so a change made in a line's horizontal blank shows on that line, and one made during its picture shows from the next line. "Copper Timing" gives the details.
 
 **Tip:** Because the held high half waits for its low half, you can write the high half of a colour *before* a WAIT and the low half after it. The whole colour then changes with the one MOVE that follows the WAIT, which the copper has already fetched, so the change is exact to the pixel. Example 5-10 does this. Put nothing but the WAIT between the two MOVEs.
 
@@ -196,59 +196,57 @@ WAIT makes the copper wait until the beam reaches a position on the screen. Whil
 
 ### The beam position
 
-A WAIT gives the position as a **line** and a **pixel**, both counted from 0 at the top left visible pixel, exactly as BEAMPOS counts them. Both are 11 bits, so the copper can reach every position in the frame, to the pixel:
+A WAIT gives the position as a **line** and a **pixel** in **beam coordinates**, exactly as BEAMPOS counts them: line 0 is the start of the vertical blank, and pixel 0 is the start of a line's horizontal blank. Each line starts with its blank and then shows its picture. Both are 11 bits, so the copper can reach every position in the frame, to the pixel:
 
 | Part of the frame | Lines | Pixels |
 |-------------------|-------|--------|
-| Visible picture | 0–575 | 0–719 |
-| Horizontal blank | 0–624 | 720–863 |
-| Vertical blank | 576–624 | 0–863 |
+| Vertical blank | 0–48 | 0–863 |
+| Horizontal blank | 0–624 | 0–143 |
+| Picture | 49–624 (VID_Y0 onwards) | 144–863 (VID_X0 onwards) |
 
-The beam passes 864 pixels per line (720 visible and 144 of horizontal blank), 37 ns each, and 625 lines per frame. Positions with a pixel of 864 or more, or a line of 625 or more, are never reached on the way, so do not use them, except for the end-of-list WAIT described below.
+The beam passes 864 pixels per line (144 of horizontal blank, then 720 of picture), 37 ns each, and 625 lines per frame. Positions with a pixel of 864 or more, or a line of 625 or more, are never reached on the way, so do not use them, except for the end-of-list WAIT described below.
 
 ```asm
-        CWAIT   100,0           ; wait for the start of line 100
-        CWAIT   100,360         ; wait for the middle of line 100
-        CWAIT   99,HBLANK       ; wait for the horizontal blank after line 99
+        CWAIT   VID_Y0+100,0            ; beam line 149: the blank before picture line 100
+        CWAIT   VID_Y0+100,VID_X0       ; picture line 100's first pixel
+        CWAIT   VID_Y0+100,VID_X0+360   ; the middle of picture line 100
 ```
 
-### Frame order
+A WAIT for line n, pixel 0 ends at the start of line n's horizontal blank, 144 pixels before its picture. It is the natural place for changes that must be in place before line n's picture: BGCOLOR, PRIO and the palette. CTRL, WINX, WINY, SCROLLX and the start of the line's fetch are taken at that moment, so those must be written before it, during line n − 1 (see "Copper Timing"). A colour change at picture line L, pixel P is `CWAIT VID_Y0+L,VID_X0+P`.
 
-The copper restarts its list at the start of every **vertical blank**, at line 576, not at line 0. It does this so that the writes at the top of the list (plane pointers, colours) are done before the coming picture's first line is fetched. As a result, the copper counts positions in **frame order**: the vertical blank comes first, then the picture.
+### Beam positions through the frame
+
+The copper restarts its list from COP1LC at the start of every frame, beam line 0, pixel 0, the start of the vertical blank. The picture's first line, beam line 49, comes 49 lines later. Those 49 blank lines are where the per-frame set-up goes: the writes at the top of the list (plane pointers, colours) are done there, before the picture's first line is fetched.
 
 ```
-                       frame order, as the copper sees it
-
-     start of list --> line 576 +-----------------------------------+
-     (COP1LC)                   |  vertical blank, lines 576-624    |  first
+     start of list --> line   0 +-----------------------------------+
+     (COP1LC)                   |  vertical blank, lines 0-48       |
                                 |  set-up: pointers, colours        |
-                       line 624 +-----------------------------------+
-                       line   0 +-----------------------------------+
+                       line  49 +-----------------------------------+
                                 |                                   |
-                                |  the picture, lines 0-575         |
+                                |  the picture, lines 49-624        |
                                 |  WAITs for picture lines          |
                                 |                                   |
-                       line 575 +-----------------------------------+  last
+                       line 624 +-----------------------------------+
                                     |
-                                    +--> next vertical blank: the list
+                                    +--> next frame: the list
                                          starts again from COP1LC
 
-                     Figure 5-2: Frame Order
+                Figure 5-2: The Frame, as the Copper Sees It
 ```
 
-So:
+Positions only go up through a frame, so the rule is simple:
 
-- A WAIT for a picture line (0–575) waits for that line of the **coming** picture.
-- A WAIT for a blanking line (576–624) waits in the vertical blank **before** that picture.
+- A WAIT ends when the beam reaches its position in this frame.
 - A WAIT for a position the beam has **already passed** in this frame ends at once. A SKIP for such a position skips.
 
-Write your WAITs in frame order: blanking lines first, if any, then picture lines from the top down. A WAIT for line 600 after a WAIT for line 100 ends at once, because in frame order line 600 came long before.
+Write your WAITs in order, from the top down. A WAIT for line 100 after a WAIT for line 600 ends at once.
 
 On the Amiga, positions wrap after line 255, and a list has to wait for line 255 at the end of the line before it can reach the lines below. Nothing like that is needed here: every line from 0 to 624 is one simple number.
 
 ### Ending a list
 
-End every list with **STOP**. The copper then does nothing until the next vertical blank, when it starts again from COP1LC.
+End every list with **STOP**. The copper then does nothing until the next frame starts, when it starts again from COP1LC.
 
 ```asm
         CSTOP
@@ -256,7 +254,7 @@ End every list with **STOP**. The copper then does nothing until the next vertic
 
 A WAIT for line 2047, `CWAIT 2047,0`, does the same, since the beam never gets there. The Amiga's end-of-list, the long word `$FFFFFFFE`, also stops the copper, but only because its op bits (111) are a reserved pattern: it sets COPSTAT.ERR as well. Use CSTOP in new lists, and change `$FFFFFFFE` to CSTOP when you bring an Amiga list across.
 
-If a list is still running when the vertical blank comes, it is abandoned: the copper starts again from the top whatever it was doing, whether waiting, stopped or in the middle of a run of MOVEs.
+If a list is still running when the next frame starts, it is abandoned: the copper starts again from the top whatever it was doing, whether waiting, stopped or in the middle of a run of MOVEs.
 
 ### The pixel-only WAIT
 
@@ -265,14 +263,14 @@ The Amiga's WAIT has mask bits, so that a WAIT can ignore the line and wait for 
 - If the beam has not yet reached the pixel position on the current line, the copper waits for it on this line.
 - If the beam has already passed it, the copper waits for it on the next line.
 
-So a pixel-only WAIT always waits for the next time the beam comes to that pixel. A block that starts with `CWAITP HBLANK` runs once in each horizontal blank, whatever line it is on, which is what you want for an effect that repeats on every line:
+So a pixel-only WAIT always waits for the next time the beam comes to that pixel. A block that starts with `CWAITP 0` runs once at the start of each line's horizontal blank, before the line's picture, whatever line it is on, which is what you want for an effect that repeats on every line:
 
 ```asm
-        CWAIT   99,HBLANK               ; the blank before line 100
+        CWAIT   VID_Y0+100,0            ; the blank before picture line 100
         CMOVEL  BGCOLOR,$000080         ; line 100's background
-        CWAITP  HBLANK                  ; the blank before line 101
+        CWAITP  0                       ; the blank before line 101
         CMOVEL  BGCOLOR,$000090         ; line 101's background
-        CWAITP  HBLANK                  ; the blank before line 102
+        CWAITP  0                       ; the blank before line 102
                                         ; ... and so on
 ```
 
@@ -294,7 +292,7 @@ The copper's registers are in the custom block at `$E00700`. All are 32 bits, an
 
 **COP1LC** and **COP2LC** each hold the address of a copper list in Chip RAM: bits 22–2 of the address, so a list always starts at a multiple of 4.
 
-- **COP1LC** is list 1, the **main list**. The copper starts it again from the top at the start of every vertical blank.
+- **COP1LC** is list 1, the **main list**. The copper starts it again from the top at the start of every frame (beam line 0, the start of the vertical blank).
 - **COP2LC** is list 2. The copper goes there only when told to, by the COPJMP2 strobe.
 
 Write them from the CPU with `MOVE.L`, which writes both halves in the right order. From the copper, use `CMOVEL`.
@@ -303,7 +301,7 @@ Write them from the CPU with `MOVE.L`, which writes both halves in the right ord
         move.l  #my_list,COP1LC(a4)
 ```
 
-A write to COP1LC does not move the copper by itself: the new address is used at the next vertical blank (or at the next COPJMP1 strobe). This is what makes double-buffered lists work (see "Double-Buffered Lists").
+A write to COP1LC does not move the copper by itself: the new address is used at the start of the next frame (or at the next COPJMP1 strobe). This is what makes double-buffered lists work (see "Double-Buffered Lists").
 
 ### Jump strobes
 
@@ -361,12 +359,12 @@ A copper list is just a run of long words in Chip RAM. All memory is Chip RAM, s
 A typical list has three parts:
 
 1. **The set-up**, run in the vertical blank: plane pointers, the colours and settings the top of the picture needs.
-2. **The effects**, each a WAIT for a position followed by the MOVEs to make there, in frame order.
+2. **The effects**, each a WAIT for a position followed by the MOVEs to make there, from the top of the screen down.
 3. **A STOP.**
 
 ### Example 5-1: Colour bars
 
-Example 3-10 in the playfield chapter made colour bars by having the CPU watch the beam. Here is the same picture as a copper list: the background colour changes every 8 lines, 72 bars in all. Each new colour is written in the horizontal blank before the bar's first line, because BGCOLOR is read at the start of each line. The assembler's `REPT` writes the 71 WAIT and MOVE pairs.
+Example 3-10 in the playfield chapter made colour bars by having the CPU watch the beam. Here is the same picture as a copper list: the background colour changes every 8 lines, 72 bars in all. Each new colour is written at the start of the bar's first line, in its horizontal blank, because BGCOLOR is read at the start of each line's picture. The assembler's `REPT` writes the 71 WAIT and MOVE pairs.
 
 ```asm
 ; Example 5-1: colour bars. The background colour changes every 8 lines:
@@ -375,19 +373,18 @@ Example 3-10 in the playfield chapter made colour bars by having the CPU watch t
             include "hw.inc"
             include "copper.inc"
 
-HBLANK      equ     720                 ; first pixel of the horizontal blank
 BAR         equ     8                   ; lines per bar
 
             cnop    0,4                 ; instructions are long-word aligned
 bars_list:  CMOVEL  BGCOLOR,$0000FF     ; bar 0, set in the vertical blank
             rept    71                  ; bars 1-71
-            CWAIT   (REPTN+1)*BAR-1,HBLANK                      ; the blank before the bar
+            CWAIT   VID_Y0+(REPTN+1)*BAR,0                      ; the blank before the bar
             CMOVEL  BGCOLOR,(((REPTN+1)*3)<<16)|(255-(REPTN+1)*3)
             endr
             CSTOP
 ```
 
-The first instruction runs at line 576, at the start of the vertical blank, and sets the colour for bar 0, which starts at line 0. The first WAIT is for line 7 at pixel 720: in frame order that comes after the whole vertical blank, so the copper waits through it. The list is 72 × 8 + 71 × 4 + 4 = 864 bytes, and it takes the CPU no time at all.
+The first instruction runs at beam line 0, at the start of the frame and of the vertical blank, and sets the colour for bar 0, which starts at beam line 49 (picture line 0). The first WAIT is for beam line 57, pixel 0: the start of picture line 8's horizontal blank. The list is 72 × 8 + 71 × 4 + 4 = 864 bytes, and it takes the CPU no time at all.
 
 ---
 
@@ -401,9 +398,9 @@ To start the copper:
 2. **Write its address to COP1LC**, with `MOVE.L`.
 3. **Write COPCON**: EN, and IRQEN and PRI if you need them.
 4. **Turn on copper DMA**: set COPEN, and DMAEN if it is not on already, in DMACON.
-5. **The display must be on** (VIDCON.EN). The beam, and so the vertical blank, runs only while it is.
+5. **The display must be on** (VIDCON.EN). The beam, and so the frame, runs only while it is.
 
-The copper starts at the next vertical blank. From then on it runs its list from COP1LC at the start of every vertical blank, with no further help.
+The copper starts at the start of the next frame. From then on it runs its list from COP1LC at the start of every frame (beam line 0, pixel 0), with no further help.
 
 Three switches must all be on for the copper to run: COPCON.EN, DMACON.COPEN and DMACON.DMAEN. Turning any of them off stops it.
 
@@ -418,7 +415,6 @@ This program shows the colour bars of Example 5-1, with every layer off so that 
             include "hw.inc"
             include "copper.inc"
 
-HBLANK      equ     720
 BAR         equ     8
 
 start:      move.w  #$2700,sr           ; no interrupts while we set up
@@ -438,25 +434,25 @@ main:       ; (your program's main loop goes here)
             cnop    0,4
 bars_list:  CMOVEL  BGCOLOR,$0000FF
             rept    71
-            CWAIT   (REPTN+1)*BAR-1,HBLANK
+            CWAIT   VID_Y0+(REPTN+1)*BAR,0
             CMOVEL  BGCOLOR,(((REPTN+1)*3)<<16)|(255-(REPTN+1)*3)
             endr
             CSTOP
 ```
 
-### What happens at each vertical blank
+### What happens in each frame
 
 ```
- line 576, pixel 0     the vertical blank starts:
+ line 0, pixel 0       the frame and the vertical blank start:
                        - VIDSTAT.VBLANK is set and FRAMECOUNT goes up by 1
                        - the copper starts again at COP1LC, whatever it was doing
- lines 576-623         the copper runs the set-up part of the list:
+ lines 0-48            the copper runs the set-up part of the list:
                        plane pointers, colours (49 lines, 1.57 ms: plenty of time)
- line 624, hblank      the display starts fetching line 0 of the next picture,
+ line 49, pixel 0      the display starts fetching the picture's first line,
                        using the pointers the copper has just written
- lines 0-575           the copper waits for each position in its list and makes
+ lines 49-624          the copper waits for each position in its list and makes
                        its writes there; then it reaches STOP and waits
- line 576              the next vertical blank: the list starts again
+ line 0                the next frame: the list starts again
 
           Figure 5-3: The Copper's Frame
 ```
@@ -465,7 +461,7 @@ The set-up part has the whole vertical blank, 49 lines, to finish before the dis
 
 ### Starting at once: COPJMP1
 
-The copper waits for the next vertical blank before it first runs its list. If you want it to start straight away, write COPJMP1 after step 4. The list then runs from the top at once, part-way through a frame: its WAITs for positions the beam has already passed end at once, so the rest of that one frame may look wrong. From the next vertical blank on, everything is normal. Usually it is simpler to let the copper start by itself.
+The copper waits for the start of the next frame before it first runs its list. If you want it to start straight away, write COPJMP1 after step 4. The list then runs from the top at once, part-way through a frame: its WAITs for positions the beam has already passed end at once, so the rest of that one frame may look wrong. From the next frame on, everything is normal. Usually it is simpler to let the copper start by itself.
 
 ### Stopping the copper
 
@@ -475,7 +471,7 @@ To stop the copper, clear COPEN in DMACON (write it with bit 15 clear), or clear
         move.w  #DMACON_COPEN_M,DMACON+2(a4)    ; bit 15 clear: COPEN off
 ```
 
-The copper stops at once. The registers it wrote keep their last values, so the screen goes on showing whatever the copper last set: for example, the colours from the bottom of the screen, and plane pointers that are no longer reset each frame. To restart the copper cleanly, set COPEN again: it starts at the next vertical blank.
+The copper stops at once. The registers it wrote keep their last values, so the screen goes on showing whatever the copper last set: for example, the colours from the bottom of the screen, and plane pointers that are no longer reset each frame. To restart the copper cleanly, set COPEN again: it starts at the start of the next frame.
 
 A copper list may also stop itself for one frame with STOP: that is the normal end of every list.
 
@@ -489,7 +485,7 @@ The plane pointers walk through memory as the display fetches, and the hardware 
 
 This is Example 3-1, the 320 × 256 16-colour playfield, with the copper resetting the pointers. Step 7 of Example 3-1 (the VBLANK handler) has gone, and so has every interrupt.
 
-The order of the start-up matters a little. Bitplane DMA is turned off first, so that the layer fetches nothing until the copper has written the pointers. Then the copper and the display are turned on, and the program waits for a vertical blank to start: in that blank the copper writes the pointers for the first time, and the program turns bitplane DMA on before line 624, when the first line of the picture is fetched.
+The order of the start-up matters a little. Bitplane DMA is turned off first, so that the layer fetches nothing until the copper has written the pointers. Then the copper and the display are turned on, and the program waits for a new frame to start: in its vertical blank the copper writes the pointers for the first time, and the program turns bitplane DMA on before beam line 49, when the first line of the picture is fetched.
 
 ```asm
 ; Example 5-3: a basic playfield, with the copper resetting the plane
@@ -506,9 +502,8 @@ HEIGHT      equ     256                 ; source lines
 PLANES      equ     4
 ROWBYTES    equ     WIDTH/8             ; 40 bytes per plane line
 PLANESIZE   equ     ROWBYTES*HEIGHT     ; 10240 bytes per plane
-WIN_X       equ     (720-2*WIDTH)/2     ; the window: 640 x 512 at (40, 32)
-WIN_Y       equ     (576-2*HEIGHT)/2
-HBLANK      equ     720
+WIN_X       equ     VID_X0+(VID_W-2*WIDTH)/2    ; the window: 640 x 512 at
+WIN_Y       equ     VID_Y0+(VID_H-2*HEIGHT)/2   ; picture position (40, 32)
 CTRL_PIC    equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|((PLANES-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
 
 start:      move.w  #$2700,sr           ; no interrupts
@@ -543,8 +538,8 @@ start:      move.w  #$2700,sr           ; no interrupts
             move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_COPEN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
 
-            ; wait for a vertical blank to start: the copper writes the
-            ; pointers in it, then bitplane DMA may start
+            ; wait for a frame to start: the copper writes the pointers
+            ; in its vertical blank, then bitplane DMA may start
             move.l  FRAMECOUNT(a4),d0
 .vb:        cmp.l   FRAMECOUNT(a4),d0
             beq.s   .vb
@@ -592,7 +587,7 @@ The later examples in this chapter build on this one: each gives a new `copper_l
 
 ### Scrolling and double buffering with the copper
 
-To scroll or to swap screen buffers, the CPU changes the addresses **in the list**: the data words of the `CMOVEL`s. Each `CMOVEL` is 8 bytes, and the pointer's high and low halves are its words at +2 and +6. Change them between the copper's set-up and the next vertical blank, for example right after line 0 has started, so that the copper never reads a pointer half-changed. A safer way, for bigger changes, is to use two lists (see "Double-Buffered Lists").
+To scroll or to swap screen buffers, the CPU changes the addresses **in the list**: the data words of the `CMOVEL`s. Each `CMOVEL` is 8 bytes, and the pointer's high and low halves are its words at +2 and +6. Change them between the copper's set-up and the start of the next frame, for example once the picture has started (beam line 49 or later), so that the copper never reads a pointer half-changed. A safer way, for bigger changes, is to use two lists (see "Double-Buffered Lists").
 
 ```asm
 ; Point the list's BPL0PT at d0 (a long): the CMOVEL is the list's first
@@ -609,7 +604,7 @@ To scroll or to swap screen buffers, the CPU changes the addresses **in the list
 
 ### SKIP
 
-SKIP compares the beam position as WAIT does, but it does not wait. If the beam **has reached** the position (in frame order), the copper skips the next instruction; if not, it runs it. A pixel-only SKIP, `CSKIPP pixel`, compares only the pixel position on the current line.
+SKIP compares the beam position as WAIT does, but it does not wait. If the beam **has reached** the position in this frame, the copper skips the next instruction; if not, it runs it. A pixel-only SKIP, `CSKIPP pixel`, compares only the pixel position on the current line.
 
 ### JUMP
 
@@ -640,28 +635,25 @@ The simplest way to give every line its own colour is to write out one block per
             include "hw.inc"
             include "copper.inc"
 
-HBLANK      equ     720
-
             cnop    0,4
 gradient:   CMOVEL  BGCOLOR,$0000FF     ; line 0, set in the vertical blank
-            CWAIT   0,HBLANK            ; the blank after line 0
+            CWAIT   VID_Y0+1,0          ; the blank before line 1
             rept    575                 ; lines 1-575
             CMOVEL  BGCOLOR,((((REPTN+1)*7)>>4)<<16)|(255-(((REPTN+1)*7)>>4))
-            CWAITP  HBLANK              ; the next line's blank
+            CWAITP  0                   ; the next line's blank
             endr
             CSTOP
 ```
 
-The ordinary WAIT for line 0 starts the run on the right line; every WAIT after it is pixel-only and simply waits for the next horizontal blank. The last `CWAITP` waits through line 575, and STOP follows. The gradient can share the screen with any layers: the background shows wherever no layer has a pixel.
+The ordinary WAIT for the start of line 1 starts the run on the right line; every WAIT after it is pixel-only and simply waits for the start of the next line's horizontal blank. The last `CWAITP` waits through line 575, the picture's last, until the frame ends and the list starts again. The gradient can share the screen with any layers: the background shows wherever no layer has a pixel.
 
 If the CPU should make the colours (for example to animate them), it can build the same list in memory. A MOVE is the register offset in the high word and the data in the low word, and a WAIT is made from the `COP_` equates in `hw.inc`:
 
 ```asm
-; Build one line's block at a0: WAIT pixel only for the horizontal blank,
-; then BGCOLOR = d0 ($00RRGGBB)
-HBLANK      equ     720
+; Build one line's block at a0: WAIT pixel only for pixel 0, the start of
+; the horizontal blank, then BGCOLOR = d0 ($00RRGGBB)
 
-line_block: move.l  #COP_EXT|(COP_OP_WAIT<<COP_OP_SHIFT)|COP_PIXONLY|HBLANK,(a0)+
+line_block: move.l  #COP_EXT|(COP_OP_WAIT<<COP_OP_SHIFT)|COP_PIXONLY|0,(a0)+
             swap    d0
             move.w  #BGCOLOR,(a0)+      ; MOVE to the high half ...
             move.w  d0,(a0)+            ; ... red
@@ -682,22 +674,20 @@ When the same thing happens on every line, a loop makes the list short. This one
             include "hw.inc"
             include "copper.inc"
 
-HBLANK      equ     720
-
             cnop    0,4
 scan_list:  CMOVEL  BGCOLOR,$000000     ; black from line 0
-            CWAIT   99,HBLANK           ; the blank before line 100
+            CWAIT   VID_Y0+100,0        ; the blank before line 100
 stripes:    CMOVE   BGCOLOR+2,$00C0     ; even lines: blue $0000C0
-            CWAITP  HBLANK
+            CWAITP  0
             CMOVE   BGCOLOR+2,$0060     ; odd lines: blue $000060
-            CWAITP  HBLANK
-            CSKIP   399,0               ; on line 399 already? leave the loop
+            CWAITP  0
+            CSKIP   VID_Y0+400,0        ; reached line 400? leave the loop
             CJUMP   stripes
             CMOVE   BGCOLOR+2,$0000     ; black again from line 400
             CSTOP
 ```
 
-Follow the loop through once. The first MOVE lands in the blank before line 100 and sets line 100's colour. The first pixel-only WAIT ends in the blank after line 100, and the second MOVE sets line 101. The second WAIT ends in the blank after line 101. The SKIP asks: has the beam reached line 399? Not yet, so the JUMP runs and the loop goes round. On the 150th pass the second WAIT ends in the blank after line 399, the SKIP skips the JUMP, and the last MOVE makes line 400 black. Seven instructions do the work of 600.
+Follow the loop through once. The first MOVE lands at the start of line 100, in its horizontal blank, and sets line 100's colour. The first pixel-only WAIT ends at the start of line 101, and the second MOVE sets line 101. The second WAIT ends at the start of line 102. The SKIP asks: has the beam reached line 400? Not yet, so the JUMP runs and the loop goes round. On the 150th pass the second WAIT ends at the start of line 400, the SKIP skips the JUMP, and the last MOVE makes line 400 black. Seven instructions do the work of 600.
 
 ---
 
@@ -733,12 +723,12 @@ plain:      CSTOP                       ; list 2: no effect
 
 stripes_list:                           ; list 2: the scan lines of Example 5-5
             CMOVEL  BGCOLOR,$000000
-            CWAIT   99,HBLANK
+            CWAIT   VID_Y0+100,0
 .loop:      CMOVE   BGCOLOR+2,$00C0
-            CWAITP  HBLANK
+            CWAITP  0
             CMOVE   BGCOLOR+2,$0060
-            CWAITP  HBLANK
-            CSKIP   399,0
+            CWAITP  0
+            CSKIP   VID_Y0+400,0
             CJUMP   .loop
             CMOVE   BGCOLOR+2,$0000
             CSTOP
@@ -773,7 +763,7 @@ The place saved is the instruction that was not finished: a WAIT that was still 
 
 A background list has to follow a few rules:
 
-- **No beam WAITs.** A WAIT for a beam position counts in frame order, so after a resume it would wait for that position in the new frame. Use `CWAITB 576,0`: line 576, pixel 0 is the first position of every frame, so this waits for the DMA engine only.
+- **No beam WAITs.** A WAIT for a beam position waits for it in the current frame, so after a resume it would wait for that position in the new frame. Use `CWAITB 0,0`: beam line 0, pixel 0 is the first position of every frame, and always passed, so this waits for the DMA engine only.
 - **Keep MOVE pairs together, and no strobes between them.** If the cut-off comes between the two halves of a `CMOVEL`, the copper runs again from the high half, so the pair is always written whole. Anything between the halves would run twice too.
 - **End by pointing COP2LC at an idle list.** Otherwise the next COPJMP2 runs the list again from the last place saved.
 - **The CPU hands out work only when the copper is idle.** While a background list runs, the hardware may overwrite COP2LC at the next vertical blank. So the CPU writes COP2LC only when the copper is in the idle list: COPPC tells it where the copper is, or the idle list can raise a COPINT when it is reached.
@@ -790,13 +780,13 @@ idle:       CSTOP                                   ; list 2 when there is no wo
 
 jobs:       CMOVEL  DMX0+DMX_CHDESC,JOB1
             CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M
-            CWAITB  576,0                           ; until the engine is idle
+            CWAITB  0,0                             ; until the engine is idle
             CMOVEL  DMX0+DMX_CHDESC,JOB2
             CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M
-            CWAITB  576,0
+            CWAITB  0,0
             CMOVEL  DMX0+DMX_CHDESC,JOB3
             CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M
-            CWAITB  576,0
+            CWAITB  0,0
             CMOVEL  COP2LC,idle                     ; done: back to the idle list
             CMOVE   COPINT+2,0                      ; tell the CPU
             CSTOP
@@ -833,7 +823,6 @@ The CPU builds a list with a 16-line bar of colours in the background, at a line
             include "hw.inc"
             include "copper.inc"
 
-HBLANK      equ     720
 LISTA       equ     $00A000             ; two list buffers in Chip RAM
 LISTB       equ     $00A400
 C_WAIT      equ     COP_EXT|(COP_OP_WAIT<<COP_OP_SHIFT)
@@ -861,14 +850,14 @@ raster:     lea     LISTA,a2            ; a2: the buffer to build in
 build:      movem.l d0-d2/a1,-(sp)
             move.l  #BG_HI|$0000,(a0)+  ; black from line 0, set in the blank
             move.l  #BG_LO|$0000,(a0)+
-            subq.w  #1,d0               ; each colour goes in the blank before its line
+            add.w   #VID_Y0,d0          ; the beam line: each colour goes at its start
             lea     bar_colours(pc),a1
             moveq   #16,d2              ; 16 bar lines, then black
 .line:      moveq   #0,d1
             move.w  d0,d1
             swap    d1                  ; the line, in bits 26-16
-            or.l    #C_WAIT|HBLANK,d1
-            move.l  d1,(a0)+            ; WAIT line, HBLANK
+            or.l    #C_WAIT|0,d1
+            move.l  d1,(a0)+            ; WAIT line, pixel 0: its horizontal blank
             move.w  #BGCOLOR,(a0)+      ; MOVE BGCOLOR (high half): red
             move.w  (a1)+,(a0)+
             move.w  #BGCOLOR+2,(a0)+    ; MOVE BGCOLOR+2 (low half): green, blue
@@ -899,12 +888,12 @@ On the Amiga, a split screen is made by the copper writing new plane pointers pa
 
 The timing comes from "Writing new pointers partway down" in the playfield chapter:
 
-- **CTRL** for line L + 1 must be written during the visible part of line L (before pixel 720).
-- **The pointers** for line L + 1 must be written after the layer's last fetch on line L, and before the horizontal blank starts at pixel 720. The layer stops fetching about 32 source pixels (here 64 screen pixels) before its window's right edge, at 680, so the gap is from about pixel 616 to 720.
+- **CTRL** for line L + 1 must be written during the visible part of line L (before the end of line L, beam pixel 864, where line L + 1's horizontal blank starts).
+- **The pointers** for line L + 1 must be written after the layer's last fetch on line L, and before line L + 1 starts. The layer stops fetching about 32 source pixels (here 64 screen pixels) before its window's right edge, at beam pixel 824 (picture pixel 680), so the gap is from about beam pixel 760 to the end of the line, 864.
 - A pointer written in that gap is used as written: it is the start of line L + 1, and nothing is added to it. BPLSTRIDE stays 40, which suits the panel too, since its planes are also 40 bytes per line.
 - With vertical scaling, the split must come after the **last** copy of a source line. At 2× down, starting at line 32, the copies are lines 32 and 33, 34 and 35, and so on; line 415 is a last copy.
 
-So the list waits for pixel 648 on line 415 and writes three registers: six MOVEs, which must all be done by pixel 720. The first is already fetched; at normal priority each of the others may take about 200 ns, so the last lands near pixel 675. That fits, but on a busy screen other DMA could hold the copper up. Setting COPCON.PRI to 1 makes sure it is not (see "Copper Timing").
+So the list waits for beam pixel 792 (picture pixel 648) on line 415 and writes three registers: six MOVEs, which must all be done by the end of the line, beam pixel 864. The first is already fetched; at normal priority each of the others may take about 200 ns, so the last lands near beam pixel 819. That fits, but on a busy screen other DMA could hold the copper up. Setting COPCON.PRI to 1 makes sure it is not (see "Copper Timing").
 
 ```asm
 ; Example 5-9: a split screen. From line 416 the layer shows a 2-plane
@@ -914,7 +903,7 @@ So the list waits for pixel 648 on line 415 and writes three registers: six MOVE
 
 PANEL       equ     $050000             ; the panel: 320 x 64, 2 separate planes
 PANELPLANE  equ     ROWBYTES*64         ; 2560 bytes per plane
-SPLIT       equ     WIN_Y+2*192         ; line 416: the panel's first line
+SPLIT       equ     WIN_Y+2*192         ; beam line 465 (line 416): the panel's first
 CTRL_PANEL  equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|((2-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|(1<<L_CTRL_PALOFS_B)
 
             cnop    0,4
@@ -924,7 +913,7 @@ copper_list:
             CMOVEL  L0+L_BPL1PT,SCREEN+1*PLANESIZE
             CMOVEL  L0+L_BPL2PT,SCREEN+2*PLANESIZE
             CMOVEL  L0+L_BPL3PT,SCREEN+3*PLANESIZE
-            CWAIT   SPLIT-1,WIN_X+2*WIDTH-32    ; line 415, pixel 648: last fetch done
+            CWAIT   SPLIT-1,WIN_X+2*WIDTH-32    ; line 415, beam pixel 792: last fetch done
             CMOVEL  L0+L_CTRL,CTRL_PANEL        ; from line 416: 2 planes, colours 16-19
             CMOVEL  L0+L_BPL0PT,PANEL           ; used as written for line 416
             CMOVEL  L0+L_BPL1PT,PANEL+PANELPLANE
@@ -953,15 +942,15 @@ copper_list:
             CMOVEL  L0+L_BPL1PT,SCREEN+1*PLANESIZE
             CMOVEL  L0+L_BPL2PT,SCREEN+2*PLANESIZE
             CMOVEL  L0+L_BPL3PT,SCREEN+3*PLANESIZE
-            CWAIT   200,0                   ; the start of line 200
+            CWAIT   VID_Y0+200,0            ; the start of line 200
 midline:    CMOVE   PALETTE+2*4,$0000       ; colour 2's new high half: held
-            CWAITP  360                     ; the middle of this line
+            CWAITP  VID_X0+360              ; the middle of this line
             CMOVE   PALETTE+2*4+2,$80FF     ; colour 2 = $0080FF, exactly here
             CMOVE   PALETTE+1*4+2,$FF00     ; colour 1 = $FFFF00, a fetch later
-            CWAITP  HBLANK                  ; the horizontal blank
+            CWAITP  0                       ; the next line's horizontal blank
             CMOVEL  PALETTE+2*4,$FF0000     ; both back for the next line
             CMOVE   PALETTE+1*4+2,$FFFF
-            CSKIP   299,HBLANK              ; after line 299? leave the loop
+            CSKIP   VID_Y0+300,0            ; past line 299? leave the loop
             CJUMP   midline
             CSTOP
 ```
@@ -987,7 +976,7 @@ copper_list:
             CMOVEL  L0+L_BPL1PT,SCREEN+1*PLANESIZE
             CMOVEL  L0+L_BPL2PT,SCREEN+2*PLANESIZE
             CMOVEL  L0+L_BPL3PT,SCREEN+3*PLANESIZE
-            CWAIT   WIN_Y+2*HEIGHT,0    ; line 544: the window has been shown
+            CWAIT   WIN_Y+2*HEIGHT,0    ; beam line 593 (line 544): the window is done
             CMOVE   COPINT+2,0          ; interrupt the CPU
             CSTOP
 
@@ -1028,10 +1017,10 @@ JOB1        equ     $060000
 JOB2        equ     $060100
 
             cnop    0,4
-dma_list:   CWAIT   0,0                             ; the start of the picture
+dma_list:   CWAIT   VID_Y0,0                        ; the start of the picture
             CMOVEL  DMX0+DMX_CHDESC,JOB1            ; channel 0: the first job ...
             CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M    ; ... start it
-            CWAITB  300,0                           ; line 300, and the engine idle
+            CWAITB  VID_Y0+300,0                    ; line 300, and the engine idle
             CMOVEL  DMX0+DMX_CHDESC,JOB2            ; the second job
             CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M
             CSTOP
@@ -1252,25 +1241,25 @@ A subroutine that draws an 8-line raster bar from the line it is called on, in t
 ; green and blue; Y counts the lines.
 
             cnop    0,4
-bars_list:  CWAIT   100,0
+bars_list:  CWAIT   VID_Y0+100,0
             CLDI    CX,$0040            ; a dark blue bar ...
             CCALL   bar
-            CWAIT   250,0
+            CWAIT   VID_Y0+250,0
             CLDI    CX,$4000            ; ... a green one ...
             CCALL   bar
-            CWAIT   400,0
+            CWAIT   VID_Y0+400,0
             CLDI    CX,$4040            ; ... and a cyan one
             CCALL   bar
             CSTOP
 
 bar:        CLDI    CY,8                ; 8 lines
-.line:      CWAITP  HBLANK              ; the end of this line
+.line:      CWAITP  0                   ; the next line's horizontal blank
             CMOVR   BGCOLOR+2,CX        ; the next line's colour
             CADDI   CX,$1010            ; a little brighter
             CSUBI   CY,1
             CSKIPEQ                     ; 8 lines done?
             CJUMP   .line
-            CWAITP  HBLANK
+            CWAITP  0
             CMOVE   BGCOLOR+2,$0000     ; back to black
             CRET
 ```
@@ -1289,7 +1278,7 @@ The storage registers are a mailbox between the CPU and the copper. Here the CPU
 mail_list:  CLD     CX,CR1              ; frames + 1
             CADDI   CX,1
             CST     CR1,CX
-            CWAIT   200,0
+            CWAIT   VID_Y0+200,0
             CLD     CX,CR0              ; the colour the CPU left
             CMOVR   BGCOLOR+2,CX
             CSTOP
@@ -1330,7 +1319,7 @@ jobs:       CLDI    CY,JOBS&$FFFF       ; the first descriptor
 .next:      CMOVE   DMX0+DMX_CHDESC,JOBS>>16    ; descriptor, high half (held) ...
             CMOVR   DMX0+DMX_CHDESC+2,CY        ; ... low half: written whole
             CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M    ; start it
-            CWAITB  576,0               ; until the engine is idle
+            CWAITB  0,0                 ; until the engine is idle
             CADDI   CY,JOBSIZE
             CCMPI   CY,(JOBS+NJOBS*JOBSIZE)&$FFFF
             CSKIPHS                     ; all 100 done?
@@ -1383,10 +1372,10 @@ The copper's writes take effect exactly as the CPU's do:
 | Palette, VIDCON.DIRECT, VIDCON.BLANKALL | At once, from the next pixel |
 | BPLxPT, BPLSTRIDE | At once: they are live. BPLSTRIDE is used when the line's last word is fetched. A copper write to a pointer wins over the display's own change in the same clock, and also sets the pointer's saved line start |
 | BPLxDAT | At once; a write of BPL0DAT completes a group for a layer with no DMA |
-| CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line: to change line L, write during the visible part of line L − 1 |
-| PRIO, BGCOLOR | At the start of each line: write during line L − 1 to change line L |
+| CTRL, WINX, WINY, SCROLLX | At the start of each line's horizontal blank (beam pixel 0): to change line L, write during the visible part of line L − 1 |
+| PRIO, BGCOLOR | At the start of each line's picture (beam pixel 144): write in line L's horizontal blank, or earlier, to change line L |
 
-A good rule: make changes for the next line in the horizontal blank (pixel 720 on), except CTRL, WINX, WINY and SCROLLX, which must be written before pixel 720 of the line before, and the plane pointers, which have their own window (Example 5-9).
+A good rule: make changes for line L in its horizontal blank, after `CWAIT VID_Y0+L,0`, except CTRL, WINX, WINY and SCROLLX, which must be written before the end of the line before, and the plane pointers, which have their own window (Example 5-9).
 
 ### How fast the copper runs
 
@@ -1395,7 +1384,7 @@ Each instruction is two 16-bit words, two memory cycles. The copper has its own 
 | Where the beam is | Fetch speed (normal priority) |
 |-------------------|-------------------------------|
 | Visible part of a line | At least about 20 MB/s: one instruction every 200 ns (about 5 pixels) or better |
-| Horizontal blank | Faster: the display fetches only the first two groups of each layer's next line |
+| Horizontal blank | Faster: the display fetches only the first two groups of each layer's line |
 | Vertical blank | Much faster: the display fetches nothing, so cycles 1 and 3 are free too |
 
 Plan with the slow figure. Then:
@@ -1424,14 +1413,14 @@ At every level, a display fetch that is about to be late still comes first, so r
 When to use them:
 
 - **PRI 0** for almost every list. Copper lists are short, and most of the copper's time is spent waiting.
-- **PRI 1** when a burst of writes must fit in a short gap: new plane pointers between a layer's last fetch and the horizontal blank (Example 5-9), many colour changes in one horizontal blank, or writes on a screen that is close to its fetch budget, where the display leaves few spare cycles. The cost is small: the DMA engine and audio wait a little.
+- **PRI 1** when a burst of writes must fit in a short gap: new plane pointers between a layer's last fetch and the start of the next line (Example 5-9), many colour changes in one horizontal blank, or writes on a screen that is close to its fetch budget, where the display leaves few spare cycles. The cost is small: the DMA engine and audio wait a little.
 - **PRI 2** only when even that is not enough, for short bursts. It slows the CPU while the copper fetches.
 
 The copper can write COPCON itself, so a list can raise its priority just before a burst and lower it after:
 
 ```asm
         CMOVE   COPCON+2,COPCON_EN_M|(1<<COPCON_PRI_B)  ; high priority ...
-        CWAIT   415,648
+        CWAIT   VID_Y0+415,VID_X0+648
         CMOVEL  L0+L_BPL0PT,$050000                     ; ... for the burst
         CMOVEL  L0+L_BPL1PT,$050A00
         CMOVE   COPCON+2,COPCON_EN_M                    ; normal again
@@ -1474,7 +1463,7 @@ Some consequences:
 |-------------|-------|--------------------|------|
 | MOVE | `CMOVE reg,value` | 0, offset (30–16, even), data (15–0) | Writes 16 bits to the register half at offset; a high half is held until its low half follows |
 | MOVE × 2 | `CMOVEL reg,value` | Two MOVEs: reg, then reg + 2 | Writes a whole 32-bit register |
-| WAIT | `CWAIT line,pixel` | `$80000000` + line << 16 + pixel | Waits until the beam reaches the position, in frame order |
+| WAIT | `CWAIT line,pixel` | `$80000000` + line << 16 + pixel | Waits until the beam reaches the position in this frame |
 | WAIT (P) | `CWAITP pixel` | `$88000000` + pixel | Waits for the pixel position on this line, or the next if passed |
 | WAIT (B) | `CWAITB line,pixel` | `$80008000` + line << 16 + pixel | As WAIT, and until the DMA engine is idle |
 | SKIP | `CSKIP line,pixel` | `$90000000` + line << 16 + pixel | Skips the next instruction if the beam has reached the position |
@@ -1488,7 +1477,7 @@ Some consequences:
 | RET | `CRET` | `$F8000000` | Continues at the popped address |
 | (reserved) | | Other patterns | Act as STOP and set COPSTAT.ERR |
 
-Line and pixel are 11 bits each (0–2047), counted as in BEAMPOS. Positions are in **frame order**: lines 576–624 first, then 0–575.
+Line and pixel are 11 bits each (0–2047), in beam coordinates, counted as in BEAMPOS: line 0 is the start of the vertical blank and the picture is lines 49–624 (VID_Y0 on); pixel 0 is the start of a line's horizontal blank and the picture is pixels 144–863 (VID_X0 on). The list starts at (0, 0), and positions only go up through a frame.
 
 ---
 
@@ -1499,7 +1488,7 @@ All offsets are from CUSTOM (`$E00000`). Access: R read only, W write only, RW r
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
 | COPCON | `$700` | RW | EN (0): copper on. IRQEN (1): COPINT raises the interrupt. RESUME (2): the vertical blank saves list 2's place in COP2LC. STKKEEP (3): the vertical blank keeps the stack. PRI (5–4): 0 normal, 1 high, 2 nasty |
-| COP1LC | `$704` | RW | List 1 address (22–2): restarted at every vertical blank |
+| COP1LC | `$704` | RW | List 1 address (22–2): restarted at the start of every frame (beam line 0) |
 | COP2LC | `$708` | RW | List 2 address (22–2). Written by the hardware only with COPCON.RESUME |
 | COPJMP1 | `$70C` | W | Strobe: start again at COP1LC now |
 | COPJMP2 | `$710` | W | Strobe: continue at COP2LC now |

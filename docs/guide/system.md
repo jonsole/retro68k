@@ -387,7 +387,7 @@ From then on, address 0 is Chip RAM for reading and writing. The overlay comes b
 
 The boot ROM in the current build checks the machine and reports over the USB serial link and on the screen:
 
-1. It turns on the USB serial link and an 80 × 30 text console, drawn into a 1-plane 640 × 480 bitmap layer centred in the 720 × 576 screen at (40, 48), with the background colour as a border.
+1. It turns on the USB serial link and an 80 × 30 text console, drawn into a 1-plane 640 × 480 bitmap layer centred in the 720 × 576 picture, 40 pixels in and 48 lines down, with the background colour as a border.
 2. It prints a banner and checks SYSID.
 3. It builds the vector table in Chip RAM and turns the overlay off.
 4. It tests Chip RAM, from `$040000` to the end of RAM.

@@ -46,7 +46,7 @@ If you have programmed the Amiga's sprites, the main ideas carry over: eight spr
 - Examples are 68000 assembly language for vasm, in Motorola syntax, and start with `include "hw.inc"`; those that use the copper also `include "copper.inc"`.
 - In ordinary code **a4 holds CUSTOM** (`$E00000`), as in the other chapters.
 - In `hw.inc`, `SPR0` … `SPR7` are the offsets of the eight sprites in the custom block (`$520`, `$540` … `$600`: 32 bytes apart), and `SPR_PT`, `SPR_H`, `SPR_V`, `SPR_CTL` and `SPR_DAT` are the offsets of the registers inside a sprite. So sprite 3's window across is `SPR3+SPR_H(a4)`. The same address also has a ready-added name, `SPR3_H`.
-- The screen is 720 × 576 (see the Playfield Hardware chapter). Pixel 720 is the first pixel of the horizontal blank; line 576 is the first line of the vertical blank.
+- Sprite positions are in **beam coordinates**, which count the blanking (see "Beam coordinates" in the Playfield Hardware chapter): the 720 × 576 picture is beam pixels 144–863 and beam lines 49–624. `hw.inc` gives the picture's top left corner as `VID_X0` (144) and `VID_Y0` (49), so picture position (x, y) is beam position (VID_X0 + x, VID_Y0 + y). In the text, "pixel 200, line 100" is a picture position unless it is called a beam pixel or beam line.
 
 ### About this chapter
 
@@ -70,14 +70,14 @@ The image must be in Chip RAM, at an even address.
 
 Two registers give the sprite's window, as WINX and WINY give a layer's:
 
-- **SPRxH**: HSTART (bits 11–0), the first screen pixel of the sprite, and HSTOP (bits 27–16), the pixel just after it.
-- **SPRxV**: VSTART (bits 10–0), the first line, and VSTOP (bits 26–16), the line just after it.
+- **SPRxH**: HSTART (bits 10–0), the first beam pixel of the sprite, and HSTOP (bits 26–16), the beam pixel just after it.
+- **SPRxV**: VSTART (bits 10–0), the first beam line, and VSTOP (bits 26–16), the beam line just after it.
 
-So a 32 × 24 sprite with its top left corner at pixel 200, line 100 has HSTART = 200, HSTOP = 232, VSTART = 100 and VSTOP = 124:
+So a 32 × 24 sprite with its top left corner at pixel 200, line 100 of the picture has HSTART = VID_X0 + 200 = 344, HSTOP = 376, VSTART = VID_Y0 + 100 = 149 and VSTOP = 173:
 
 ```asm
-        move.l  #(232<<16)|200,SPR0+SPR_H(a4)
-        move.l  #(124<<16)|100,SPR0+SPR_V(a4)
+        move.l  #((VID_X0+232)<<16)|(VID_X0+200),SPR0+SPR_H(a4)
+        move.l  #((VID_Y0+124)<<16)|(VID_Y0+100),SPR0+SPR_V(a4)
 ```
 
 The window also sets the image's size: there is no separate width or height register. The hardware works out from the window how many words each line of the image has (see "The Window and the Image's Size").
@@ -141,8 +141,8 @@ start:      move.w  #$2700,sr
             move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_SPREN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
 
-            move.w  #100,d6             ; x
-            move.w  #50,d7              ; y
+            move.w  #VID_X0+100,d6      ; x, beam pixel
+            move.w  #VID_Y0+50,d7       ; y, beam line
             moveq   #3,d4               ; dx
             moveq   #2,d5               ; dy
 
@@ -156,7 +156,6 @@ start:      move.w  #$2700,sr
             add.w   #BW,d0
             swap    d0
             move.w  d6,d0               ; HSTOP in the high half, HSTART in the low
-            and.l   #$0FFF0FFF,d0
             move.l  d0,SPR0+SPR_H(a4)
             move.w  d7,d0
             add.w   #BH,d0
@@ -165,18 +164,18 @@ start:      move.w  #$2700,sr
             move.l  d0,SPR0+SPR_V(a4)
             move.l  #BALL,SPR0+SPR_PT(a4)
 
-            ; move, bouncing off the edges
+            ; move, bouncing half off each edge (unsigned: all positive)
             add.w   d4,d6
-            cmp.w   #-BW/2,d6
-            ble.s   .bx
-            cmp.w   #720-BW/2,d6
-            blt.s   .xok
+            cmp.w   #VID_X0-BW/2,d6
+            bls.s   .bx
+            cmp.w   #VID_X0+VID_W-BW/2,d6
+            blo.s   .xok
 .bx:        neg.w   d4
 .xok:       add.w   d5,d7
-            cmp.w   #0,d7
-            ble.s   .by
-            cmp.w   #576-BH,d7
-            blt.s   .frame
+            cmp.w   #VID_Y0-BH/2,d7
+            bls.s   .by
+            cmp.w   #VID_Y0+VID_H-BH/2,d7
+            blo.s   .frame
 .by:        neg.w   d5
             bra.s   .frame
 
@@ -212,7 +211,7 @@ draw:       lea     BALL,a0
             rts
 ```
 
-The ball goes half off the left and right edges before it bounces: the hardware clips it there, as "Positioning and Clipping" explains. At the top and bottom it bounces at the edge.
+The ball goes half off each edge of the picture before it bounces: the hardware clips it there, as "Positioning and Clipping" explains. Its position is always a positive beam position, so the program compares it unsigned (`BLS`, `BLO`).
 
 ---
 
@@ -260,30 +259,33 @@ There is no limit on the size except the memory's speed (see "Sprite DMA"): a sp
 
 A sprite shows in its window once per frame. If HSTOP is not greater than HSTART, or VSTOP not greater than VSTART, the window is empty and the sprite does not show. After reset all the windows are empty.
 
-To hide a sprite, turn its bit in SPRDMA off, or set VSTART to 576 or more.
+To hide a sprite, turn its bit in SPRDMA off, or set VSTART to 625 (BEAM_H) or more.
 
 ---
 
 ## Positioning and Clipping
 
-HSTART and HSTOP are **signed** 12-bit numbers, so a sprite can start left of the screen. In assembly, mask negative values to 12 bits: a sprite from pixel −20 to 12 is
+HSTART, HSTOP, VSTART and VSTOP are **unsigned** 11-bit beam coordinates: beam pixels 0–863 across and beam lines 0–624 down, of which the picture is pixels 144–863 and lines 49–624. A beam line starts with its horizontal blank, and a frame with its vertical blank, so a sprite can start left of or above the picture with ordinary positive numbers. A 32-pixel sprite hanging 20 pixels off the left edge, at picture pixels −20 to 11, is
 
 ```asm
-        move.l  #(12<<16)|(-20&$FFF),SPR0+SPR_H(a4)
+        move.l  #((VID_X0+12)<<16)|(VID_X0-20),SPR0+SPR_H(a4)    ; beam pixels 124-155
 ```
 
-The hardware clips a sprite at three edges:
+The hardware clips a sprite at all four edges:
 
-- **Left.** Pixels left of pixel 0 are not shown. They are still fetched, so the sprite costs the same memory. A sprite's line starts in the horizontal blank of the line before it, 144 pixels before the screen's left edge, so HSTART can be no lower than **−144**: a sprite can hang off the left edge by up to 144 pixels.
-- **Right.** Pixels from 720 on are not shown, and not fetched.
-- **Bottom.** Lines from 576 on are not shown, and not fetched.
+- **Left.** Pixels in the horizontal blank, before beam pixel 144, are not shown. They are still fetched, so the sprite costs the same memory. HSTART can be as low as 0, so a sprite can hang off the left edge by up to 144 pixels.
+- **Top.** Lines in the vertical blank, before beam line 49, are not shown. They are still fetched and used up, so the first line that shows is the right line of the image: there is nothing to do in software. VSTART can be as low as 0, so a sprite can hang off the top by up to 49 lines (but see below).
+- **Right.** Pixels from beam pixel 864 on are not shown, and not fetched. An HSTOP above 864 counts as 864.
+- **Bottom.** Lines from beam line 625 on are not shown, and not fetched. A VSTOP above 625 counts as 625.
 
-At the **top**, VSTART cannot be above line 0. To show a sprite partly above the screen, do the clipping yourself: point SPRxPT at the image's first visible line, set VSTART to 0, and set VSTOP to the number of lines still showing. For a 24-line sprite that should start at line −10:
+For a 24-line sprite whose top 10 lines are above the picture:
 
 ```asm
-        move.l  #(14<<16)|0,SPR0+SPR_V(a4)          ; lines 0-13
-        move.l  #BALL+10*16,SPR0+SPR_PT(a4)         ; from its 11th line (16 bytes a line)
+        move.l  #((VID_Y0+14)<<16)|(VID_Y0-10),SPR0+SPR_V(a4)    ; beam lines 39-62
+        move.l  #BALL,SPR0+SPR_PT(a4)       ; the whole image: lines 0-9 are fetched, not shown
 ```
+
+**Do not start a sprite on beam line 0 or 1.** The DMA needs a moment after the frame starts, and after SPRxPT is written, to fetch the sprite's first words. Those lines are in the vertical blank, so this matters only for a sprite that hangs more than 47 lines off the top.
 
 ---
 
@@ -291,7 +293,7 @@ At the **top**, VSTART cannot be above line 0. To show a sprite partly above the
 
 ### When writes take effect
 
-Writing a sprite's SPRxPT, SPRxH, SPRxV or SPRxCTL **starts the sprite again**: the hardware empties its FIFO, takes the new settings, and fetches the image afresh from SPRxPT's current value. The same happens to all eight sprites at the start of each vertical blank. This makes the registers simple to use, but it brings two rules:
+Writing a sprite's SPRxPT, SPRxH, SPRxV or SPRxCTL **starts the sprite again**: the hardware empties its FIFO, takes the new settings, and fetches the image afresh from SPRxPT's current value. The same happens to all eight sprites at the start of each frame (beam line 0, pixel 0, the start of the vertical blank). This makes the registers simple to use, but it brings two rules:
 
 1. **Write SPRxPT last.** SPRxPT moves as the image is fetched, and the DMA starts fetching as soon as the sprite is started (it fetches ahead, as "Sprite DMA" explains). If you write the pointer and then the window, the restart from the window write takes the pointer where the DMA had already moved it. Write the window and CTL first, then the pointer.
 2. **Change a sprite while it is not being drawn**: in the vertical blank, or after the sprite's last line. A write while the sprite is on the screen starts it again partway down, from wherever its pointer had got to.
@@ -318,18 +320,18 @@ Do not mix the two for one sprite in one frame: if the copper writes the pointer
 
             cnop    0,4
 spr_list:
-spr0_h:     CMOVEL  SPR0+SPR_H,(232<<16)|200        ; sprite 0: 200-231 across
-spr0_v:     CMOVEL  SPR0+SPR_V,(124<<16)|100        ;           100-123 down
+spr0_h:     CMOVEL  SPR0+SPR_H,((VID_X0+232)<<16)|(VID_X0+200)  ; sprite 0: 200-231 across
+spr0_v:     CMOVEL  SPR0+SPR_V,((VID_Y0+124)<<16)|(VID_Y0+100)  ;           100-123 down
             CMOVEL  SPR0+SPR_PT,BALL                ; pointer last
-spr1_h:     CMOVEL  SPR1+SPR_H,(432<<16)|400
-spr1_v:     CMOVEL  SPR1+SPR_V,(324<<16)|300
+spr1_h:     CMOVEL  SPR1+SPR_H,((VID_X0+432)<<16)|(VID_X0+400)
+spr1_v:     CMOVEL  SPR1+SPR_V,((VID_Y0+324)<<16)|(VID_Y0+300)
             CMOVEL  SPR1+SPR_PT,BALL
             ; ... the rest of the list (plane pointers, colour changes)
             CSTOP
 
-; Move sprite 1 to (d0, d1): its window's four values are the data words
-; at +2 and +6 of the two CMOVELs
-move1:      move.w  d0,spr1_h+6         ; HSTART (low half; mask to 12 bits if it can be negative)
+; Move sprite 1 to beam position (d0, d1): its window's four values are
+; the data words at +2 and +6 of the two CMOVELs
+move1:      move.w  d0,spr1_h+6         ; HSTART (low half)
             add.w   #32,d0
             move.w  d0,spr1_h+2         ; HSTOP (high half)
             move.w  d1,spr1_v+6         ; VSTART
@@ -338,7 +340,7 @@ move1:      move.w  d0,spr1_h+6         ; HSTART (low half; mask to 12 bits if i
             rts
 ```
 
-Call `move1` when the copper is not reading those words: for example, once the beam is past line 0, after the copper's vertical blank work is done. For many sprites, or to make the change exact, use two lists and swap them (see "Double-Buffered Lists" in the Coprocessor Hardware chapter).
+Call `move1` when the copper is not reading those words: for example, once the picture has started (BEAMPOS line VID_Y0 or more), after the copper's work at the start of the frame is done. For many sprites, or to make the change exact, use two lists and swap them (see "Double-Buffered Lists" in the Coprocessor Hardware chapter).
 
 ---
 
@@ -348,8 +350,8 @@ Call `move1` when the copper is not reading those words: for example, once the b
 
 ```asm
         ; the 32 x 24 ball at x2 by x2: a 64 x 48 window
-        move.l  #((200+64)<<16)|200,SPR0+SPR_H(a4)
-        move.l  #((100+48)<<16)|100,SPR0+SPR_V(a4)
+        move.l  #((VID_X0+200+64)<<16)|(VID_X0+200),SPR0+SPR_H(a4)
+        move.l  #((VID_Y0+100+48)<<16)|(VID_Y0+100),SPR0+SPR_V(a4)
         move.l  #(1<<SPR_CTL_BPP_B)|(1<<SPR_CTL_HMAG_B)|(1<<SPR_CTL_VMAG_B)|(2<<SPR_CTL_PAL_B),SPR0+SPR_CTL(a4)
         move.l  #BALL,SPR0+SPR_PT(a4)
 ```
@@ -407,19 +409,19 @@ SHIP2       equ     SHIP+24*16
 CTL_SHIP    equ     (1<<SPR_CTL_BPP_B)|(3<<SPR_CTL_PAL_B)
 
             cnop    0,4
-ships:      CMOVEL  SPR0+SPR_H,(232<<16)|200        ; ship 1
-            CMOVEL  SPR0+SPR_V,(124<<16)|100        ; lines 100-123
+ships:      CMOVEL  SPR0+SPR_H,((VID_X0+232)<<16)|(VID_X0+200)  ; ship 1
+            CMOVEL  SPR0+SPR_V,((VID_Y0+124)<<16)|(VID_Y0+100)  ; lines 100-123
             CMOVEL  SPR0+SPR_PT,SHIP
 
-            CWAIT   124,0                           ; ship 1 finished
-            CMOVEL  SPR0+SPR_H,(532<<16)|500        ; ship 2
-            CMOVEL  SPR0+SPR_V,(224<<16)|200        ; lines 200-223
+            CWAIT   VID_Y0+124,0                    ; ship 1 finished
+            CMOVEL  SPR0+SPR_H,((VID_X0+532)<<16)|(VID_X0+500)  ; ship 2
+            CMOVEL  SPR0+SPR_V,((VID_Y0+224)<<16)|(VID_Y0+200)  ; lines 200-223
             CMOVEL  SPR0+SPR_CTL,CTL_SHIP|(4<<SPR_CTL_PAL_B)  ; other colours (palette block 7)
             CMOVEL  SPR0+SPR_PT,SHIP
 
-            CWAIT   224,0                           ; ship 2 finished
-            CMOVEL  SPR0+SPR_H,(392<<16)|360        ; ship 3
-            CMOVEL  SPR0+SPR_V,(324<<16)|300
+            CWAIT   VID_Y0+224,0                    ; ship 2 finished
+            CMOVEL  SPR0+SPR_H,((VID_X0+392)<<16)|(VID_X0+360)  ; ship 3
+            CMOVEL  SPR0+SPR_V,((VID_Y0+324)<<16)|(VID_Y0+300)
             CMOVEL  SPR0+SPR_CTL,CTL_SHIP
             CMOVEL  SPR0+SPR_PT,SHIP2               ; another image
             CSTOP
@@ -442,7 +444,7 @@ The hardware checks every pixel on the screen for sprites touching: **SPRCOLL** 
 | 23–16 (L1) | Bit 16 + n: the same, against layer 1 |
 | 31–24 (L2) | Bit 24 + n: the same, against layer 2 |
 
-A pixel is **opaque** if it is drawn: a sprite pixel with a value other than 0; a layer pixel inside the layer's window that is not transparent (TRANSP set and value 0). Depth does not matter: a sprite behind a layer still collides with it. Only pixels on the screen count, not those clipped at the edges.
+A pixel is **opaque** if it is drawn: a sprite pixel with a value other than 0; a layer pixel inside the layer's window that is not transparent (TRANSP set and value 0). Depth does not matter: a sprite behind a layer still collides with it. Only picture pixels count, not those clipped at the edges or hanging into the blanking.
 
 The bits are **sticky**: once set, a bit stays set until you clear it by writing a 1 to it. The usual way is to read SPRCOLL once a frame, in the vertical blank, and then clear the bits you read:
 
@@ -535,33 +537,32 @@ This is useful for sprites whose image is computed rather than stored, and for e
             include "hw.inc"
             include "copper.inc"
 
-HBLANK      equ     720
 CTL_BEAM    equ     (0<<SPR_CTL_BPP_B)|(4<<SPR_CTL_PAL_B)
 
             cnop    0,4
-beam_list:  CMOVEL  SPR0+SPR_H,((360+16)<<16)|360   ; pixels 360-375
-            CMOVEL  SPR0+SPR_V,(400<<16)|100        ; lines 100-399
+beam_list:  CMOVEL  SPR0+SPR_H,((VID_X0+360+16)<<16)|(VID_X0+360)  ; pixels 360-375
+            CMOVEL  SPR0+SPR_V,((VID_Y0+400)<<16)|(VID_Y0+100)     ; lines 100-399
             CMOVEL  SPR0+SPR_CTL,CTL_BEAM           ; (these empty the FIFO: write them first)
-            ; fill the FIFO with 16 lines' worth in the vertical blank
+            ; 15 lines' worth in the vertical blank: room for one more line
             CLDI    CY,$1B1B
-            CLDI    CX,32
+            CLDI    CX,30
 beam_pre:   CMOVR   SPR0+SPR_DAT+2,CY
             CADDI   CY,$0101
             CSUBI   CX,1
             CSKIPEQ
             CJUMP   beam_pre
-            ; then 2 words a line, keeping 16 lines ahead
-            CWAIT   99,HBLANK
+            ; then 2 words a line, keeping 15 lines ahead
+            CWAIT   VID_Y0+100,0                    ; the blank before line 100
 beam_loop:  CMOVR   SPR0+SPR_DAT+2,CY
             CMOVR   SPR0+SPR_DAT+2,CY
             CADDI   CY,$0101
-            CWAITP  HBLANK
-            CSKIP   383,0
+            CWAITP  0                               ; the next line's blank
+            CSKIP   VID_Y0+385,0                    ; reached line 385? done
             CJUMP   beam_loop
             CSTOP
 ```
 
-The FIFO holds 32 words: 16 lines of this sprite. The list fills it in the vertical blank, then pushes one line's words in each horizontal blank, so the FIFO stays 16 lines ahead of the beam. The loop stops 16 lines early (at line 383), because the last 16 lines' words are already in the FIFO.
+The FIFO holds 32 words: 16 lines of this sprite. The list puts 15 lines' worth in during the vertical blank, leaving room for one line, then pushes one line's words at the start of each line, before the sprite takes that line's words; so the FIFO never overflows (a word written to a full FIFO is lost) and stays 15 lines ahead of the beam. The loop stops 15 lines early: its last push, at the start of line 384, is line 399's words, and the SKIP leaves the loop at the start of line 385.
 
 ---
 
@@ -574,8 +575,8 @@ Offsets in the custom block at `$E00000`.
 | SPRDMA | `$500` | Set/clear | SPR (7–0): DMA on for sprite n; SETCLR (15). All on after reset. Low half at `$502` |
 | SPRCOLL | `$504` | W1C | SPR (7–0), L0 (15–8), L1 (23–16), L2 (31–24): collisions, sticky |
 | SPRxPT | SPRn + `$00` | RW | The next word of the image (22–1). Write it each frame, last |
-| SPRxH | SPRn + `$04` | RW | HSTART (11–0), HSTOP (27–16), signed; HSTART no lower than −144 |
-| SPRxV | SPRn + `$08` | RW | VSTART (10–0), VSTOP (26–16) |
+| SPRxH | SPRn + `$04` | RW | HSTART (10–0), HSTOP (26–16): unsigned beam pixels (0–863; the picture is 144–863) |
+| SPRxV | SPRn + `$08` | RW | VSTART (10–0), VSTOP (26–16): unsigned beam lines (0–624; the picture is 49–624). Start on beam line 2 or later |
 | SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), HMAG (17–16), VMAG (19–18), DEPTH (21–20), PAL (27–24) |
 | SPRxDAT | SPRn + `$10` | W, R | Write: push a word (15–0) into the FIFO (DMA off). Read: words in the FIFO (5–0) |
 

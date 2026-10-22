@@ -71,29 +71,40 @@ The display has **one video mode, 576p**: 720 × 576 at 50 Hz, exactly as the CE
 |------|-------------|---------|------------------------|-----------|-------|---------|
 | 576p | 27 MHz | 720 × 576 | 864 × 625 | 32.0 µs | 20.0 ms | 50 Hz |
 
-Positions on the screen are given in **screen pixels** across (`hpixel`) and **lines** down (`vline`), both counted from 0 at the top left visible pixel. After the visible part of each line comes the **horizontal blank** (front porch, sync, back porch); after the last visible line comes the **vertical blank**, the lines from VVISIBLE (576) to the end of the frame.
+### Beam coordinates
+
+Every position the hardware uses (the beam position, LINECMP, the copper's WAIT and SKIP, layer windows and sprite windows) is given in **beam coordinates**: **beam pixels** across (`hpixel`) and **beam lines** down (`vline`). They count the blanking too. Each line starts with its **horizontal blank** (front porch, sync, back porch) and then shows its 720 pixels. Each frame starts with the **vertical blank** and then shows its 576 lines.
+
+| | Beam pixels (across) | Beam lines (down) |
+|--|--|--|
+| 0 | The start of the horizontal blank | The start of the vertical blank |
+| Blank | 0–143 | 0–48 |
+| The picture | 144–863 (720 pixels) | 49–624 (576 lines) |
+| Total | 864 per line | 625 per frame |
 
 ```
-   hpixel 0                         HVISIBLE           total
- vline 0 +-------------------------------+--------------+
-         |                               |              |
-         |        visible screen         |  horizontal  |
-         |           720 x 576           |    blank     |
-         |                               |              |
-VVISIBLE +-------------------------------+--------------+
-         |           vertical blank (49 lines)          |
-   total +----------------------------------------------+
+  hpixel  0              144 (VID_X0)                 864
+ vline 0 +--------------+------------------------------+
+         |          vertical blank (lines 0-48)        |
+      49 +--------------+------------------------------+
+(VID_Y0) |              |                              |
+         |  horizontal  |           picture            |
+         |    blank     |          720 x 576           |
+         |   (0-143)    |                              |
+     625 +--------------+------------------------------+
 
                   Figure 3-1: The Screen and the Beam
 ```
 
-The horizontal blank is 144 pixels (5.33 µs). The vertical blank is 49 lines (1.57 ms).
+The horizontal blank is 144 pixels (5.33 µs). The vertical blank is 49 lines (1.57 ms). A frame starts at beam line 0, pixel 0, and positions only go up through it.
+
+`hw.inc` gives the picture's top left corner as **VID_X0** (144) and **VID_Y0** (49), its size as **VID_W** (720) and **VID_H** (576), and the beam's total as **BEAM_W** (864) and **BEAM_H** (625). So the picture's pixel (x, y), counted from its top left corner, is at beam position (VID_X0 + x, VID_Y0 + y). This chapter calls that **picture position** (x, y) where it helps.
 
 The pixels are not quite square: on a 4:3 screen each one is 16/15 as wide as it is tall, about the shape of an Amiga PAL pixel.
 
 ### Normal screens and overscan
 
-HDMI sends exactly the visible pixels, with no border beyond them, so the whole 720 × 576 is the **overscan** area. A normal screen is a smaller window in the middle, with the background colour round it as the border, as on the Amiga:
+HDMI sends exactly the visible pixels, with no border beyond them, so the whole 720 × 576 is the **overscan** area. A normal screen is a smaller window in the middle, with the background colour round it as the border, as on the Amiga (positions here are picture positions):
 
 | Screen | Source | Window |
 |--------|--------|--------|
@@ -141,17 +152,17 @@ PLANESIZE   equ     ROWBYTES*HEIGHT     ; 10240 bytes per plane
 
 ### Step 2: Define the display window
 
-The **display window** is the rectangle of the screen where the layer shows. It is given in screen pixels and lines by WINX (XSTART in bits 26–16, XEND in bits 10–0) and WINY (YSTART and YEND, the same way). The window includes XSTART and YSTART but stops just before XEND and YEND. Outside its window, a layer is transparent.
+The **display window** is the rectangle of the screen where the layer shows. It is given in beam pixels and lines by WINX (XSTART in bits 26–16, XEND in bits 10–0) and WINY (YSTART and YEND, the same way). The window includes XSTART and YSTART but stops just before XEND and YEND. Outside its window, a layer is transparent.
 
-The picture is 320 × 256, and CTRL (step 6) will show each source pixel 2 × 2, so it covers 640 × 512 screen pixels. Centred in the 720 × 576 screen, that window starts at (40, 32):
+The picture is 320 × 256, and CTRL (step 6) will show each source pixel 2 × 2, so it covers 640 × 512 screen pixels. Centred in the 720 × 576 picture, that window starts at picture position (40, 32), which is beam position (184, 81):
 
 ```asm
-WIN_X       equ     (720-640)/2         ; 40
-WIN_Y       equ     (576-512)/2         ; 32
+WIN_X       equ     VID_X0+(VID_W-640)/2    ; 144 + 40 = 184
+WIN_Y       equ     VID_Y0+(VID_H-512)/2    ; 49 + 32 = 81
 
         lea     L0(a4),a0               ; a0 = layer 0
-        move.l  #(WIN_X<<16)|(WIN_X+640),L_WINX(a0) ; XSTART 40, XEND 680
-        move.l  #(WIN_Y<<16)|(WIN_Y+512),L_WINY(a0) ; YSTART 32, YEND 544
+        move.l  #(WIN_X<<16)|(WIN_X+640),L_WINX(a0) ; XSTART 184, XEND 824
+        move.l  #(WIN_Y<<16)|(WIN_Y+512),L_WINY(a0) ; YSTART 81, YEND 593
 ```
 
 You never set a data-fetch start or stop: the hardware works out from the window, the scale and the fine scroll which words to fetch and when.
@@ -238,7 +249,7 @@ Here are the steps put together. The picture is a pattern of 16 × 16-pixel squa
 ```asm
 ; Example 3-1: a basic playfield. A 320 x 256 picture in 4 separate
 ; bitplanes (16 colours), shown 2x across and 2x down as a 640 x 512
-; window in the middle of the 720 x 576 screen, as a PAL Amiga lores
+; window in the middle of the 720 x 576 picture, as a PAL Amiga lores
 ; screen. Assumes supervisor mode and the vector table in Chip RAM at 0.
 
             include "hw.inc"
@@ -250,8 +261,8 @@ HEIGHT      equ     256                 ; source lines
 PLANES      equ     4
 ROWBYTES    equ     WIDTH/8             ; 40 bytes per plane line
 PLANESIZE   equ     ROWBYTES*HEIGHT     ; 10240 bytes per plane
-WIN_X       equ     (720-2*WIDTH)/2     ; the window: 640 x 512 at (40, 32)
-WIN_Y       equ     (576-2*HEIGHT)/2
+WIN_X       equ     VID_X0+(VID_W-2*WIDTH)/2    ; the window: 640 x 512 at
+WIN_Y       equ     VID_Y0+(VID_H-2*HEIGHT)/2   ; picture position (40, 32)
 
 start:      move.w  #$2700,sr           ; no interrupts while we set up
             lea     CUSTOM,a4
@@ -268,9 +279,9 @@ start:      move.w  #$2700,sr           ; no interrupts while we set up
             move.l  #(2<<PRIO_BACK_B)|(1<<PRIO_MIDDLE_B)|(0<<PRIO_FRONT_B),PRIO(a4)
 
             lea     L0(a4),a0           ; a0 = layer 0
-            ; step 2: the display window, in screen pixels
-            move.l  #(WIN_X<<16)|(WIN_X+2*WIDTH),L_WINX(a0)     ; XSTART 40, XEND 680
-            move.l  #(WIN_Y<<16)|(WIN_Y+2*HEIGHT),L_WINY(a0)    ; YSTART 32, YEND 544
+            ; step 2: the display window, in beam coordinates
+            move.l  #(WIN_X<<16)|(WIN_X+2*WIDTH),L_WINX(a0)     ; XSTART 184, XEND 824
+            move.l  #(WIN_Y<<16)|(WIN_Y+2*HEIGHT),L_WINY(a0)    ; YSTART 81, YEND 593
             move.l  #0,L_SCROLLX(a0)
             ; step 3: the plane pointers
             bsr     setptrs
@@ -446,8 +457,8 @@ BM_W        equ     64
 BM_H        equ     32
 BM_PL       equ     4
 BM_LINE     equ     BM_W/8              ; 8 bytes per plane line
-BM_X        equ     400                 ; shown 2x at (400, 300)
-BM_Y        equ     300
+BM_X        equ     VID_X0+400          ; shown 2x at picture position (400, 300)
+BM_Y        equ     VID_Y0+300
 
             lea     L1(a4),a0
             move.l  #BITMAP+0*BM_LINE,L_BPL0PT(a0)
@@ -487,12 +498,12 @@ A chunky layer has one pointer, BPL0PT; the other pointers are left alone. Like 
 
 Chunky pixels are easier and faster for the CPU to draw one at a time, since one pixel is one byte (8 bpp) or one nibble (4 bpp). Planar pixels are better for drawing whole shapes plane by plane, and for using fewer bits per pixel than a chunky depth allows (3, 5, 6 or 7).
 
-A 1-bit chunky layer and a 1-plane planar layer are the same thing. The boot ROM's console uses a 1 bpp chunky layer of 640 × 480, 80 bytes per line, in a window centred in the screen at (40, 48):
+A 1-bit chunky layer and a 1-plane planar layer are the same thing. The boot ROM's console uses a 1 bpp chunky layer of 640 × 480, 80 bytes per line, in a window centred in the picture, at picture position (40, 48):
 
 ```asm
 CON         equ     $030000             ; the console: 640 x 480, 1 bit per pixel
-CON_X       equ     (720-640)/2         ; 40
-CON_Y       equ     (576-480)/2         ; 48
+CON_X       equ     VID_X0+(VID_W-640)/2    ; 144 + 40 = 184
+CON_Y       equ     VID_Y0+(VID_H-480)/2    ; 49 + 48 = 97
 
             lea     L0(a4),a0
             move.l  #CON,L_BPL0PT(a0)
@@ -529,45 +540,47 @@ There are 2 or 4 MB of Chip RAM, so even a 256-colour full screen leaves plenty 
 
 ## The Display Window
 
-Each layer has its own display window, set by WINX and WINY in screen pixels and lines:
+Each layer has its own display window, set by WINX and WINY in beam coordinates (see "Beam coordinates" in "The Screen"):
 
 | Register | Bits 26–16 | Bits 10–0 |
 |----------|------------|-----------|
 | WINX | XSTART: first pixel of the window | XEND: first pixel after the window |
 | WINY | YSTART: first line of the window | YEND: first line after the window |
 
-The window covers `XSTART ≤ hpixel < XEND` and `YSTART ≤ vline < YEND`. A full-screen window is 0, 0, HVISIBLE, VVISIBLE. Outside its window, a layer is transparent: lower layers or the background colour show through, and nothing is fetched for it.
+The window covers `XSTART ≤ hpixel < XEND` and `YSTART ≤ vline < YEND`. A full-screen window is XSTART 144, XEND 864, YSTART 49, YEND 625 (VID_X0, VID_X0 + VID_W, VID_Y0, VID_Y0 + VID_H), which is also the value after reset. Outside its window, a layer is transparent: lower layers or the background colour show through, and nothing is fetched for it.
+
+A window is clamped to the picture. A start in the blank counts as the picture's edge: the layer's first pixel then shows there, at VID_X0 or VID_Y0, so a layer is not clipped as a sprite is. An end past the last pixel or line counts as the picture's end.
 
 ```
-   0                                                    HVISIBLE
- 0 +-------------------------------------------------------+
-   |                                                       |
-   |        XSTART                    XEND                 |
-   | YSTART   +-------------------------+                  |
-   |          |                         |                  |
-   |          |   the layer's pixels    |                  |
-   |          |                         |                  |
-   | YEND     +-------------------------+                  |
-   |          (first line after the window)                |
-   +-------------------------------------------------------+
- VVISIBLE
+        VID_X0                                       VID_X0+VID_W
+ VID_Y0 +-------------------------------------------------------+
+        |                                                       |
+        |        XSTART                    XEND                 |
+        | YSTART   +-------------------------+                  |
+        |          |                         |                  |
+        |          |   the layer's pixels    |                  |
+        |          |                         |                  |
+        | YEND     +-------------------------+                  |
+        |          (first line after the window)                |
+        +-------------------------------------------------------+
+ VID_Y0+VID_H
 
                  Figure 3-6: A Layer's Display Window
 ```
 
 Because every layer has its own window, windows can overlap, sit side by side, or be stacked one above the other. A status panel at the bottom of the screen is simply a second layer with a window covering the bottom lines; it needs no copper.
 
-The window is given in **screen** pixels. With scaling (next section), the window covers fewer **source** pixels: a 640-pixel-wide window at 2× shows 320 source pixels.
+The window is given in **screen** pixels (beam pixels). With scaling (next section), the window covers fewer **source** pixels: a 640-pixel-wide window at 2× shows 320 source pixels.
 
 ### Centring a window
 
-There is one screen size, so a centred window can be worked out when you assemble. For a window W pixels wide and H lines high, XSTART is (720 − W) ÷ 2 and YSTART is (576 − H) ÷ 2. This fragment centres a 640 × 512 window, for a 320 × 256 picture at 2 × 2: it gives 40–680 across and 32–544 down.
+There is one screen size, so a centred window can be worked out when you assemble. For a window W pixels wide and H lines high, XSTART is VID_X0 + (720 − W) ÷ 2 and YSTART is VID_Y0 + (576 − H) ÷ 2. This fragment centres a 640 × 512 window, for a 320 × 256 picture at 2 × 2: it gives beam pixels 184–824 across and beam lines 81–593 down.
 
 ```asm
 WIN_W       equ     640
 WIN_H       equ     512
-WIN_X       equ     (720-WIN_W)/2       ; 40
-WIN_Y       equ     (576-WIN_H)/2       ; 32
+WIN_X       equ     VID_X0+(VID_W-WIN_W)/2  ; 184
+WIN_Y       equ     VID_Y0+(VID_H-WIN_H)/2  ; 81
 
         lea     L0(a4),a0
         move.l  #(WIN_X<<16)|(WIN_X+WIN_W),L_WINX(a0)
@@ -576,7 +589,7 @@ WIN_Y       equ     (576-WIN_H)/2       ; 32
 
 ### When window changes take effect
 
-The hardware reads CTRL, WINX, WINY and SCROLLX for each line at the start of the horizontal blank before it. **To change line L, write during the visible part of line L − 1 or earlier.** This lets you move a window or change a layer's format partway down the screen.
+The hardware reads CTRL, WINX, WINY and SCROLLX for each line at the start of its horizontal blank (beam pixel 0), before its picture. **To change line L, write during the visible part of line L − 1 or earlier.** This lets you move a window or change a layer's format partway down the screen.
 
 ### How much is fetched
 
@@ -603,8 +616,8 @@ The hardware fetches whole groups of 16 source pixels, so with fine scroll it ma
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| WINX | Ln + `$04` | RW | XSTART (26–16), XEND (10–0): window across, screen pixels |
-| WINY | Ln + `$08` | RW | YSTART (26–16), YEND (10–0): window down, screen lines |
+| WINX | Ln + `$04` | RW | XSTART (26–16), XEND (10–0): window across, beam pixels (full screen 144, 864) |
+| WINY | Ln + `$08` | RW | YSTART (26–16), YEND (10–0): window down, beam lines (full screen 49, 625) |
 | VIDSIZE | `$020` | R | VVISIBLE (26–16), HVISIBLE (10–0): the screen size |
 
 ---
@@ -622,7 +635,7 @@ Each layer can show every source pixel 1, 2, 4 or 8 times across (CTRL.HSCALE) a
 
 This gives the low-resolution looks of older machines on a modern screen, with sharp pixels:
 
-| Picture | Scale | On the 720 × 576 screen | Looks like |
+| Picture | Scale | On the 720 × 576 picture (picture position) | Looks like |
 |---------|-------|-------------------------|------------|
 | 320 × 256 | 2 × 2 | 640 × 512 at (40, 32) | Amiga PAL lores, non-interlaced |
 | 640 × 256 | 1 × 2 | 640 × 512 at (40, 32) | Amiga PAL hires, non-interlaced |
@@ -855,7 +868,7 @@ The plane pointers are not reset by the hardware. At the end of a frame each poi
 - **the copper**, which does it in the vertical blank with a few MOVE instructions in its list, as Amiga programs do (Chapter 5 has the list for Example 3-1). The boot ROM resets its own layers' pointers this way;
 - **the CPU**, in its vertical blank interrupt, which is what the examples in this chapter do.
 
-The VBLANK interrupt comes at the start of the vertical blank (line VVISIBLE, pixel 0), after the last visible line has been fetched and the pointers have stopped moving. The hardware starts fetching the next frame's first line at the start of the horizontal blank of the last line of the frame (line 624). So the handler has the whole vertical blank, 49 lines or about 1.5 ms, to write the pointers. A layer whose window starts lower down is fetched later, at the start of the horizontal blank before its YSTART.
+The VBLANK interrupt comes at the start of the frame (beam line 0, pixel 0), the start of the vertical blank, after the last picture line has been fetched and the pointers have stopped moving. The hardware starts fetching the picture's first line at the start of that line's horizontal blank (beam line 49, pixel 0). So the handler has the whole vertical blank, 49 lines or about 1.5 ms, to write the pointers. A layer whose window starts lower down is fetched later, at the start of the horizontal blank of its YSTART line.
 
 The handler is also the natural place to make any other change that must happen between frames: scroll positions, which buffer is shown, a new palette.
 
@@ -904,13 +917,14 @@ A **split screen** shows different pictures, or different parts of one picture, 
 The simplest way is to use one layer for each band. Give each layer a window covering its band, and set each one up independently: its own pointers, stride, scroll, scale and format. A layer is fetched only on the lines its window covers, so bands that do not overlap cost no extra bandwidth.
 
 ```
+ picture
  line  32 +-----------------------------------------+
           |  layer 0: game area                      |
           |  320 x 224, 5 planes, 2x, scrolling      |
-          |  WINY 32-480                             |
+          |  WINY 81-529 (VID_Y0+32 to VID_Y0+480)   |
       480 +-----------------------------------------+
           |  layer 1: status panel, 640 x 64, 2 pl.  |
-      544 +-----------------------------------------+  WINY 480-544
+      544 +-----------------------------------------+  WINY 529-593
 
             Figure 3-8: A Split Screen from Two Layers
 ```
@@ -923,15 +937,15 @@ Because the stride is used at the end of each line, changing it during a line ch
 - To repeat a line, set BPLSTRIDE to 0 for as many lines as you want it repeated.
 - To show a reflection, set BPLSTRIDE to −(row stride) and leave it there: from then on each line steps back a row.
 
-The LINE interrupt (see "Video Interrupts") is made for this: it comes at the start of line LINECMP, and its handler writes BPLSTRIDE while that line is being shown. With vertical scaling, the stride is used only after the last copy of a source line, so the change takes effect at the end of the source line being shown.
+The LINE interrupt (see "Video Interrupts") is made for this: it comes at the start of beam line LINECMP, 144 pixels before the line's picture, and its handler writes BPLSTRIDE while that line is being shown. With vertical scaling, the stride is used only after the last copy of a source line, so the change takes effect at the end of the source line being shown.
 
 ### Example 3-6: A reflection
 
-This example extends Example 3-1. From screen line 384 down (source line 176), the LINE interrupt sets the stride to step back one row per source line, so the picture above the line is reflected below it. It also switches the layer to colours 16–31, a darker set, from the next line. The vertical blank handler puts the pointers, the stride and the colours back for the next frame.
+This example extends Example 3-1. From picture line 384 down (beam line 433, source line 176), the LINE interrupt sets the stride to step back one row per source line, so the picture above the line is reflected below it. It also switches the layer to colours 16–31, a darker set, from the next line. The vertical blank handler puts the pointers, the stride and the colours back for the next frame.
 
 ```asm
 ; Example 3-6: a reflection, added to Example 3-1
-MIRROR      equ     384                 ; screen line where the reflection starts
+MIRROR      equ     VID_Y0+384          ; beam line where the reflection starts
 CTRL_TOP    equ     L_CTRL_EN_M|L_CTRL_PLANAR_M|((PLANES-1)<<L_CTRL_PLANES_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)
 
             ; in the set-up: colours 16-31 for the water, then the interrupts
@@ -971,10 +985,10 @@ mirror:     move.l  a0,-(sp)
 
 On the Amiga, the copper makes splits by writing new plane pointers in the horizontal blank. You can write the pointers at any time here too, since they are live, but you need to know exactly what the hardware does with them:
 
-- The next line's fetch begins at the **start of the horizontal blank**. During the line, the hardware keeps fetching until about 32 source pixels before the window's right edge. When it fetches the line's last word, it sets each pointer to the line's start plus BPLSTRIDE.
+- A line's fetch begins at the **start of its horizontal blank** (beam pixel 0). During the line, the hardware keeps fetching until about 32 source pixels before the window's right edge. When it fetches the line's last word, it sets each pointer to the line's start plus BPLSTRIDE.
 - A write to a pointer wins over the hardware's own change in the same clock, and it also sets that pointer's saved line start.
 
-So a pointer written during the short gap between the layer's last fetch on line L and the start of the horizontal blank is used **as written** as the start of line L + 1: nothing is added and nothing taken off. A pointer written earlier in line L is used for the rest of line L, which disturbs it; one written after the horizontal blank has started is too late for the start of line L + 1. With a full-width window the gap is under a microsecond, too short for the CPU to hit reliably; it is meant for the copper. With the CPU, use separate layers or the stride method above.
+So a pointer written during the short gap between the layer's last fetch on line L and the start of line L + 1 (its horizontal blank) is used **as written** as the start of line L + 1: nothing is added and nothing taken off. A pointer written earlier in line L is used for the rest of line L, which disturbs it; one written after line L + 1's horizontal blank has started is too late for its start. With a full-width window the gap is under a microsecond, too short for the CPU to hit reliably; it is meant for the copper. With the CPU, use separate layers or the stride method above.
 
 ---
 
@@ -1030,7 +1044,7 @@ Each layer scrolls independently, so you can scroll the two at different speeds 
 
 ### Example 3-7: Dual playfields with parallax
 
-The back layer is a 640 × 256 picture in 4 interleaved planes, colours 32–47, scrolled across one pixel per frame by the routine from Example 3-3. The front layer is 320 × 256 in 3 separate planes, colours 16–23, with a band of coloured blocks; its colour 0 is transparent. Both are 2 × 2, in the same 640 × 512 window at (40, 32) as Example 3-1. Bandwidth: 3 ÷ 8 ÷ 2 + 4 ÷ 8 ÷ 2 = 0.44 bytes per pixel, well within the budget.
+The back layer is a 640 × 256 picture in 4 interleaved planes, colours 32–47, scrolled across one pixel per frame by the routine from Example 3-3. The front layer is 320 × 256 in 3 separate planes, colours 16–23, with a band of coloured blocks; its colour 0 is transparent. Both are 2 × 2, in the same 640 × 512 window at picture position (40, 32) as Example 3-1. Bandwidth: 3 ÷ 8 ÷ 2 + 4 ÷ 8 ÷ 2 = 0.44 bytes per pixel, well within the budget.
 
 ```asm
 ; Example 3-7: two playfields, as in the Amiga's dual-playfield mode.
@@ -1039,7 +1053,7 @@ The back layer is a 640 × 256 picture in 4 interleaved planes, colours 32–47,
 ;   scrolled across one pixel per frame.
 ; Layer 0 (in front): a 320 x 256 picture in 3 separate planes, colours
 ;   16-23 (PALOFS 1), with colour 0 transparent so layer 1 shows through.
-; Both in a 640 x 512 window at (40, 32).
+; Both in a 640 x 512 window at picture position (40, 32).
 ; Assumes supervisor mode and the vector table in Chip RAM at 0.
 
             include "hw.inc"
@@ -1054,8 +1068,8 @@ BK_PL       equ     4
 BK_ROW      equ     BK_W/8              ; 80 bytes per plane line
 BK_STRIDE   equ     BK_ROW*BK_PL        ; 320 bytes from one line to the next
 VIEW_W      equ     320                 ; source pixels in the window
-WIN_X       equ     40                  ; both layers: 640 x 512 at (40, 32)
-WIN_Y       equ     32
+WIN_X       equ     VID_X0+40           ; both layers: 640 x 512 at
+WIN_Y       equ     VID_Y0+32           ; picture position (40, 32)
 
 ; layer 0: the foreground
 FRONT       equ     $060000
@@ -1325,8 +1339,8 @@ So the example uses three chunky 8 bpp layers of 160 × 256, shown 4× across an
 
 ```asm
 ; Example 3-8: a 24-bit direct-colour screen. Three chunky 8 bpp layers of
-; 160 x 256, shown 4x across and 2x down as a 640 x 512 window at (40, 32):
-; layer 0 is red, layer 1 green, layer 2 blue.
+; 160 x 256, shown 4x across and 2x down as a 640 x 512 window at
+; picture position (40, 32): layer 0 is red, layer 1 green, layer 2 blue.
 ; Bandwidth: 3 x 8 bits / 8 / 4 = 0.75 bytes per pixel. (At 2x across it
 ; would be 1.5, just over the budget of 1.48.)
 ; Assumes supervisor mode and the vector table in Chip RAM at 0.
@@ -1336,8 +1350,8 @@ So the example uses three chunky 8 bpp layers of 160 × 256, shown 4× across an
 VECTORS     equ     $000000
 WIDTH       equ     160
 HEIGHT      equ     256
-WIN_X       equ     40
-WIN_Y       equ     32
+WIN_X       equ     VID_X0+40           ; picture position (40, 32)
+WIN_Y       equ     VID_Y0+32
 RED         equ     $040000             ; 40960 bytes each
 GREEN       equ     $050000
 BLUE        equ     $060000
@@ -1442,7 +1456,7 @@ Plane 0 of each layer holds the channel's lowest bit.
 
 Each layer has eight 16-bit data registers, BPL0DAT–BPL7DAT, and eight 16-bit shift registers. There is no other storage: the data registers hold the layer's **next group** of 16 source pixels, while the shift registers show the current group. A planar group is one word per plane (plane p in BPLpDAT); a chunky group is b consecutive words for b bits per pixel, the first in BPL(b−1)DAT and the last in BPL0DAT. Either way every layer is a whole 16 pixels ahead.
 
-- At the start of the horizontal blank, each layer whose window covers the next line starts fetching. The DMA fills a group's data registers from the highest down, BPL0DAT last; the group is complete when BPL0DAT is written.
+- At the start of each line's horizontal blank (beam pixel 0), each layer whose window covers the line starts fetching. The DMA fills a group's data registers from the highest down, BPL0DAT last; the group is complete when BPL0DAT is written.
 - The shift registers take the line's first group as soon as it is complete, in the horizontal blank. That empties the data registers, so the DMA fetches the second group straight away, and it is already waiting when the window starts. (The Amiga fetches ahead of its display window in the same way.)
 - After that, each time the shifters use up a group (every 16 source pixels), they take the next one from the data registers at once, and the DMA fetches another.
 - The layers that want a word take turns, one word each, so no layer waits for more than one word from each of the others.
@@ -1501,7 +1515,7 @@ where, for a planar layer, bits per pixel is the number of planes. Vertical scal
 
 The budget applies point by point, so layers that do not overlap do not add up. A status panel **below** a game area adds nothing on the game's lines, and a narrow layer down the side of the screen counts only where it is. When you design a screen, add up the layers line by line, and across each line where windows start and stop.
 
-Fine scroll adds one word per plane per line, which is too little to matter. The fetch for each line starts at the start of the horizontal blank, so the first two groups of a window at the left edge are fetched during the blank and cost nothing in the visible part.
+Fine scroll adds one word per plane per line, which is too little to matter. The fetch for each line starts at the start of its horizontal blank, so the first two groups of a window at the left edge are fetched during the blank and cost nothing in the visible part.
 
 Each layer has one group of time in hand (its data registers). Close to the budget, very deep layers at 1× (8 planes or 8 bpp) are the first to run short.
 
@@ -1531,7 +1545,7 @@ With bitplane DMA off (DMACON.BPLEN clear, or a layer's BPLDMA all clear), a lay
 
 The timing follows the fetch rules in "How the display fetches":
 
-- At the start of each horizontal blank the hardware throws away any group still waiting in the data registers. **Write the line's first group after the horizontal blank has started.**
+- At the start of each line's horizontal blank (beam pixel 0) the hardware throws away any group still waiting in the data registers. **Write the line's first group after the horizontal blank has started.**
 - The first group goes straight into the shifters (once the blank has started), which empties the data registers again; a second group written before the window starts waits there.
 - Any further group must be written within 16 source pixels of the previous one being taken. That is short for the CPU, so in practice the CPU feeds windows of one or two groups: 16 or 32 source pixels, which scaling can stretch to 128 or 256 screen pixels.
 - If a group is missing when it is needed, the layer is transparent for it and OVERRUN is set, as usual.
@@ -1557,30 +1571,28 @@ start:      move.w  #$2700,sr
             move.l  #$202020,PALETTE+0*4(a4)
             move.l  #$FFC000,PALETTE+1*4(a4)
             lea     L0(a4),a0
-            move.l  #(232<<16)|(232+32*8),L_WINX(a0)   ; 256 screen pixels, centred
-            move.l  #(0<<16)|576,L_WINY(a0)
+            move.l  #((VID_X0+232)<<16)|(VID_X0+232+32*8),L_WINX(a0)   ; 256 screen pixels, centred
+            move.l  #(VID_Y0<<16)|(VID_Y0+VID_H),L_WINY(a0)            ; every line
             move.l  #0,L_SCROLLX(a0)
             move.l  #L_CTRL_EN_M|L_CTRL_PLANAR_M|(0<<L_CTRL_PLANES_B)|(3<<L_CTRL_HSCALE_B),L_CTRL(a0)
             move.l  #VIDCON_EN_M,VIDCON(a4)
 
-main:       move.w  VIDSIZE+2(a4),d2
-            and.w   #VIDSIZE_HVISIBLE_M,d2
-            add.w   #16,d2              ; d2 = a little way into the blank
+main:       moveq   #16,d2              ; d2 = a little way into the blank (0-143)
             move.w  #$FF00,d3           ; the pattern
-.blank:     move.w  BEAMPOS+2(a4),d0    ; low half: hpixel
+.visible:   move.w  BEAMPOS+2(a4),d0    ; low half: hpixel
             and.w   #BEAMPOS_HPIXEL_M,d0
             cmp.w   d2,d0
-            blo.s   .blank              ; wait for the horizontal blank
+            bhs.s   .visible            ; wait for the start of a line
+.blank:     move.w  BEAMPOS+2(a4),d0
+            and.w   #BEAMPOS_HPIXEL_M,d0
+            cmp.w   d2,d0
+            blo.s   .blank              ; wait until d2 pixels into its blank
             move.w  d3,L0+L_BPL0DAT+2(a4)   ; group 1: into the shifters
             move.w  d3,d0
             not.w   d0
             move.w  d0,L0+L_BPL0DAT+2(a4)   ; group 2: waits in BPL0DAT
             ror.w   #1,d3               ; the next line's pattern
-.visible:   move.w  BEAMPOS+2(a4),d0
-            and.w   #BEAMPOS_HPIXEL_M,d0
-            cmp.w   d2,d0
-            bhs.s   .visible            ; wait for the next line
-            bra.s   .blank
+            bra.s   .visible
 ```
 
 The data registers can also be read back, which is occasionally useful when debugging.
@@ -1623,12 +1635,12 @@ To give plane 4 back to the DMA, set its bit again with bit 15 set, and point BP
 
 ### The beam position
 
-BEAMPOS holds the beam's position: the line, `vline`, in bits 26–16 and the pixel, `hpixel`, in bits 10–0, both counting from 0 at the top left visible pixel. Read it with `MOVE.L`: reading the high half captures both, so the line and pixel always match. If you need only the pixel, a `MOVE.W` of the low half (BEAMPOS + 2) is enough.
+BEAMPOS holds the beam's position in beam coordinates: the line, `vline`, in bits 26–16 and the pixel, `hpixel`, in bits 10–0, both counting from 0 at the start of the blanking (see "Beam coordinates" in "The Screen"). The picture is lines 49–624 and pixels 144–863. Read it with `MOVE.L`: reading the high half captures both, so the line and pixel always match. If you need only the pixel, a `MOVE.W` of the low half (BEAMPOS + 2) is enough.
 
-While the beam is in the vertical blank, `vline` is VVISIBLE or more, and VIDSTAT.INVBLANK (bit 8) reads 1. FRAMECOUNT counts frames: it goes up by one at the start of each vertical blank and wraps at 65536.
+While the beam is in the vertical blank, `vline` is less than VID_Y0 (49), and VIDSTAT.INVBLANK (bit 8) reads 1. FRAMECOUNT counts frames: it goes up by one at the start of each frame (beam line 0, pixel 0, the start of the vertical blank) and wraps at 65536.
 
 ```asm
-; Wait until the beam reaches line d0.w (0 = the first visible line)
+; Wait until the beam reaches beam line d0.w (VID_Y0 = the first picture line)
 wait_line:  move.l  d1,-(sp)
 .w:         move.l  BEAMPOS(a4),d1      ; one read: vline and hpixel match
             swap    d1
@@ -1641,22 +1653,22 @@ wait_line:  move.l  d1,-(sp)
 
 ### Example 3-10: Colour bars
 
-The background colour is read at the start of each line, so a write during line L − 1 changes line L. This loop changes it every 8 lines from a table, which makes colour bars behind (or instead of) the layers, as Amiga programs do with the copper. It runs with interrupts off, one frame per pass.
+The background colour is read at the start of each line, so a write during beam line L − 1 changes line L. This loop changes it every 8 lines from a table, which makes colour bars behind (or instead of) the layers, as Amiga programs do with the copper. It runs with interrupts off, one frame per pass.
 
 ```asm
 ; Example 3-10: colour bars. Changes BGCOLOR every 8 lines from a table of
 ; 72 colours (576 lines). Uses wait_line, above.
 bars:       lea     CUSTOM,a4
 .frame:     lea     bar_colours+4(pc),a1
-            moveq   #7,d0               ; write during line 7 for line 8, ...
+            moveq   #VID_Y0+7,d0        ; write during picture line 7 for line 8, ...
 .bar:       bsr     wait_line
             move.l  (a1)+,BGCOLOR(a4)
             addq.w  #8,d0
-            cmp.w   #576-8,d0
-            blo.s   .bar                ; ... up to line 567 for line 568
-            move.w  #576,d0
-            bsr     wait_line           ; the vertical blank
-            move.l  bar_colours(pc),BGCOLOR(a4)     ; line 0's colour, for the next frame
+            cmp.w   #VID_Y0+VID_H-8,d0
+            blo.s   .bar                ; ... up to picture line 567 for line 568
+            moveq   #0,d0
+            bsr     wait_line           ; the start of the frame: the vertical blank
+            move.l  bar_colours(pc),BGCOLOR(a4)     ; picture line 0's colour
             bra.s   .frame
 
 bar_colours:
@@ -1671,8 +1683,8 @@ The video unit raises three interrupt sources in the interrupt controller:
 
 | Flag (VIDSTAT bit) | Source | When |
 |--------------------|--------|------|
-| VBLANK (0) | VBLANK, source 0 | Start of the vertical blank: line VVISIBLE, pixel 0 |
-| LINE (1) | LINE, source 1 | Start of line LINECMP, pixel 0 |
+| VBLANK (0) | VBLANK, source 0 | Start of the frame, the start of the vertical blank: beam line 0, pixel 0 |
+| LINE (1) | LINE, source 1 | Start of beam line LINECMP, pixel 0: the start of its horizontal blank, 144 pixels before its picture |
 | OVERRUN (4, 5, 6 for L0, L1, L2) | VIDERR, source 3 | A layer's group was not ready in time |
 
 Each flag is **sticky**: it is set by the event and stays set until you write 1 to it in VIDSTAT. It raises its interrupt only if its bit in **VIDINTEN** is set (VIDINTEN has the same layout as VIDSTAT). From there the request goes through the interrupt controller: the source must also be enabled in INTENA, with INTCON.MASTER on, and the CPU's interrupt mask must be below the source's level (5 by default for all three). The vector is VECBASE + the source number, so with the default VECBASE of 64, VBLANK uses vector 64, LINE 65 and VIDERR 67. The Interrupts and Timers chapter explains this path in full.
@@ -1705,17 +1717,17 @@ You can also poll the flags with interrupts off, as the boot ROM's video test do
             move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)
 ```
 
-**LINE** comes once per frame, at the start of the line in LINECMP (bits 26–16). To have it on several lines, write the next line number into LINECMP in the handler. The 68000 takes from about 2 µs to about 10 µs to start a handler, depending on the instruction it is in the middle of, so a LINE handler runs during the line it was asked for (32 µs); that is enough to change CTRL, WINX, WINY, SCROLLX, PRIO or BGCOLOR for the **next** line, or BPLSTRIDE for the end of this one.
+**LINE** comes once per frame, at the start of the beam line in LINECMP (bits 26–16): pixel 0, the start of that line's horizontal blank, 144 pixels (5.3 µs) before its picture. For picture line L, write VID_Y0 + L. To have it on several lines, write the next line number into LINECMP in the handler. The 68000 takes from about 2 µs to about 10 µs to start a handler, depending on the instruction it is in the middle of, so a LINE handler runs during the line it was asked for (32 µs); that is enough to change CTRL, WINX, WINY, SCROLLX, PRIO or BGCOLOR for the **next** line, or BPLSTRIDE for the end of this one.
 
 ### Summary: interrupts and the beam
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| VIDSTAT | `$004` | W1C (INVBLANK R) | VBLANK (0), LINE (1), OVERRUN L0–L2 (4–6): sticky flags; INVBLANK (8): the beam is in the vertical blank |
+| VIDSTAT | `$004` | W1C (INVBLANK R) | VBLANK (0), LINE (1), OVERRUN L0–L2 (4–6): sticky flags; INVBLANK (8): the beam is in the vertical blank (beam line < 49) |
 | VIDINTEN | `$008` | RW | Interrupt enables, as VIDSTAT bits 0–6 |
-| BEAMPOS | `$00C` | R | `vline` (26–16), `hpixel` (10–0) |
-| FRAMECOUNT | `$010` | R | Frame counter (15–0), up at the start of each vertical blank |
-| LINECMP | `$014` | RW | Line (26–16) for the LINE interrupt |
+| BEAMPOS | `$00C` | R | `vline` (26–16), `hpixel` (10–0), beam coordinates |
+| FRAMECOUNT | `$010` | R | Frame counter (15–0), up at the start of each frame |
+| LINECMP | `$014` | RW | Beam line (26–16) for the LINE interrupt |
 
 ---
 
@@ -1723,10 +1735,10 @@ You can also poll the flags with interrupts off, as the boot ROM's video test do
 
 | Registers | Take effect |
 |-----------|-------------|
-| CTRL, WINX, WINY, SCROLLX | At the start of the horizontal blank before each line. To change line L, write during the visible part of line L − 1 or earlier |
+| CTRL, WINX, WINY, SCROLLX | At the start of each line's horizontal blank (beam pixel 0), before its picture. To change line L, write during the visible part of line L − 1 or earlier |
 | BPLxPT, BPLSTRIDE | At once: they are live. The next word fetched uses the new pointer; BPLSTRIDE is used when the line's last word is fetched. A CPU write to a pointer wins over the DMA's own change in the same clock, and also sets the pointer's saved line start |
 | BPLxDAT | At once; a write of BPL0DAT completes the group |
-| PRIO, BGCOLOR | At the start of each line |
+| PRIO, BGCOLOR | At the start of each line's picture (beam pixel 144), so a write in the line's horizontal blank still changes it |
 | VIDCON.DIRECT, VIDCON.BLANKALL, palette | At once (the next pixel) |
 
 ---
@@ -1742,9 +1754,9 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 | VIDCON | `$000` | RW | EN (0): display on. BLANKALL (2): background colour only. DIRECT (4): direct colour |
 | VIDSTAT | `$004` | W1C | VBLANK (0), LINE (1), OVERRUN L0 (4), L1 (5), L2 (6), SPRUNDER (7, sprites); INVBLANK (8, R) |
 | VIDINTEN | `$008` | RW | Enables for VIDSTAT bits 0, 1, 4–7 |
-| BEAMPOS | `$00C` | R | `vline` (26–16), `hpixel` (10–0) |
+| BEAMPOS | `$00C` | R | `vline` (26–16), `hpixel` (10–0), beam coordinates |
 | FRAMECOUNT | `$010` | R | Frames (15–0) |
-| LINECMP | `$014` | RW | LINE interrupt line (26–16) |
+| LINECMP | `$014` | RW | LINE interrupt beam line (26–16) |
 | BGCOLOR | `$018` | RW | Background colour, RGB (23–0) |
 | PRIO | `$01C` | RW | FRONT (1–0), MIDDLE (3–2), BACK (5–4); 3 = no layer |
 | VIDSIZE | `$020` | R | VVISIBLE (26–16), HVISIBLE (10–0) |
@@ -1756,8 +1768,8 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
 | CTRL | Ln + `$00` | RW | EN (0), PLANAR (1), BPP (3–2), TRANSP (4), HSCALE (7–6), VSCALE (9–8), PALOFS (15–12), PLANES (18–16), WRAP (23–20) |
-| WINX | Ln + `$04` | RW | XSTART (26–16), XEND (10–0) |
-| WINY | Ln + `$08` | RW | YSTART (26–16), YEND (10–0) |
+| WINX | Ln + `$04` | RW | XSTART (26–16), XEND (10–0), beam pixels. Reset: 144, 864 |
+| WINY | Ln + `$08` | RW | YSTART (26–16), YEND (10–0), beam lines. Reset: 49, 625 |
 | SCROLLX | Ln + `$0C` | RW | Fine scroll, 0–15 source pixels (3–0) |
 | BPLSTRIDE | Ln + `$10` | RW | Stride: bytes from one line's start to the next, signed, even (15–0) |
 | BPLDMA | Ln + `$14` | Set/clear | SETCLR (15), PLANES (7–0): DMA on per plane; chunky: bit 0. All on after reset |
