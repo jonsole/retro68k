@@ -35,6 +35,8 @@ VIDSTAT_LINE_M               equ $2
 VIDSTAT_OVERRUN_B            equ $4
 VIDSTAT_OVERRUN_W            equ $3
 VIDSTAT_OVERRUN_M            equ $70
+VIDSTAT_SPRUNDER_B           equ $7
+VIDSTAT_SPRUNDER_M           equ $80
 VIDSTAT_INVBLANK_B           equ $8
 VIDSTAT_INVBLANK_M           equ $100
 VIDINTEN                     equ $8          ; RW, spec 4/6.1
@@ -45,6 +47,8 @@ VIDINTEN_LINE_M              equ $2
 VIDINTEN_OVERRUN_B           equ $4
 VIDINTEN_OVERRUN_W           equ $3
 VIDINTEN_OVERRUN_M           equ $70
+VIDINTEN_SPRUNDER_B          equ $7
+VIDINTEN_SPRUNDER_M          equ $80
 BEAMPOS                      equ $C          ; R, spec 4/3.3
 BEAMPOS_VLINE_B              equ $10
 BEAMPOS_VLINE_W              equ $B
@@ -110,6 +114,25 @@ DMXINTEN                     equ $344        ; RW, spec 11/8
 DMXINTEN_CH_B                equ $0
 DMXINTEN_CH_W                equ $4
 DMXINTEN_CH_M                equ $F
+SPRDMA                       equ $500        ; SC, spec 9/6
+SPRDMA_SPR_B                 equ $0
+SPRDMA_SPR_W                 equ $8
+SPRDMA_SPR_M                 equ $FF
+SPRDMA_SETCLR_B              equ $F
+SPRDMA_SETCLR_M              equ $8000
+SPRCOLL                      equ $504        ; W1C, spec 9/6
+SPRCOLL_SPR_B                equ $0
+SPRCOLL_SPR_W                equ $8
+SPRCOLL_SPR_M                equ $FF
+SPRCOLL_L0_B                 equ $8
+SPRCOLL_L0_W                 equ $8
+SPRCOLL_L0_M                 equ $FF00
+SPRCOLL_L1_B                 equ $10
+SPRCOLL_L1_W                 equ $8
+SPRCOLL_L1_M                 equ $FF0000
+SPRCOLL_L2_B                 equ $18
+SPRCOLL_L2_W                 equ $8
+SPRCOLL_L2_M                 equ $FF000000
 AUDRATE                      equ $404        ; RW, spec 6/5
 AUDRATE_D_B                  equ $0
 AUDRATE_D_W                  equ $10
@@ -436,6 +459,92 @@ DMX3_CHDESC                  equ $330
 DMX3_CHCTRL                  equ $334
 DMX3_CHSTAT                  equ $338
 DMX3_CHERR                   equ $33C
+; SPR0..SPR7: 8 x 16 bytes, spec 9/6
+SPR_NUM                      equ $8
+SPR_SPAN                     equ $10
+SPR0                         equ $520
+SPR1                         equ $530
+SPR2                         equ $540
+SPR3                         equ $550
+SPR4                         equ $560
+SPR5                         equ $570
+SPR6                         equ $580
+SPR7                         equ $590
+SPR_PT                       equ $0          ; RW, spec 9/6 (add to SPRn)
+SPR_PT_ADDR_B                equ $1
+SPR_PT_ADDR_W                equ $16
+SPR_PT_ADDR_M                equ $7FFFFE
+SPR_POS                      equ $4          ; RW, spec 9/6 (add to SPRn)
+SPR_POS_X_B                  equ $0
+SPR_POS_X_W                  equ $C
+SPR_POS_X_M                  equ $FFF
+SPR_POS_Y_B                  equ $10
+SPR_POS_Y_W                  equ $C
+SPR_POS_Y_M                  equ $FFF0000
+SPR_CTL                      equ $8          ; RW, spec 9/3 (add to SPRn)
+SPR_CTL_HEIGHT_B             equ $0
+SPR_CTL_HEIGHT_W             equ $A
+SPR_CTL_HEIGHT_M             equ $3FF
+SPR_CTL_WIDTH_B              equ $A
+SPR_CTL_WIDTH_W              equ $2
+SPR_CTL_WIDTH_M              equ $C00
+SPR_CTL_BPP_B                equ $C
+SPR_CTL_BPP_W                equ $2
+SPR_CTL_BPP_M                equ $3000
+SPR_CTL_HFLIP_B              equ $E
+SPR_CTL_HFLIP_M              equ $4000
+SPR_CTL_VFLIP_B              equ $F
+SPR_CTL_VFLIP_M              equ $8000
+SPR_CTL_HMAG_B               equ $10
+SPR_CTL_HMAG_W               equ $2
+SPR_CTL_HMAG_M               equ $30000
+SPR_CTL_VMAG_B               equ $12
+SPR_CTL_VMAG_W               equ $2
+SPR_CTL_VMAG_M               equ $C0000
+SPR_CTL_DEPTH_B              equ $14
+SPR_CTL_DEPTH_W              equ $2
+SPR_CTL_DEPTH_M              equ $300000
+SPR_CTL_PAL_B                equ $18
+SPR_CTL_PAL_W                equ $4
+SPR_CTL_PAL_M                equ $F000000
+SPR_CTL_END_B                equ $1F
+SPR_CTL_END_M                equ $80000000
+SPR_DAT                      equ $C          ; RW, spec 9/6 (add to SPRn)
+SPR_DAT_DATA_B               equ $0
+SPR_DAT_DATA_W               equ $10
+SPR_DAT_DATA_M               equ $FFFF
+SPR0_PT                      equ $520
+SPR0_POS                     equ $524
+SPR0_CTL                     equ $528
+SPR0_DAT                     equ $52C
+SPR1_PT                      equ $530
+SPR1_POS                     equ $534
+SPR1_CTL                     equ $538
+SPR1_DAT                     equ $53C
+SPR2_PT                      equ $540
+SPR2_POS                     equ $544
+SPR2_CTL                     equ $548
+SPR2_DAT                     equ $54C
+SPR3_PT                      equ $550
+SPR3_POS                     equ $554
+SPR3_CTL                     equ $558
+SPR3_DAT                     equ $55C
+SPR4_PT                      equ $560
+SPR4_POS                     equ $564
+SPR4_CTL                     equ $568
+SPR4_DAT                     equ $56C
+SPR5_PT                      equ $570
+SPR5_POS                     equ $574
+SPR5_CTL                     equ $578
+SPR5_DAT                     equ $57C
+SPR6_PT                      equ $580
+SPR6_POS                     equ $584
+SPR6_CTL                     equ $588
+SPR6_DAT                     equ $58C
+SPR7_PT                      equ $590
+SPR7_POS                     equ $594
+SPR7_CTL                     equ $598
+SPR7_DAT                     equ $59C
 ; AUD0..AUD3: 4 x 32 bytes, spec 6/5
 AUD_NUM                      equ $4
 AUD_SPAN                     equ $20

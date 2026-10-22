@@ -130,6 +130,22 @@ Channel n (0–3) at `0x300 + n × 0x10`:
 | `0x340` | DMXINT | W1C | 11, 8 |
 | `0x344` | DMXINTEN | RW | 11, 8 |
 
+### 3.5b Sprites (`0xE00500`)
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `0x500` | SPRDMA | Set/clear | 9, 6 |
+| `0x504` | SPRCOLL | W1C | 9, 6 |
+
+Sprite n (0–7) at `0x520 + n × 0x10`:
+
+| Offset | Name | Access | Spec |
+|--------|------|--------|------|
+| `+0x00` | PT | RW | 9, 6 |
+| `+0x04` | POS | RW | 9, 6 |
+| `+0x08` | CTL | RW | 9, 3 |
+| `+0x0C` | DAT | W, R | 9, 6 |
+
 ### 3.6 Audio (`0xE00400`)
 
 | Offset | Name | Access | Spec |

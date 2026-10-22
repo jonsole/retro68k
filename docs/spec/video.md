@@ -281,7 +281,7 @@ The offsets are within the custom register block at `0xE00000`. Spec 3 has the f
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
 | `0x000` | VIDCON | EN (0), BLANKALL (2), DIRECT (4) | Video on; show the background colour only; direct colour |
-| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L2 (6–4), INVBLANK (8, read-only) | Sticky flags, write 1 to clear |
+| `0x004` | VIDSTAT | VBLANK (0), LINE (1), OVERRUN L0–L2 (6–4), SPRUNDER (7: a sprite's FIFO ran dry, spec 9), INVBLANK (8, read-only) | Sticky flags, write 1 to clear |
 | `0x008` | VIDINTEN | Same layout as VIDSTAT | Interrupt enables |
 | `0x00C` | BEAMPOS | `vline` 26–16, `hpixel` 10–0 | Read-only |
 | `0x010` | FRAMECOUNT | 15–0 | Read-only |
@@ -343,6 +343,5 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 - More layers, fractional scaling and shrinking
 - More modes (exact 640×480, 720p, 1024×768): a different pixel clock from MMCM 2, at build time or by reconfiguring it; the rest of the design is ready for it
 - Wide fetch (memory cycle 3 for the display)
-- Sprites (spec 9, on hold)
 - EHB and HAM modes, a 1024-entry palette, tile-map layers
 - HDMI audio

@@ -1,194 +1,204 @@
 # Spec 9: Sprites
 
-Status: **on hold, not in version 1.** Sprites were removed from v1 to save logic. The last implementation is in git history at commit 7df97fd. The rest of this spec is kept as it was for a later version.
+Status: **v1 scope**
 
-Sprites are small images drawn over (or between) the layers at any position, without changing the layers' memory. This spec defines what a sprite can be and how the hardware shows it. How sprite data is fetched from memory is set by the video spec (spec 4, section 5.4) and the slot rules in spec 5. This spec extends both.
+Sprites are small images drawn over (or between) the layers at any position, without touching the layers' memory. Version 1 has eight sprite channels, organised as on the Amiga: each channel follows a list in Chip RAM, so one channel can show many sprites down the screen. The images are bigger and more colourful than the Amiga's, and their data is fetched just in time, through the same scheduler as the bitplanes, into a FIFO per sprite.
+
+(An earlier design, with a 64-entry sprite table and fractional scaling, is in git history at commit 7df97fd. It was dropped for size.)
 
 ## 1. Summary
 
 | Item | Value |
 |------|-------|
-| Sprites defined | 64, in a sprite table in block RAM |
-| Sprites per line | Up to 16 |
-| Width | 16, 32 or 64 pixels, at up to 32 bytes per line |
+| Channels | 8 (SPR0–SPR7). Each shows one sprite at a time; a channel shows many sprites down the screen by following its list |
+| Width | 16, 32 or 64 pixels |
 | Height | 1 to 1024 lines |
-| Colours | 2, 4 or 8 bits per pixel (3, 15 or 255 colours + transparent), any 16-entry block of the 1024-colour palette |
-| Position | Any pixel, including partly off any edge of the screen |
+| Colours | 2, 4 or 8 bits per pixel. 2 and 4 bpp: 3 or 15 colours + transparent, from any 16-colour block of the palette; 8 bpp: 255 colours + transparent, the whole palette |
+| Position | Any pixel, including partly off any edge |
 | Flip | Horizontal and vertical |
-| Scaling | 1× to 4× bigger, in 1/256 steps, separately across and down |
-| Depth | Each sprite chooses where it sits among the 4 layers |
-| Images | Taken from anywhere in Chip RAM, with a stride, so frames can come straight from a sprite sheet |
-| Collision | Sprite–sprite (by groups) and sprite–layer, per pixel, latched each frame |
-| Fetch | On the line the sprite is shown, starting a fixed 128 slots before its first pixel (sprites near the left edge start at the end of the line before). Can borrow the CPU's memory cycle when needed |
+| Magnify | ×1, ×2 or ×4, across and down separately |
+| Depth | Per sprite: in front of all layers, between any two (in PRIO order), or behind all |
+| Collisions | Sprite–sprite and sprite–layer, per pixel, latched (as the Amiga's CLXDAT) |
+| Data registers | A 32-word FIFO per sprite (one line of the widest, deepest sprite) |
+| Fetch | Just in time, deadline first, shared with the bitplanes (spec 4, section 5; spec 5, section 6). A sprite's next words are fetched as soon as its FIFO has room and a memory cycle is free, so most of each line is fetched ahead |
 
 ## 2. Comparison with the Amiga (OCS/ECS)
 
-| Feature | Amiga | retro68k |
-|---------|-------|----------|
-| Count | 8 hardware sprites; more by reusing them further down the screen (multiplexing) | 64 in a table, any 16 on a line, no multiplexing needed |
+| Feature | Amiga | retro68k v1 |
+|---------|-------|-------------|
+| Channels | 8, each following a list in Chip RAM | The same |
+| Reuse down the screen | The list holds several sprites, each after the last ends | The same |
+| Pointers | SPRxPT, rewritten by the copper each frame | The same |
+| Control words | SPRxPOS, SPRxCTL: position, height | POS and CTL: position, height, width, depth, flips, magnify, depth among the layers, palette block |
 | Width | 16 pixels (lores) | 16, 32 or 64 pixels |
-| Colours | 3 + transparent (15 when two are attached) | 3, 15 or 255 + transparent |
-| Palette | Fixed colour registers 16–31, shared in pairs | Any 16-colour block of 1024 colours, per sprite |
-| Data | A DMA list in Chip RAM, including control words, rewritten to move or animate | Position and image pointer in a table; move or animate by changing one value |
-| Scaling, flipping | None | Both |
-| Priority | Fixed against playfields, in pairs | Per sprite, any depth among the layers |
-| Collision | One shared register (CLXDAT) for sprite pairs and bitplanes | Per-sprite hit flags, collision groups, and a group-pair register like CLXDAT |
+| Colours | 3 + transparent; 15 with two attached sprites | 3, 15 or 255 + transparent, every sprite |
+| Pixel format | Two bitplanes | Chunky: 2, 4 or 8 bits per pixel, first pixel in the high bits |
+| Data registers | SPRxDATA, SPRxDATB: one line of 16 pixels | A 32-word FIFO: a whole line of up to 64 pixels at 8 bpp |
+| Fetch | Two words per sprite per line, in fixed slots in the horizontal blank | Just in time, deadline first; early when cycles are free |
+| Manual mode | Write SPRxDATA/B with DMA off | Push words into SPRxDAT with the sprite's DMA off |
+| Priority | Fixed in pairs against the playfields | Per sprite, any depth among the layers |
+| Flip, magnify | None | Both |
+| Collision | CLXDAT | SPRCOLL: per sprite, against the other sprites and each layer |
 
-## 3. The sprite table
+## 3. Sprite lists
 
-The sprite table holds 64 entries of 32 bytes (2 KB, one block RAM) at `0xE05000`–`0xE057FF`. The CPU and the copper can read and write it at any time. Sprite 0 is entry 0, and so on.
+Each channel has a pointer, **SPRxPT**, into a list in Chip RAM. As on the Amiga, the hardware does not reset it: the copper (or the CPU) writes the eight pointers in every vertical blank.
 
-| Offset | Name | Bits | Meaning |
-|--------|------|------|---------|
-| `+0x00` | POS | X 11–0, Y 27–16 (both signed 12-bit) | Screen position of the top-left pixel. Negative values or values past the edge clip the sprite |
-| `+0x04` | PTR | 22–0 | Chip RAM byte address of the image's top line |
-| `+0x08` | SIZE | HEIGHT−1 9–0, STRIDE 31–16 (signed) | Height in source lines; bytes from one source line to the next |
-| `+0x0C` | CTRL | see below | |
-| `+0x10` | SCALE | HSTEP 15–0, VSTEP 31–16 (8.8 fixed point) | `0x0100` = 1:1, `0x0080` = 2× bigger, `0x0040` = 4× bigger. Values from `0x0040` to `0x0100` are allowed |
-| `+0x14` | COLL | GROUP 1–0, HITGROUPS 7–4, HITLAYERS 11–8 | Collision settings (section 7) |
-| `+0x18`, `+0x1C` | – | | Reserved, read as 0 |
+A list is a sequence of sprites, each a **header** of two long words followed by its **image**:
 
-**CTRL bits:**
+```
+ header:  POS   long: Y (27-16), X (11-0)
+          CTL   long: END, HEIGHT-1, WIDTH, BPP, HFLIP, VFLIP, HMAG, VMAG, DEPTH, PAL
+ image:   HEIGHT lines, each WIDTH x BPP / 16 words, top line first
+ header:  the next sprite in this channel, further down
+ ...
+ header:  CTL.END set: no more sprites in this channel this frame
+```
 
-| Bits | Name | Meaning |
-|------|------|---------|
-| 0 | EN | Sprite on |
-| 2–1 | WIDTH | 0 = 16, 1 = 32, 2 = 64 pixels (source pixels, before scaling) |
-| 4–3 | BPP | 0 = 2, 1 = 4, 2 = 8 bits per pixel |
-| 5 | HFLIP | Mirror left–right |
-| 6 | VFLIP | Mirror top–bottom |
-| 10–8 | DEPTH | 0 = in front of everything; 1–3 = behind the 1st–3rd layer in PRIO order; 4 = behind all layers |
-| 21–16 | PALOFS | Palette block: colour index = PALOFS × 16 + pixel value |
+The pointer moves through the list as it is fetched, so at the end of a sprite it points at the next header. Lists are word-aligned (headers on even addresses).
 
-**Width and colour depth:** one line of a sprite can be up to 32 bytes:
+**POS** (the same layout as the POS register):
 
-| Width | 2bpp | 4bpp | 8bpp |
-|-------|------|------|------|
-| 16 px | 4 bytes | 8 bytes | 16 bytes |
-| 32 px | 8 bytes | 16 bytes | 32 bytes |
-| 64 px | 16 bytes | 32 bytes | not allowed (64 bytes) |
+| Bits | Field | Meaning |
+|------|-------|---------|
+| 11–0 | X | Screen pixel of the sprite's left edge, signed (−2048 to 2047). Off the left edge clips |
+| 27–16 | Y | Screen line of the sprite's top line, signed. Off the top clips |
 
-Pixel value 0 is always transparent. An 8bpp sprite uses PALOFS in steps of 16 like the others, so it can start its 256 colours at any 16-colour boundary.
+**CTL** (the same layout as the CTL register):
 
-**Sprite sheets:** STRIDE lets a sprite's image be a rectangle inside a bigger picture. For example, a sheet of 32×32 4bpp animation frames laid out 8 across has STRIDE = 128, and changing frames just means changing PTR.
+| Bits | Field | Meaning |
+|------|-------|---------|
+| 9–0 | HEIGHT | Source lines − 1 (1 to 1024 lines) |
+| 11–10 | WIDTH | 0 = 16, 1 = 32, 2 = 64 source pixels |
+| 13–12 | BPP | 0 = 2, 1 = 4, 2 = 8 bits per pixel |
+| 14 | HFLIP | Mirror left to right |
+| 15 | VFLIP | Mirror top to bottom |
+| 17–16 | HMAG | Each source pixel shown 1, 2 or 4 times across (0, 1, 2) |
+| 19–18 | VMAG | Each source line shown on 1, 2 or 4 screen lines (0, 1, 2) |
+| 21–20 | DEPTH | 0 = in front of all layers; 1 = behind the front layer; 2 = behind the middle layer; 3 = behind all layers (in PRIO order) |
+| 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the palette (colour = PAL × 16 + value). Not used at 8 bpp |
+| 31 | END | End of the list: this channel shows nothing more this frame. The other fields are ignored |
 
-**Size on screen:** width × 256 ÷ HSTEP by height × 256 ÷ VSTEP. A 64-pixel sprite at 4× is 256 pixels wide.
+A sprite is shown on screen lines Y to Y + (HEIGHT + 1) × VMAG − 1, and pixels X to X + WIDTH × HMAG − 1. The next sprite in the same channel must start on a later line than the last line of the one before (one line later is enough). If its Y has already passed when its header is fetched, its lines up to the current one are skipped, as if clipped.
 
-## 4. Choosing the sprites for each line
+At the start of each vertical blank, every channel whose DMA is on fetches its first header from SPRxPT.
 
-Before any sprite on line L can be fetched, the hardware has to know which sprites are on that line and where they start. This **selection** is the one step that happens ahead of the fetch.
+### 3.1 Pixels and colours
 
-- **Selection point:** a fixed **136 slots before line L begins** (13.6 µs). At 640×480 that is slot 184 of line L−1.
-- At the selection point, the sprite unit reads EN, X, Y and HEIGHT from all 64 table entries (block RAM, 10 entries per slot, so 7 slots) and picks those that cover line L. The extra 8 slots before the earliest possible fetch (136 = 128 + 8) are the time this takes.
-- **Up to 16 sprites per line,** taken in table order. If more than 16 cover a line, the extras are not drawn on that line and SPROVF is set in VIDSTAT. Putting the most important sprites first in the table makes sure they always show.
-- Each picked sprite is given one of **16 sprite units**. A unit holds the sprite's data for one line in its **data register**: 32 bytes, double-buffered, because a unit can be fetching for line L while still drawing a sprite at the right-hand end of line L−1. 16 units × 64 bytes = 1 KB, built from FPGA logic.
+Image lines are **chunky**, as chunky layers are: 2, 4 or 8 bits per pixel, packed in words, the first pixel in the highest bits. A value of 0 is transparent. Other values are palette entries: at 8 bpp the value itself; at 2 and 4 bpp, PAL × 16 + the value.
 
-## 5. Fetching at a fixed distance before the sprite
+### 3.2 Flip and magnify
 
-This replaces the fetch window in spec 4, section 5.4.
+- **HFLIP:** the DMA fetches each line's words last first, and the sprite shows each word's pixels in reverse order, so the line is mirrored. The image in memory is unchanged.
+- **VFLIP:** the DMA fetches the image's lines bottom first. The pointer still ends after the image, at the next header.
+- **HMAG** repeats each pixel 1, 2 or 4 times across; **VMAG** shows each source line on 1, 2 or 4 screen lines. A repeated line is fetched again (the FIFO cannot replay a line), so VMAG costs memory cycles on every screen line, and HMAG divides the cost across a line (section 5).
 
-- **Fetch point:** every sprite's fetch starts exactly **D = 128 slots (12.8 µs) before the slot holding its first visible pixel**. At 640×480 that is 320 pixels ahead; at 1280×720, 853 pixels.
-  - Sprites far enough right are fetched on the line they are shown.
-  - Sprites nearer the left edge than that have their fetch point at the end of the line before.
-- **At the fetch point,** the unit reads the rest of the sprite's settings: PTR, STRIDE, CTRL, SCALE and COLL. It works out the source line (from Y, VSTEP and VFLIP) and starts fetching.
-- A line of up to 32 bytes takes up to 16 memory cycles (16 bits each, any address). They are done in the cycles right after the fetch point, and are always complete before the first pixel in the cases listed below.
-- **Cycles a sprite can use, in order of preference:**
-  1. Free-pool cycles (spec 5, section 6)
-  2. Display cycles that no layer needs at that moment
-  3. **The CPU's cycle 0, only when the sprite would otherwise miss its first pixel**
-- **What always fits:** a 128-slot window has 128 cycle-3s, at least 90 free cycle-4s, and at least 64 cycle-0s the CPU leaves even when running flat out.
-  - With wide fetch off: at least 282 cycles. 16 full-size sprites (32 bytes each = 256 cycles) all starting at the same X fit, without touching the CPU.
-  - With wide fetch on, cycle 3 is taken in the visible part, leaving at least 154 cycles: 16 sprites of up to 16 bytes, or 9 full-size sprites, at the same X without touching the CPU; up to 13 full-size by borrowing CPU cycles. Spread out across the line, all 16 fit.
-  - If a sprite still misses its first pixel, its line is transparent and SPRMISS is set.
-- **Cost to the CPU:** each cycle taken costs 2 CPU clocks, and only if the CPU wanted that cycle.
-  - Typical (sprites spread out, or wide fetch off): nothing.
-  - Worst case (13 full-size sprites at the same X, wide fetch on, CPU running flat out from Chip RAM): 64 cycles, 128 CPU clocks, 20% of a 640×480 line, on that line only.
+### 3.3 Depth and priority
 
-### 5.0 Version 1 (fpga/rtl/sprites.v, sprite_pix.v)
+Each sprite's DEPTH puts it in front of all three layers, between any two in their PRIO order, or behind all of them (in front of the background colour). Where two sprites overlap, the lower-numbered channel is in front. A layer's transparent pixels (TRANSP, value 0) show the sprites and layers behind them.
 
-What the first implementation does, where it is simpler than the text above:
+In direct-colour mode (VIDCON.DIRECT, spec 4, section 4.9) sprites are drawn in front of the picture with their palette colours, and DEPTH is not used.
 
-- **Selection** reads EN, X, Y, HEIGHT and also **VSTEP** at the selection point (it needs VSTEP to know whether a scaled sprite covers the line), from a small copy of those fields kept beside the table. The other settings are read at the fetch point, as described.
-- **Fetch order:** due units are fetched one sprite at a time, those for the line on screen first, then in unit (table) order. Since a unit only becomes due at its fetch point, this is close to earliest-deadline-first.
-- **Urgent:** a sprite may take the CPU's cycle 0 in the last 16 slots before its first pixel.
-- **The beam in slots** is counted from the start of each line as the 100 MHz side sees it, so the selection and fetch points are fixed but may sit up to a slot later than the exact figures above.
-- A 64-pixel 8 bpp sprite (not allowed, section 3) is simply not drawn.
-- HSTEP is limited to the allowed `0x0040`–`0x0100` when it is read (VSTEP is not checked).
+## 4. Data registers: the FIFO
 
-### 5.1 When writes take effect
+Each sprite has a **FIFO of 32 words**, its data registers: one line of the widest, deepest sprite (64 pixels at 8 bpp). The DMA pushes the image's words in at the back; the sprite takes them from the front as it is drawn, a line's worth per screen line (WIDTH × BPP / 16 words: 1 to 32).
 
-| Settings | Read at | To change a sprite on line L, write before |
-|----------|---------|---------------------------------------------|
-| EN, X, Y, HEIGHT (which lines it is on, and where) | The selection point | 136 slots before line L begins |
-| PTR, STRIDE, CTRL, SCALE, COLL (what it looks like) | The sprite's own fetch point | 128 slots before the sprite's first pixel on line L |
+- **Fetching early.** The DMA pushes a sprite's words whenever its FIFO has room. So while a line is being drawn, the words it has finished with are already being replaced by the next line's, using any memory cycle nobody else wants. Fetching becomes urgent only when the FIFO is about to run out: then the sprite takes part in the deadline-first order with the layers, and may take the CPU's cycle (spec 5, section 6).
+- **A sprite at the right edge** has only the horizontal blank (5.3 µs) to fetch its next line ahead, but it has finished its own line by then.
+- **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper can write its POS and CTL registers and push words into its FIFO by writing SPRxDAT. The sprite then shows as described by POS and CTL, taking a line's words from the FIFO on each line it shows. If the FIFO runs dry, the sprite is transparent where the words are missing and VIDSTAT.SPRUNDER is set.
+- **Underrun.** If the DMA cannot keep a sprite's FIFO filled (section 5), the missing pixels are transparent and VIDSTAT.SPRUNDER (bit 7) is set; it can raise the VIDERR interrupt like OVERRUN.
 
-- The appearance deadline is a fixed distance before each sprite, wherever it is on the screen. A copper program or interrupt can change a sprite's image, colours or scale a fixed time ahead of where it is drawn, even part-way down the screen.
-- **Reusing a table entry lower down the screen** (Amiga-style multiplexing, for more than 64 sprites in a frame): change its Y, X and PTR before the selection point of the first line it should appear on.
-- The selection point has to come first because the hardware can't start a sprite's fetch until it knows the sprite is on the line and where its fetch point is.
+## 5. Memory budget
 
-## 6. Drawing
+Sprites and layers share one budget, ordered by deadline. The display's own memory cycles (1 and 3 of each slot, spec 5) give about **12 words per 16 screen pixels** for certain; cycles the CPU, audio and copper leave free give more.
 
-For each pixel, each sprite unit whose sprite covers that pixel gives a colour index, or "transparent" for pixel value 0.
+- A **layer** needs, per 16 source pixels, 1 word per plane (planar) or b words at b bpp (chunky); at 2× scale across, half that per 16 screen pixels.
+- A **sprite** needs BPP words per 16 source pixels while the beam is over it (2, 4 or 8); with HMAG ×2, half that per 16 screen pixels.
+- Sprites side by side do not add up; sprites over the same pixels at the same time do. Because each FIFO holds a line ahead, what matters is mostly the total per line, not each moment: a whole line at 1× has 45 groups of 16 pixels, about 540 guaranteed words.
 
-- **Between sprites:** the front sprite is the one with the smallest DEPTH; if two have the same DEPTH, the lower table index is in front. Sorting by depth first avoids the "priority quirk" of some consoles, where a sprite set behind a layer could still hide a sprite in front of it.
-- **Against layers:** the chosen sprite pixel goes in front of the layers its DEPTH puts it in front of, and behind the others (layer order from the PRIO register, spec 4, section 4.8). Transparent layer pixels let it show through.
-- **Scaling:** like layers, nearest-neighbour with no filtering, so pixels stay sharp.
-- **Clipping:** parts of a sprite off the left, right, top or bottom of the screen are simply not drawn. A sprite can slide smoothly on and off any edge.
+Sprites stacked over the same 16 screen pixels, guaranteed (more when cycles are free):
 
-## 7. Collision detection
+| Layers | Words per 16 pixels | 8 bpp | 8 bpp, ×2 across | 4 bpp | 2 bpp |
+|--------|--------------------|-------|------------------|-------|-------|
+| None | 0 | 1 | 3 | 3 | 6 |
+| One 8 bpp layer at 2× | 4 | 1 | 2 | 2 | 4 |
+| Two 5-plane layers at 2× (Amiga style) | 5 | 0 | 1 | 1 | 3 |
+| Two 4-plane layers at 1× | 8 | 0 | 1 | 1 | 2 |
+| Three 4-plane layers at 1× | 12 | 0 | 0 | 0 | 0 |
 
-Each sprite has a collision **GROUP** (0–3), a set of **HITGROUPS** it reacts to, and a set of **HITLAYERS** (layers 0–3) it reacts to. For example: player = group 0, hits groups 1 and 2 and layer 1 (walls); enemies = group 1, hit group 0; bullets = group 2.
+The FIFOs' lead lets sprites go well beyond these figures where the screen has quieter parts on the same line. The figures are worked out, not measured; to be measured in simulation (open point S1).
 
-At every visible pixel where a sprite has a non-transparent pixel:
+## 6. Registers
 
-- If another sprite in one of its HITGROUPS also has a non-transparent pixel there, the sprite's **hit flag** is set.
-- If a layer in its HITLAYERS has a non-transparent pixel there, the hit flag is set. This check ignores priority: a sprite behind a layer still collides with it.
-- The **group-pair register** CLXGRP gets a bit set for each pair of groups that touched (4 × 4 bits), like the Amiga's CLXDAT.
+Offsets in the custom register block at `0xE00000`.
 
-**Reading the results:** hits are collected during the frame. At the start of vertical blanking they are copied to SPRHIT0 (sprites 0–31) and SPRHIT1 (sprites 32–63) and CLXGRP, and the collection starts again from clear. Software reads one complete frame's results during vertical blanking without having to clear anything.
+| Offset | Name | Access | Bits | Description |
+|--------|------|--------|------|-------------|
+| `0x500` | SPRDMA | Set/clear | SPR (7–0), SETCLR (15) | DMA on for sprite n (bit n). Set/clear, as DMACON. Default all on. A sprite fetches only while SPRDMA bit n, DMACON.SPREN and DMACON.DMAEN are all set |
+| `0x504` | SPRCOLL | RW1C | SPR (7–0), L0 (15–8), L1 (23–16), L2 (31–24) | Collisions, sticky until cleared by writing 1. SPR bit n: an opaque pixel of sprite n was on the same screen pixel as another sprite's opaque pixel. Ln bit n: sprite n was on an opaque pixel of layer n (a pixel the layer draws: not transparent) |
 
-Collision only counts pixels that are actually drawn: inside the screen, on lines where the sprite was among the 16 shown.
+Sprite n (0–7) at `0x520 + n × 0x10`:
 
-## 8. Registers
+| Offset | Name | Access | Bits | Description |
+|--------|------|--------|------|-------------|
+| `+0x00` | SPRxPT | RW | 22–1 | The next word of the sprite's list (even). Written by the copper each frame |
+| `+0x04` | SPRxPOS | RW | X (11–0), Y (27–16) | The sprite being shown: loaded from each header by the DMA; written by the CPU or copper in manual mode |
+| `+0x08` | SPRxCTL | RW | as section 3 | The same |
+| `+0x0C` | SPRxDAT | W, R | write: 15–0; read: COUNT (5–0) | Write: push a word into the FIFO (manual mode). Read: words in the FIFO (0–32) |
 
-Offsets in the custom register block at `0xE00000`. Spec 3 sets the final addresses.
+VIDSTAT bit 7, **SPRUNDER** (spec 4, section 6.1): a sprite's FIFO ran dry while it was being drawn. Sticky, with an enable in VIDINTEN; raises VIDERR like OVERRUN.
 
-| Offset | Name | Bits | Description |
-|--------|------|------|-------------|
-| `0x200` | SPRCON | EN (0) | All sprites on/off (DMACON.SPREN must also be set) |
-| `0x204` | SPRHIT0 | 31–0 | Hit flags, sprites 0–31, from the last complete frame |
-| `0x208` | SPRHIT1 | 31–0 | Hit flags, sprites 32–63 |
-| `0x20C` | CLXGRP | 15–0 | Bit (4 × a + b): groups a and b touched in the last frame |
-| `0x5000`–`0x57FF` | Sprite table | | 64 × 32 bytes (section 3) |
+DMACON bit 5, **SPREN**: sprite DMA on (spec 5, section 8).
 
-New flags in VIDSTAT (spec 4, section 6.1): **SPROVF** (bit 12, more than 16 sprites on a line) and **SPRMISS** (bit 11, a sprite missed its fetch deadline). Both are sticky, write 1 to clear, and can raise the video interrupt.
+**When writes take effect:** SPRxPT at once (the next word fetched); POS and CTL from the next line (the DMA loads them from each header before the sprite's first line); SPRDMA at once (a sprite whose DMA is turned off keeps what is in its FIFO).
 
-The PRIO register's SPRPOS field (spec 4, section 4.8) is replaced by each sprite's DEPTH.
+## 7. Examples
 
-## 9. FPGA resources
+A 32 × 24 sprite at 4 bpp, in colours 32–47, behind the front layer, on channel 0. In Chip RAM:
+
+```
+ship:       dc.l    (100<<16)|200                       ; POS: line 100, pixel 200
+            dc.l    (24-1)|(1<<10)|(1<<12)|(1<<20)|(2<<24)   ; CTL: 24 lines, 32 px, 4 bpp, depth 1, block 2
+            ; 24 lines x 8 words of image
+            ...
+            dc.l    0                                   ; POS (not used)
+            dc.l    $80000000                           ; CTL.END
+```
+
+In the copper list, every frame:
+
+```
+            CMOVEL  SPR0+SPR_PT,ship
+```
+
+To move the ship, change the POS long in memory (or a copper MOVE can write it into the list for the next frame). To reuse channel 0 for another sprite lower down, put that sprite's header and image where the END header is.
+
+## 8. FPGA resources
 
 | Item | Resource |
 |------|----------|
-| Sprite table, 2 KB | 1 block RAM |
-| Data registers, 16 × 2 × 32 bytes | About 130 LUTs used as RAM |
-| 16 sprite units (position, scaling, flip, pixel select) | Estimate 1,500–2,500 LUTs; to confirm by synthesis (S1) |
-| Depth sort and collision logic | Included in the estimate above |
+| 8 FIFOs of 32 × 16 bits | Distributed RAM, about 100 LUTs |
+| List fetcher: headers, line addresses (flip), FIFO fill and deadlines, in the scheduler | About 600 LUTs |
+| 8 pixel units: position, magnify, flip, pixel select | About 800 LUTs |
+| Mixing with the layers (depth), collisions, registers | About 400 LUTs |
+| Total | About 1,800–2,200 LUTs; no block RAM |
 
-## 10. Open points
+## 9. Open points
 
 | # | Item |
 |---|------|
-| S1 | Check the 16 sprite units fit and meet timing at 66.7 MHz pixel clock on the XC7A35T. If not, 8 sprites per line is the fallback |
-| S2 | Sprite reuse further right on the same line (more than 16 per line): possible later with the just-in-time fetch |
-| S3 | Should 64-pixel 8bpp sprites (64 bytes per line, 32 memory cycles) be allowed? It would need bigger data registers |
-| S4 | Shrinking sprites (HSTEP above `0x0100`) would need more data per line; left out for now |
+| S1 | Measure how many stacked sprites each layer set-up allows (section 5), in simulation |
+| S2 | Whether the sprites' share of the free cycles should be limited, so that a screen full of sprites cannot starve the CPU |
 
-## 11. Tests
+## 10. Tests
 
-- **Golden images:** render sprites at every width, depth, flip and scale, clipped at each edge, in front of and behind layers, and compare with a Python reference model.
-- **Line limit:** 17 sprites on a line: the first 16 by table index are drawn and SPROVF is set.
-- **Fetch:** 16 full-size sprites at the same X with wide fetch off: no SPRMISS, no CPU cycles taken. With wide fetch on: exactly the cases in section 5 fit, and every CPU delay is 2 clocks.
-- **Depth:** two overlapping sprites, one behind a layer and one in front: the front one always shows, whatever their table order.
-- **Collision:** set up known overlaps between groups and layers; check SPRHIT and CLXGRP after the frame, including a sprite hidden behind a layer.
-- **Write timing:** a position write just before line L's selection point changes line L, just after it changes line L+1. An appearance write just before a sprite's fetch point changes that line, just after it changes the next one. Check this for sprites at several X positions, including near the left edge.
-- **Fixed offset:** for sprites at many X positions, assert the fetch starts exactly 128 slots before the first pixel.
+- **Golden images:** sprites in every width, depth and magnify, flipped, clipped at all four edges, reused down the screen, at every DEPTH against layers in different PRIO orders, over transparent layer pixels, compared pixel by pixel with the Python video model extended with sprites.
+- **Collisions:** known overlaps set exactly the expected SPRCOLL bits.
+- **Manual mode:** a sprite fed by the CPU through SPRxDAT; an underrun sets SPRUNDER.
+- **Stress:** sprites stacked over the same pixels with layers of each depth, to measure section 5's table.
+
+## 11. Later versions
+
+- A sprite table, so that software need not build lists
+- Fractional scaling
+- Sprites in direct-colour mode at any depth

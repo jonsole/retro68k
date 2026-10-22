@@ -18,7 +18,7 @@ The design is installed as an extra core on the Next, next to the normal Next co
 | R4 | Video output is HDMI/DVI and VGA; one mode, 576p (720×576 at 50 Hz, CEA-861, 27 MHz); every line exactly 320 memory slots, so the display's DMA repeats the same way on every line | decided (version 1) |
 | R5 | Audio: 4 Paula-style 8-bit sample channels | decided (version 1) |
 | R6 | Usable as a home computer: boots to a monitor, then BASIC; PS/2 keyboard; SD card | decided ("both") |
-| R7 | Usable as a game/demo machine: bitmap layers with scrolling, a copper, a DMA engine for copies and fills (sprites later) | decided ("both") |
+| R7 | Usable as a game/demo machine: bitmap layers with scrolling, a copper, a DMA engine for copies and fills, sprites | decided ("both") |
 | R8 | Hardware = the ZX Spectrum Next KS3, already owned | decided |
 
 ## 2. Key decisions
@@ -102,7 +102,7 @@ Some boards may have 2 MB of SRAM; SYSCFG.CHIPMB reports which (spec 7).
 Defined in [spec 4: video](spec/video.md). In short:
 
 - DVI over HDMI and VGA at the same time. **One mode, 576p:** 720×576 at 50 Hz with a 27 MHz pixel clock, as CEA-861 defines it, so every HDMI TV and monitor takes it; the digital form of PAL. No timing registers. The whole 720×576 is the overscan area; a normal screen is a centred window (for example a PAL Amiga 320×256 at 2× is 640×512 at (40, 32)), with the background colour as the border. Every line is exactly 320 slots
-- **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and palette block. No text layer and no sprites (spec 9 is on hold); the boot ROM draws its 80×30 console into a 1-plane 640×480 layer, centred at (40, 48)
+- **3 bitmap layers + background colour**, in any priority order. Each layer has its own display window, scroll, scale and palette block. No text layer. 8 sprite channels, Amiga-style (spec 9); the boot ROM draws its 80×30 console into a 1-plane 640×480 layer, centred at (40, 48)
 - Each layer is **planar** (1–8 Amiga-style bitplanes) or **chunky** (1/2/4/8 bits per pixel), with Amiga-style plane pointers (BPLxPT), row stride (BPLSTRIDE) and data registers (BPLxDAT), and no hidden buffers. The copper resets the pointers each frame
 - Whole-number scaling: 1×, 2×, 4× or 8×, across and down separately
 - Video memory is fetched on demand by DMA as the beam scans, in memory cycles 1 and 3 of each slot only (no wide fetch). The budget is a rate: 4 bytes per 100 ns slot, 1.48 bytes per pixel. Layers never use the CPU's cycle
@@ -187,7 +187,7 @@ Each block gets a short spec first: its interface, registers, timing and a test 
 6. [`docs/spec/audio.md`](spec/audio.md): **drafted.** 4 Paula-style channels, 8-bit samples, nearest-sample playback, sigma-delta output
 7. [`docs/spec/system.md`](spec/system.md): **drafted.** Reset sources and behaviour, boot ROM and overlay, start-up keys and colours, buttons, ID registers, installing as a Next core, board connections (timers are spec 12, interrupts 13, USB serial 14, SD card 15, keyboard 16)
 8. ~~CPU board~~: dropped with the move to the KS3
-9. [`docs/spec/sprites.md`](spec/sprites.md): **on hold, not in version 1.** Sprite table, formats, scaling, depth, just-in-time fetch, collision. The last implementation is in git history at commit 7df97fd
+9. [`docs/spec/sprites.md`](spec/sprites.md): **v1 scope, not built yet.** 8 channels with Amiga-style lists, up to 64 px at 8 bpp, flip, magnify, depth among the layers, collisions; a FIFO per sprite filled just in time with the bitplanes. (An earlier sprite-table design is in git history at commit 7df97fd)
 10. [`docs/spec/copper.md`](spec/copper.md): **drafted.** Amiga-style beam-following coprocessor: MOVE, WAIT and SKIP, restarted each frame
 11. [`docs/spec/dma-engine.md`](spec/dma-engine.md): **drafted.** One channel: byte-granular copy and fill in 1D and 2D, Chip RAM only, free memory cycles only
 12. [`docs/spec/timers.md`](spec/timers.md): **drafted.** 64-bit time counter, 4 chainable 32-bit timers (clock, lines, frames), interrupts or DMA starts, watchdog
