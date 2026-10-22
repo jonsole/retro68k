@@ -219,7 +219,7 @@ DMACON turns DMA on and off, as on the Amiga. Its 16-bit value is in the low hal
 | 8 | BPLEN | Bitplane DMA for the layers |
 | 7 | COPEN | Copper (later) |
 | 6 | BLTEN | DMA engine / blitter (later) |
-| 5 | SPREN | Kept for sprites; no effect yet |
+| 5 | SPREN | Sprite DMA (see the Sprite Hardware chapter) |
 | 3–0 | AUD3EN–AUD0EN | Audio channels 3–0 (later) |
 
 The bits are where the Amiga has them. A DMA user works only when both its own bit and DMAEN are set. For finer control, each layer's BPLDMA register turns bitplane DMA on and off plane by plane (see the playfield chapter), so any one plane, or one audio channel, can be left to the CPU or copper. DMACON is cleared at every reset.

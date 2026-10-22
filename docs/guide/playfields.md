@@ -1740,15 +1740,15 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
 | VIDCON | `$000` | RW | EN (0): display on. BLANKALL (2): background colour only. DIRECT (4): direct colour |
-| VIDSTAT | `$004` | W1C | VBLANK (0), LINE (1), OVERRUN L0 (4), L1 (5), L2 (6); INVBLANK (8, R) |
-| VIDINTEN | `$008` | RW | Enables for VIDSTAT bits 0, 1, 4–6 |
+| VIDSTAT | `$004` | W1C | VBLANK (0), LINE (1), OVERRUN L0 (4), L1 (5), L2 (6), SPRUNDER (7, sprites); INVBLANK (8, R) |
+| VIDINTEN | `$008` | RW | Enables for VIDSTAT bits 0, 1, 4–7 |
 | BEAMPOS | `$00C` | R | `vline` (26–16), `hpixel` (10–0) |
 | FRAMECOUNT | `$010` | R | Frames (15–0) |
 | LINECMP | `$014` | RW | LINE interrupt line (26–16) |
 | BGCOLOR | `$018` | RW | Background colour, RGB (23–0) |
 | PRIO | `$01C` | RW | FRONT (1–0), MIDDLE (3–2), BACK (5–4); 3 = no layer |
 | VIDSIZE | `$020` | R | VVISIBLE (26–16), HVISIBLE (10–0) |
-| DMACON | `$094` | SC | BPLEN (8), DMAEN (9): both needed for bitplane DMA; SETCLR (15). 16 bits, low half at `$096` |
+| DMACON | `$094` | SC | BPLEN (8), DMAEN (9): both needed for bitplane DMA; SPREN (5): sprites; SETCLR (15). 16 bits, low half at `$096` |
 | PALETTE | `$4000`–`$43FF` | RW | 256 × `$00RRGGBB` |
 
 ### Layer registers

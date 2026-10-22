@@ -52,14 +52,14 @@ Each sprite has three registers (section 6):
 
 | Register | Bits | Field | Meaning |
 |----------|------|-------|---------|
-| SPRxH | 11–0 | HSTART | First screen pixel of the sprite, signed (−2048 to 2047). Pixels left of the screen are clipped |
+| SPRxH | 11–0 | HSTART | First screen pixel of the sprite, signed, −144 or more (a lower value counts as −144). Pixels left of the screen are clipped |
 | SPRxH | 27–16 | HSTOP | Screen pixel just after the sprite, signed. Past the right edge clips |
 | SPRxV | 10–0 | VSTART | First picture line of the sprite (0–575; 576 or more: not shown this frame) |
 | SPRxV | 26–16 | VSTOP | Picture line just after the sprite. Past the bottom clips |
 
 The image's size follows from the window: **source width** = (HSTOP − HSTART) ÷ HMAG pixels and **source height** = (VSTOP − VSTART) ÷ VMAG lines, each rounded up. A source line is stored in whole words, ⌈source width × BPP ÷ 16⌉ of them. There is no size limit: lines of any length stream through the FIFO (section 4); only the memory budget (section 5) limits how big and how many sprites can be.
 
-**Clipping:** at the left, right and bottom the hardware clips: pixels outside the screen are not shown (those left of it are still fetched and dropped). At the top, VSTART cannot be above line 0: to show a sprite partly above the screen, point SPRxPT at its first visible line and set VSTART to 0.
+**Clipping:** at the left, right and bottom the hardware clips: pixels outside the screen are not shown (those left of it are still fetched and dropped). A sprite's line starts in the horizontal blank, 144 pixels before the screen's left edge (pixel 720 of the line before), so a sprite can start at most 144 pixels left of the screen. At the top, VSTART cannot be above line 0: to show a sprite partly above the screen, point SPRxPT at its first visible line and set VSTART to 0.
 
 **SPRxCTL:**
 
@@ -89,7 +89,7 @@ Image lines are **chunky**, as chunky layers are: 2, 4 or 8 bits per pixel, pack
 
 ### 3.2 Flip and magnify
 
-- **HFLIP:** the DMA fetches each line's words last first, and the sprite shows each word's pixels in reverse order, so the line is mirrored. The image in memory is unchanged.
+- **HFLIP:** the DMA fetches each line's words last first, and the sprite shows each word's pixels in reverse order, so the line is mirrored. The image in memory is unchanged. If the source width does not fill the line's last word, its unused pixels (which come first when mirrored) are skipped.
 - **VFLIP:** the DMA fetches the image's lines bottom first: point SPRxPT at the image's last line, and the pointer steps back a line after each one (section 3).
 - **HMAG** repeats each pixel 1, 2 or 4 times across; **VMAG** shows each source line on 1, 2 or 4 screen lines. A repeated line is fetched again (the FIFO cannot replay a line), so VMAG costs memory cycles on every screen line, and HMAG divides the cost across a line (section 5).
 
@@ -105,8 +105,8 @@ Each sprite has a **FIFO of 32 words**, its data registers. The DMA pushes the i
 
 - **Fetching early.** The DMA pushes a sprite's words whenever its FIFO has room. So while a line is being drawn, the words it has finished with are already being replaced by the next line's, using any memory cycle nobody else wants. Fetching becomes urgent only when the FIFO is about to run out: then the sprite takes part in the deadline-first order with the layers, and may take the CPU's cycle (spec 5, section 6).
 - **The lead** is up to 32 words per sprite: 64 source pixels at 8 bpp, 128 at 4 bpp, 256 at 2 bpp. A sprite at the right edge fills its FIFO for its next line in the horizontal blank (5.3 µs).
-- **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper pushes the image's words into its FIFO by writing SPRxDAT. The sprite shows as its window and CTL say, taking a line's words from the FIFO on each line it shows. If the FIFO runs dry, the sprite is transparent where the words are missing and VIDSTAT.SPRUNDER is set.
-- **Underrun.** If the DMA cannot keep a sprite's FIFO filled (section 5), the missing pixels are transparent and VIDSTAT.SPRUNDER (bit 7) is set; it can raise the VIDERR interrupt like OVERRUN.
+- **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper pushes the image's words into its FIFO by writing SPRxDAT. The sprite shows as its window and CTL say, taking a line's words from the FIFO on each line it shows. If the FIFO is empty when a word is needed, the sprite waits for it: it is transparent until a word is written, and the rest of the line follows from there. SPRUNDER is not set in manual mode.
+- **Underrun.** If the DMA cannot keep a sprite's FIFO filled (section 5), VIDSTAT.SPRUNDER (bit 7) is set, and the sprite shows nothing more until it next starts (the next vertical blank, or a write to its registers): its words would no longer line up with its lines. SPRUNDER can raise the VIDERR interrupt like OVERRUN.
 
 ## 5. Memory budget
 
@@ -135,7 +135,7 @@ Offsets in the custom register block at `0xE00000`.
 | Offset | Name | Access | Bits | Description |
 |--------|------|--------|------|-------------|
 | `0x500` | SPRDMA | Set/clear | SPR (7–0), SETCLR (15) | DMA on for sprite n (bit n). Set/clear, as DMACON. Default all on. A sprite fetches only while SPRDMA bit n, DMACON.SPREN and DMACON.DMAEN are all set |
-| `0x504` | SPRCOLL | RW1C | SPR (7–0), L0 (15–8), L1 (23–16), L2 (31–24) | Collisions, sticky until cleared by writing 1. SPR bit n: an opaque pixel of sprite n was on the same screen pixel as another sprite's opaque pixel. Ln bit n: sprite n was on an opaque pixel of layer n (a pixel the layer draws: not transparent) |
+| `0x504` | SPRCOLL | RW1C | SPR (7–0), L0 (15–8), L1 (23–16), L2 (31–24) | Collisions, sticky until cleared by writing 1. SPR bit n: an opaque pixel of sprite n was on the same screen pixel as another sprite's opaque pixel. Ln bit n: sprite n was on an opaque pixel of layer n (a pixel the layer draws: not transparent). Only pixels on the screen count, not those clipped |
 
 Sprite n (0–7) at `0x520 + n × 0x20`:
 
@@ -169,7 +169,7 @@ In the copper list, every frame (in the vertical blank):
     CMOVEL  SPR0+SPR_PT,ship
 ```
 
-To move the ship, write SPR0H and SPR0V (from the CPU, or with copper MOVEs in the vertical blank).
+To move the ship, write SPR0H and SPR0V and then SPR0PT (from the CPU, or with copper MOVEs in the vertical blank). SPRxPT always goes last: each of these writes starts the sprite again from SPRxPT, which moves as the image is fetched.
 
 Reusing sprite 0 for a second ship lower down, from line 300: after the first ship's last line (123), the copper writes sprite 0 again:
 
