@@ -14,7 +14,7 @@ On the ZX Spectrum Next KS3 board the CPU is always fx68k inside the FPGA. The e
 | CPU speed | 20 MHz: fx68k clocked at 40 MHz with alternating phase enables |
 | Clock crossing | 40 MHz and 100 MHz come from the same MMCM and line up every 50 ns. Signals cross at fixed points with at least 15 ns to settle, so no synchronisers and no uncertainty |
 | Bus | 68000 asynchronous bus: /AS, /UDS, /LDS, R/W, /DTACK, /BERR, FC0–2, IPL0–2. /VPA, E, bus arbitration and /HALT input are not used |
-| Wait states | None for ROM, block RAM, registers and Chip RAM: no DMA ever takes the CPU's memory cycle (spec 5) |
+| Wait states | None for ROM, block RAM and registers. None for Chip RAM, except when an urgent display fetch (or a copper at "nasty" priority) takes the CPU's memory cycle: then 2 (spec 5, section 6) |
 | Bus errors | Unmapped addresses, writes to ROM, and (optionally) user-mode accesses to hardware |
 | Interrupts | Vectored; the interrupt controller answers the acknowledge cycle with no wait states |
 | Reset | fx68k reset from the system reset (spec 7); its RESET instruction resets the devices; a halted CPU (double bus fault) is detected |
@@ -90,7 +90,7 @@ For block RAM, registers and ROM, the data is ready well before 160 ns. So all t
 
 | Target | Wait |
 |--------|------|
-| Chip RAM | 0, always: cycle 0 of every slot is the CPU's and no DMA takes it |
+| Chip RAM | 0 normally. 2 (one slot) each time an urgent display fetch or a nasty copper takes cycle 0 (spec 5, section 6): /DTACK and the data simply come one slot later. A posted write that loses its cycle 0 waits for the next one; the next bus cycle waits for it |
 | Boot ROM, block RAM areas, custom registers, system registers | 0 |
 | Interrupt acknowledge | 0 |
 

@@ -186,8 +186,8 @@ With VIDCON.DIRECT set, the palette and priority are not used. Every visible pix
 - **A group is always 16 source pixels.** Planar: one word from each plane, plane p in BPLpDAT. Chunky with b bits per pixel: b consecutive words from BPL0PT; the first (leftmost pixels) goes in BPL(b−1)DAT and the last in BPL0DAT. So every layer has 16 pixels of time in hand, whatever its format.
 - **When a group is complete:** the DMA fills a group's data registers from the highest down, and the group is complete when the last of them arrives (BPL0DAT, unless plane 0's DMA is off; section 5.5). For a layer with no DMA, the CPU or copper writes the data registers, and its write of BPL0DAT completes the group.
 - The shifters take all of a layer's data registers at once. They take the line's first group as soon as it is complete, in the horizontal blank, so the second group is already in the data registers when the window starts (as the Amiga fetches ahead of the display window). After that they take the next group each time the current one is used up (every 16 source pixels). Each take empties the data registers, and the DMA fetches the next group.
-- The display owns **memory cycles 1 and 3 of every slot** (40 and 60 ns apart): 4 bytes every 100 ns (spec 5, section 4.3). It never touches the CPU's cycle 0.
-- **Order:** the layers that want a word take turns, one word each, so a layer never waits for more than one word from each of the others. With a given screen setup, the fetch pattern is the same on every line and every frame.
+- The display owns **memory cycles 1 and 3 of every slot** (40 and 60 ns apart): 4 bytes every 100 ns (spec 5, section 4.3). It may also use any cycle nobody else wants, including cycle 0 when the CPU leaves it, and, as on the Amiga, an **urgent** fetch (one about to be late) takes the CPU's cycle 0 (spec 5, section 6).
+- **Order:** each word goes to the layer whose deadline is nearest (**earliest deadline first**): when a layer's shifters take a group, its countdown loads the time that group lasts (16 source pixels × its scale). Layers with equal deadlines take turns. A request whose deadline is about to pass is **urgent**.
 - **Start and stop:** at the start of the horizontal blank, each layer whose window covers the next line gets its first group fetched; the number of groups on the line comes from the window width, scale and fine scroll. Nothing is fetched outside the windows.
 - With vertical scaling, each source line is fetched again for every screen line it appears on.
 
@@ -332,7 +332,7 @@ Layer n (0–2) is at `0x100 + n × 0x80`.
 - **Boot ROM:** the console and a 4-plane interleaved picture, checked pixel by pixel.
 - **Fetch budget:** for every example in 5.2 that fits, no OVERRUN. For one that does not fit, OVERRUN is set on the right layer only.
 - **Register timing:** a CTRL write during line L − 1's visible part changes line L.
-- **CPU:** with all layers fetching, the CPU never waits (spec 5 zero-wait test).
+- **CPU:** on screens within the turnaround limits the CPU almost never waits; count the stolen cycle 0s on heavy screens.
 
 ## 10. Later versions
 

@@ -1389,7 +1389,7 @@ Each layer has eight 16-bit data registers, BPL0DAT–BPL7DAT, and eight 16-bit 
 - After that, each time the shifters use up a group (every 16 source pixels), they take the next one from the data registers at once, and the DMA fetches another.
 - The layers that want a word take turns, one word each, so no layer waits for more than one word from each of the others.
 
-So each layer is always one group ahead, and the display reads memory at the rate it shows it. The display has **memory cycles 1 and 3 of every 100 ns slot**: 4 bytes every 100 ns, or 40 MB/s. These are its own cycles; the display never takes the CPU's cycle, so no screen setup slows the CPU.
+So each layer is always one group ahead, and the display reads memory at the rate it shows it. The display has **memory cycles 1 and 3 of every 100 ns slot**: 4 bytes every 100 ns, or 40 MB/s. These are its own cycles. It also uses any cycle nobody else wants, and, as on the Amiga, a fetch about to be late takes the CPU's cycle 0: the CPU then waits one slot. Screens within the turnaround limits (spec 4, section 5.6) rarely need that.
 
 ### The budget
 

@@ -18,7 +18,7 @@ retro68k is a 68000 computer built inside the FPGA of a ZX Spectrum Next KS3 boa
 
 There are a few differences worth knowing from the start:
 
-- **The CPU never waits for the display.** The memory is fast enough that the 68000 has its own memory cycle in every slot, whatever the video is doing.
+- **The CPU has its own memory cycle in every slot.** It waits only when the display would otherwise be late: then, as on the Amiga, the bitplane DMA takes the CPU's cycle and the CPU waits one slot.
 - **There is no Fast RAM.** All RAM is Chip RAM, and the CPU gets it at full speed.
 - **Registers are 32 bits wide**, written and read as two 16-bit halves. The rules for this are in "Working with the Hardware Registers" below.
 - **Interrupts are vectored.** Each interrupt source has its own vector, so a handler never needs to find out who interrupted.
@@ -31,7 +31,7 @@ There are a few differences worth knowing from the start:
 | CPU | 68000 (the fx68k core inside the FPGA) at 20 MHz |
 | Chip RAM | 4 MB of 10 ns SRAM, shared by the CPU and DMA (some boards: 2 MB) |
 | Boot ROM | 32 KB at `$F80000`, in FPGA block RAM, loaded with the FPGA |
-| Memory bandwidth | 100 MB/s in total; the CPU can use up to 10 MB/s with no wait states |
+| Memory bandwidth | 100 MB/s in total; the CPU can use up to 10 MB/s, with no wait states unless the display needs its cycle |
 | Video | HDMI and VGA at once; one mode, 576p: 720 × 576 at 50 Hz, the digital form of PAL; three bitmap layers; a 256-colour palette of 24-bit colours |
 | Serial | USB link to a PC through an FT232H module: several MB/s, hardware flow control |
 | Interrupts | 24 sources, each with its own vector and a programmable level; NMI from a button or from the PC |
@@ -189,7 +189,7 @@ A 68000 bus cycle takes 4 CPU clocks, 200 ns: two slots. The CPU needs at most o
 - A **write** is posted: the CPU is told it is done at once, and the memory write happens in cycle 0 of the next slot, which is the first slot of the CPU's next bus cycle. The CPU never uses that cycle 0 for itself, so nothing is held up. A read that follows a write always sees the new data.
 - The boot ROM, the palette and all registers are not in Chip RAM and use no memory cycles at all.
 
-So the CPU runs **with no wait states** from Chip RAM, ROM and registers alike. The display, and later the audio and normal DMA, take only their own cycles. Unlike the Amiga, there is no screen mode that slows the CPU down.
+So the CPU normally runs **with no wait states** from Chip RAM, ROM and registers alike. The display, and later the audio and normal DMA, use their own cycles and any the CPU leaves. As on the Amiga, a bitplane fetch that would otherwise be late takes the CPU's cycle 0 (and a copper set to "nasty" priority may too); that Chip RAM access then waits one slot, 2 CPU clocks. Screens well inside the budget almost never do this; heavy ones slow the CPU a little on the lines that need it. ROM and register accesses never wait.
 
 The specification allows two exceptions for later blocks: a DMA engine job that you mark as high priority, and an urgent copper fetch, may borrow the CPU's cycle 0. Each borrowed cycle costs the CPU one slot (2 clocks). Neither block is built yet, and in the current build the CPU is never made to wait.
 

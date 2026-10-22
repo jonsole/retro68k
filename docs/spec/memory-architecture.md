@@ -206,6 +206,6 @@ Together with BPLDMA, every DMA user can be turned off on its own (one audio cha
 ## 10. Tests
 
 - **Cycle table:** check each owner gets its cycles at the same `hslot` on every line, and that unused cycles go to the free pool.
-- **CPU zero-wait:** run fx68k from Chip RAM with the display, audio, copper and DMA engine all busy; assert /DTACK is never delayed.
+- **CPU waits:** run fx68k from Chip RAM with the display, audio, copper and DMA engine all busy; check that /DTACK is delayed only by stolen cycle 0s (urgent display, nasty copper), each by exactly one slot.
 - **SRAM model:** run the controller against an SRAM simulation model with the datasheet timing checks on (setup, hold, pulse widths, bus turnaround). Done in `sim/` for version 1.
 - **Board test:** a full 4 MB pattern test from the CPU and from the DMA engine at once, with the display busy.
