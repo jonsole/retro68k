@@ -1057,17 +1057,58 @@ In this chapter, and in `copper.inc`, the registers are named `CX`, `CY`, `CF` a
 
 ### Writing through X and Y: MOVR
 
-The **MOVR** instructions are MOVEs that take the register, or the data, or both, from X and Y:
+An ordinary MOVE has both the register and the data written into the instruction. The **MOVR** instructions are MOVEs that can take either of them, or both, from the copper's registers instead:
 
-| Macro | Does |
-|-------|------|
-| `CMOVX value` | Writes value to the register half whose offset is in X |
-| `CMOVXP value` | The same, then adds 2 to X |
-| `CMOVR reg,CY` | Writes Y (or `CX`: X) to reg |
-| `CMOVXR CY` | Writes Y (or X) to the register half at X |
-| `CMOVXRP CY` | The same, then adds 2 to X |
+- **The register from X.** X holds a register's offset in the custom block, and the MOVE writes to that register. This is like the 68000's `MOVE.W D0,(A0)`, with X as the address register. Change X, and the same instruction writes somewhere else.
+- **The data from X or Y.** The value written is whatever is in X or Y at the time, rather than a number fixed in the list.
 
-The `P` forms step X on to the next register half, so a run of them walks through the palette, or a layer's registers, without naming each one. All the rules of MOVE still hold: a high half is held until its low half, and strobes act on a low-half write.
+X holds an **offset**, as the copper's register names do, not a full address: load it with `CLDI CX,BGCOLOR+2`, not with `$E0001A`. As in a MOVE, an offset with bit 1 clear is a register's high half and one with bit 1 set its low half; bit 0 and bit 15 of X are ignored.
+
+As with every copper instruction, the register written is named first:
+
+```
+        CMOVR   BGCOLOR+2,CY    ; BGCOLOR's low half = Y
+        CMOVXR  CY              ; the register half at X = Y
+```
+
+**The instructions**
+
+| Macro | Writes | To | Example (X = `BGCOLOR+2`, Y = `$1234` before) | Result |
+|-------|--------|----|-----------------------------------------------|--------|
+| `CMOVX n` | The number n | The register half at X | `CMOVX $00FF` | BGCOLOR's low half = `$00FF` |
+| `CMOVXP n` | The number n | The register half at X, then X = X + 2 | `CMOVXP $00FF` | The same, and X = `BGCOLOR+4` |
+| `CMOVR reg,CY` | Y | reg (`CMOVR reg,CX`: X) | `CMOVR PALETTE+2,CY` | Colour 0's low half = `$1234` |
+| `CMOVXR CY` | Y | The register half at X (`CMOVXR CX`: X) | `CMOVXR CY` | BGCOLOR's low half = `$1234` |
+| `CMOVXRP CY` | Y | The register half at X, then X = X + 2 | `CMOVXRP CY` | The same, and X = `BGCOLOR+4` |
+
+None of them change the flags.
+
+**Stepping through registers: the P forms.** The forms ending in `P` add 2 to X after the write, as the 68000's `(A0)+` does. Two steps of 2 take X from a register's high half to its low half, then on to the next register, so a run of P forms walks through consecutive registers without naming each one. For example, to write a whole palette entry, then move on to the next:
+
+```
+        CLDI    CX,PALETTE+5*4  ; X = colour 5, high half
+        CMOVXP  $00FF           ; red = $FF (held); X = colour 5, low half
+        CMOVXRP CY              ; green, blue = Y: colour 5 written whole;
+                                ; X = colour 6, high half
+```
+
+**The halves rule still holds.** A MOVR to a high half is held until a low-half write to the same register, which then writes both together, exactly as with CMOVE. Strobes (COPJMP1, COPJMP2, COPINT, a DMA engine start) act on a write to their low half, whether it comes from a MOVE or a MOVR. A MOVR can reach only the custom block, as a MOVE can.
+
+**How a MOVR is made up.** The macros build it; this is for reading a list in memory:
+
+```
+  31 30  28 27 26 25 24 23            16 15                                 0
+ +--+------+--+--+--+--+----------------+-------------------------------------+
+ | 1| 100  | A| S| I| X|    00000000    |  number (S = 0), or offset (A = 0)  |
+ +--+------+--+--+--+--+----------------+-------------------------------------+
+   A: the register is the one at X        S: the data is a register (X or Y)
+   I: X = X + 2 afterwards (with A only)  X: with S, the data is X (else Y)
+   With A and S both set, bits 15-0 are 0. A and S both clear is reserved.
+
+             Figure 5-5: The MOVR Instruction
+```
+
+So `CMOVXRP CY` is `$CE000000`: op 100, A, S and I set, X clear (the data is Y).
 
 ### Arithmetic and comparing: the ALU instructions
 
@@ -1166,7 +1207,7 @@ As with SKIP, the instruction skipped is usually a `CJUMP` back to the top of a 
    d:  the register changed (for ST: stored): 0 X, 1 Y, 3 the flags (LD, ST only)
    s:  the source: 0 the number in bits 15-0, 1 X, 2 Y, 3 Rn (n in bits 2-0)
 
-             Figure 5-5: The ALU Instruction
+             Figure 5-6: The ALU Instruction
 ```
 
 So `CADDI CY,$0604` is `$D4800604`: op 101, fn 2 (ADD), d 1 (Y), s 0 (a number), number `$0604`.
