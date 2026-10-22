@@ -12,14 +12,14 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 |------|-------|
 | Sprites | 8 (SPR0–SPR7). Each can be reused further down the screen by the copper rewriting its registers |
 | Window | HSTART–HSTOP across, VSTART–VSTOP down, like a layer's window. The image's size follows from the window and the magnify |
-| Width | Any; one line must fit the 32-word FIFO: up to 64 source pixels at 8 bpp, 128 at 4 bpp, 256 at 2 bpp |
+| Size | Any, as a layer's: set by the window. Only the memory budget limits it (section 5) |
 | Colours | 2, 4 or 8 bits per pixel. 2 and 4 bpp: 3 or 15 colours + transparent, from any 16-colour block of the palette; 8 bpp: 255 colours + transparent, the whole palette |
 | Position | Any pixel; clipped at the left, right and bottom edges by the hardware, at the top by software (section 3) |
 | Flip | Horizontal and vertical |
 | Magnify | ×1, ×2 or ×4, across and down separately |
 | Depth | Per sprite: in front of all layers, between any two (in PRIO order), or behind all |
 | Collisions | Sprite–sprite and sprite–layer, per pixel, latched (as the Amiga's CLXDAT) |
-| Data registers | A 32-word FIFO per sprite (one line of the widest, deepest sprite) |
+| Data registers | A 32-word FIFO per sprite, streaming: lines of any length pass through it |
 | Fetch | Just in time, deadline first, shared with the bitplanes (spec 4, section 5; spec 5, section 6). A sprite's next words are fetched as soon as its FIFO has room and a memory cycle is free, so most of each line is fetched ahead |
 
 ## 2. Comparison with the Amiga (OCS/ECS)
@@ -30,11 +30,11 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Pointers | SPRxPT, rewritten by the copper each frame | The same |
 | Position and settings | SPRxPOS, SPRxCTL (HSTART, VSTART, VSTOP): fetched by the DMA from control words in the sprite's data, or written by the CPU/copper | SPRxH, SPRxV (start and stop across and down: a window, as a layer has), SPRxCTL: plain registers, written by the CPU or copper only; the data in memory is image only |
 | Reuse down the screen | The data holds more control words after each sprite | The copper writes the sprite's registers again, after a WAIT |
-| Settings | Position, height | A window (any width up to the FIFO, any height), bits per pixel, flips, magnify, depth among the layers, palette block |
-| Width | 16 pixels (lores) | Set by the window: up to 64 source pixels at 8 bpp, 128 at 4 bpp, 256 at 2 bpp |
+| Settings | Position, height | A window (any size), bits per pixel, flips, magnify, depth among the layers, palette block |
+| Width | 16 pixels (lores) | Any: set by the window |
 | Colours | 3 + transparent; 15 with two attached sprites | 3, 15 or 255 + transparent, every sprite |
 | Pixel format | Two bitplanes | Chunky: 2, 4 or 8 bits per pixel, first pixel in the high bits |
-| Data registers | SPRxDATA, SPRxDATB: one line of 16 pixels | A 32-word FIFO: a whole line of up to 64 pixels at 8 bpp |
+| Data registers | SPRxDATA, SPRxDATB: one line of 16 pixels | A 32-word FIFO, streaming: lines of any length pass through it |
 | Fetch | Two words per sprite per line, in fixed slots in the horizontal blank | Just in time, deadline first; early when cycles are free |
 | Manual mode | Write SPRxDATA/B with DMA off | Push words into SPRxDAT with the sprite's DMA off |
 | Priority | Fixed in pairs against the playfields | Per sprite, any depth among the layers |
@@ -57,7 +57,7 @@ Each sprite has three registers (section 6):
 | SPRxV | 10–0 | VSTART | First picture line of the sprite (0–575; 576 or more: not shown this frame) |
 | SPRxV | 26–16 | VSTOP | Picture line just after the sprite. Past the bottom clips |
 
-The image's size follows from the window: **source width** = (HSTOP − HSTART) ÷ HMAG pixels and **source height** = (VSTOP − VSTART) ÷ VMAG lines, each rounded up. A source line is stored in whole words, ⌈source width × BPP ÷ 16⌉ of them, and must fit the FIFO: at most 32 words (64 pixels at 8 bpp, 128 at 4 bpp, 256 at 2 bpp). A wider window shows the sprite's pixels up to that limit and is transparent beyond it.
+The image's size follows from the window: **source width** = (HSTOP − HSTART) ÷ HMAG pixels and **source height** = (VSTOP − VSTART) ÷ VMAG lines, each rounded up. A source line is stored in whole words, ⌈source width × BPP ÷ 16⌉ of them. There is no size limit: lines of any length stream through the FIFO (section 4); only the memory budget (section 5) limits how big and how many sprites can be.
 
 **Clipping:** at the left, right and bottom the hardware clips: pixels outside the screen are not shown (those left of it are still fetched and dropped). At the top, VSTART cannot be above line 0: to show a sprite partly above the screen, point SPRxPT at its first visible line and set VSTART to 0.
 
@@ -101,10 +101,10 @@ In direct-colour mode (VIDCON.DIRECT, spec 4, section 4.9) sprites are drawn in 
 
 ## 4. Data registers: the FIFO
 
-Each sprite has a **FIFO of 32 words**, its data registers: one source line of up to 32 words (64 pixels at 8 bpp, 128 at 4 bpp, 256 at 2 bpp). The DMA pushes the image's words in at the back; the sprite takes them from the front as it is drawn, a line's worth per screen line (⌈source width × BPP ÷ 16⌉ words: 1 to 32).
+Each sprite has a **FIFO of 32 words**, its data registers. The DMA pushes the image's words in at the back; the sprite takes them from the front as it is drawn, a line's worth per screen line (⌈source width × BPP ÷ 16⌉ words). The FIFO streams: a line can be longer than the FIFO, as long as the DMA keeps it from running dry. Its size only sets how far ahead the DMA can fetch: up to 32 words.
 
 - **Fetching early.** The DMA pushes a sprite's words whenever its FIFO has room. So while a line is being drawn, the words it has finished with are already being replaced by the next line's, using any memory cycle nobody else wants. Fetching becomes urgent only when the FIFO is about to run out: then the sprite takes part in the deadline-first order with the layers, and may take the CPU's cycle (spec 5, section 6).
-- **A sprite at the right edge** has only the horizontal blank (5.3 µs) to fetch its next line ahead, but it has finished its own line by then.
+- **The lead** is up to 32 words per sprite: 64 source pixels at 8 bpp, 128 at 4 bpp, 256 at 2 bpp. A sprite at the right edge fills its FIFO for its next line in the horizontal blank (5.3 µs).
 - **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper pushes the image's words into its FIFO by writing SPRxDAT. The sprite shows as its window and CTL say, taking a line's words from the FIFO on each line it shows. If the FIFO runs dry, the sprite is transparent where the words are missing and VIDSTAT.SPRUNDER is set.
 - **Underrun.** If the DMA cannot keep a sprite's FIFO filled (section 5), the missing pixels are transparent and VIDSTAT.SPRUNDER (bit 7) is set; it can raise the VIDERR interrupt like OVERRUN.
 
@@ -114,7 +114,7 @@ Sprites and layers share one budget, ordered by deadline. The display's own memo
 
 - A **layer** needs, per 16 source pixels, 1 word per plane (planar) or b words at b bpp (chunky); at 2× scale across, half that per 16 screen pixels.
 - A **sprite** needs BPP words per 16 source pixels while the beam is over it (2, 4 or 8); with HMAG ×2, half that per 16 screen pixels.
-- Sprites side by side do not add up; sprites over the same pixels at the same time do. Because each FIFO holds a line ahead, what matters is mostly the total per line, not each moment: a whole line at 1× has 45 groups of 16 pixels, about 540 guaranteed words.
+- Sprites side by side do not add up; sprites over the same pixels at the same time do. Each FIFO's lead (32 words) lets a sprite fetch ahead into quieter stretches of the line, so short overlaps (up to about the lead's width: 64 pixels at 8 bpp, 256 at 2 bpp) are smoothed out; longer overlaps of wide sprites are limited by the budget at that moment, as the table shows.
 
 Sprites stacked over the same 16 screen pixels, guaranteed (more when cycles are free):
 
@@ -126,7 +126,7 @@ Sprites stacked over the same 16 screen pixels, guaranteed (more when cycles are
 | Two 4-plane layers at 1× | 8 | 0 | 1 | 1 | 2 |
 | Three 4-plane layers at 1× | 12 | 0 | 0 | 0 | 0 |
 
-The FIFOs' lead lets sprites go well beyond these figures where the screen has quieter parts on the same line. The figures are worked out, not measured; to be measured in simulation (open point S1).
+The FIFOs' lead lets sprites go beyond these figures for short overlaps, and where the screen has quieter parts nearby on the same line. The figures are worked out, not measured; to be measured in simulation (open point S1).
 
 ## 6. Registers
 
