@@ -171,6 +171,11 @@ Channel n (0–15) at `0x440 + n × 0x20`:
 | `0x714` | COPPC | R | 10, 6 |
 | `0x718` | COPSTAT | R, W1C | 10, 6 |
 | `0x71C` | COPINT | W | 10, 6 |
+| `0x720` | COPX | RW | 10, 6 |
+| `0x724` | COPY | RW | 10, 6 |
+| `0x728` | COPFLAGS | RW | 10, 6 |
+| `0x72C` | COPSP | RW | 10, 6 |
+| `0x740`–`0x75C` | COPR0–7 | RW | 10, 6 |
 
 ## 4. System block (`0xF00000`)
 

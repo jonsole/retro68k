@@ -103,7 +103,7 @@ array AUD 16 0x440 0x20 6/6
 end
 
 # Copper (spec 10)
-reg 0x700 COPCON  RW   10/6  EN=0 IRQEN=1 RESUME=2 PRI=5:4
+reg 0x700 COPCON  RW   10/6  EN=0 IRQEN=1 RESUME=2 STKKEEP=3 PRI=5:4
 reg 0x704 COP1LC  RW   10/6  ADDR=22:2
 reg 0x708 COP2LC  RW   10/6  ADDR=22:2
 reg 0x70C COPJMP1 W    10/6
@@ -111,6 +111,11 @@ reg 0x710 COPJMP2 W    10/6
 reg 0x714 COPPC   R    10/6  ADDR=22:2
 reg 0x718 COPSTAT RW1C 10/6  WAITING=0 STOPPED=1 ERR=2 IRQ=3
 reg 0x71C COPINT  W    10/6
+reg 0x720 COPX    RW   10/6  VALUE=15:0
+reg 0x724 COPY    RW   10/6  VALUE=15:0
+reg 0x728 COPFLAGS RW  10/6  Z=0 N=1 C=2
+reg 0x72C COPSP   RW   10/6  DEPTH=3:0
+regs COPR 8 0x740 RW 10/6
 
 # Memory areas in the custom block
 area PALETTE 0x4000 0x0400 RW 4/6.3
@@ -288,3 +293,32 @@ const COP_PIXONLY   0x08000000 "bit 27: WAIT/SKIP compare the pixel position onl
 const COP_BLT       0x00008000 "bit 15: WAIT also waits for the DMA engine to be idle"
 const COP_V_SHIFT   16
 const COP_H_SHIFT   0
+const COP_OP_MOVR   4          "MOVE through X and Y"
+const COP_OP_ALU    5
+const COP_OP_SKIPC  6          "SKIP on a condition"
+const COP_OP_CALL   7          "CALL and RET"
+const COP_MR_A      0x08000000 "MOVR bit 27: the register offset is X"
+const COP_MR_S      0x04000000 "MOVR bit 26: the data is a copper register (bit 24)"
+const COP_MR_I      0x02000000 "MOVR bit 25: X goes up by 2 afterwards"
+const COP_MR_X      0x01000000 "MOVR bit 24: the data register is X (else Y)"
+const COP_FN_SHIFT  25         "ALU bits 27-25: the function"
+const COP_FN_LD     0
+const COP_FN_ST     1
+const COP_FN_ADD    2
+const COP_FN_SUB    3
+const COP_FN_AND    4
+const COP_FN_OR     5
+const COP_FN_CMP    6
+const COP_D_SHIFT   23         "ALU bits 24-23: the register: 0 X, 1 Y, 3 flags"
+const COP_S_SHIFT   21         "ALU bits 22-21: the source: 0 immediate, 1 X, 2 Y, 3 Rn (n in bits 2-0)"
+const COP_CC_SHIFT  24         "SKIPC bits 27-24: the condition"
+const COP_CC_EQ     0
+const COP_CC_NE     1
+const COP_CC_LO     2
+const COP_CC_HS     3
+const COP_CC_MI     4
+const COP_CC_PL     5
+const COP_CC_HI     6
+const COP_CC_LS     7
+const COP_RET       0x08000000 "CALL bit 27: RET"
+const COP_STACK     8          "stack depth"

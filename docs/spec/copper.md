@@ -9,7 +9,8 @@ The copper is a small coprocessor that follows the beam, as on the Amiga: it run
 | Item | Value |
 |------|-------|
 | Program | A list of 32-bit instructions in Chip RAM, restarted from COP1LC at the start of every vertical blank |
-| Instructions | MOVE, WAIT, SKIP (as the Amiga), plus JUMP and STOP |
+| Instructions | MOVE, WAIT, SKIP (as the Amiga), plus JUMP and STOP; MOVE through X and Y; ADD, SUB, AND, OR, CMP, LD, ST; SKIP on a condition; CALL and RET |
+| Registers | X and Y (16 bits), the flags (Z, N, C), 8 storage registers COPR0–7, a return stack 8 deep. The CPU can read and write all but the stack contents |
 | Can write | The custom register block only (`0xE00000`–`0xE07FFF`, the reach of a MOVE's 15-bit offset): every register there and the palette. Not the system block |
 | Beam position | Full range (11-bit line and pixel), pixel exact |
 | Memory | Its own DMA channel in the scheduler (spec 5, section 6): best effort, cycle 4 and any cycle nobody else wants; COPCON.PRI can raise it (section 5) |
@@ -20,7 +21,9 @@ The copper is a small coprocessor that follows the beam, as on the Amiga: it run
 
 | | Amiga | retro68k v1 |
 |--|-------|-------------|
-| Instructions | MOVE, WAIT, SKIP, 32 bits each | The same, plus JUMP and STOP |
+| Instructions | MOVE, WAIT, SKIP, 32 bits each | The same, plus JUMP and STOP, and the instructions below |
+| Registers and arithmetic | None | X and Y: MOVE through them, ADD, SUB, AND, OR, CMP; flags and a conditional SKIP; 8 storage registers (section 4.2) |
+| Subroutines | None | CALL and RET, with a stack 8 deep (section 4.4) |
 | MOVE | 16-bit data to a custom register | The same: 16-bit data to a register half; a 32-bit register (a BPLxPT) takes two MOVEs, high half first |
 | WAIT/SKIP position | 8-bit line (wraps after line 255), horizontal in steps of 4 low-resolution pixels, with compare masks | 11-bit line and pixel, pixel exact. No masks: a **pixel-only** WAIT repeats an effect on every line |
 | Waiting for the blitter | BFD bit in WAIT | The same: the BLT bit waits until the DMA engine is idle too |
@@ -41,7 +44,7 @@ The list restarts from COP1LC at the start of each **vertical blank**, line 576,
 
 ## 4. Instructions
 
-Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kind:
+Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kind; for bit 31 = 1, bits 30–28 are the operation:
 
 ```
  MOVE   0 | register offset (30-16, even)          | data (15-0)
@@ -49,6 +52,10 @@ Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kin
  SKIP   1 | 001 | P | line (26-16)        | 0 | 0000 | pixel (10-0)
  JUMP   1 | 010 | 0000 0 | address (22-2), bits 1-0 = 0
  STOP   1 | 011 | 0 ...
+ MOVR   1 | 100 | A | S | I | X | 0000 0000 | data or offset (15-0)       section 4.1
+ ALU    1 | 101 | fn (27-25) | d (24-23) | s (22-21) | 0 ... | value or n (15-0)   section 4.2
+ SKIPC  1 | 110 | cc (27-24) | 0 ...                                       section 4.3
+ CALL   1 | 111 | R | 0000 | address (22-2), bits 1-0 = 0 (R = 1: RET)   section 4.4
 ```
 
 | Instruction | Does |
@@ -59,14 +66,90 @@ Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kin
 | **JUMP** | Continues at the address |
 | **STOP** | Stops until the next frame (or a COPJMP strobe). A WAIT for line 2047 does the same, as on the Amiga |
 
-Unused bit patterns are reserved; the copper treats them as STOP and sets COPSTAT.ERR.
+Unused bit patterns are reserved; the copper treats them as STOP and sets COPSTAT.ERR. Bits shown as 0 must be 0.
 
-**Loops:** SKIP and JUMP make loops that end at a beam position. For example, to repeat a block of MOVEs on every line until line 400: `loop: WAIT P 0, 0` … MOVEs … `SKIP 400, 0` / `JUMP loop`.
+**Loops:** SKIP and JUMP make loops that end at a beam position. For example, to repeat a block of MOVEs on every line until line 400: `loop: WAIT P 0, 0` … MOVEs … `SKIP 400, 0` / `JUMP loop`. Loops that end on a count or a value use the registers and SKIPC (sections 4.2, 4.3).
+
+### 4.1 MOVR: MOVE through X and Y
+
+MOVR is a MOVE whose register offset, or data, or both, come from the copper's registers X and Y (section 4.2):
+
+| Bit | Name | Meaning |
+|-----|------|---------|
+| 27 | A | The register offset is X (bits 14–1 of X; bits 15 and 0 are ignored) |
+| 26 | S | The data is a register: X if bit 24 is set, else Y |
+| 25 | I | After the write, X = X + 2 (only with A) |
+| 24 | X | With S: the data register is X |
+
+Bits 15–0 hold the data when S is clear, or the register offset (as in MOVE, bits 14–1) when S is set and A clear; with A and S both set they are 0. A and S both clear is reserved. A MOVR follows every MOVE rule: the halves rule, strobes, and the reach (the custom block only).
+
+| Form | Macro | Does |
+|------|-------|------|
+| A | `CMOVX value` | (X) ← value |
+| A, I | `CMOVXP value` | (X) ← value, then X = X + 2 |
+| S | `CMOVR reg,CX` / `CMOVR reg,CY` | reg ← X or Y |
+| A, S | `CMOVXR CY` | (X) ← Y (or X) |
+| A, S, I | `CMOVXRP CY` | (X) ← Y (or X), then X = X + 2 |
+
+With I, a run of MOVRs walks through consecutive register halves: the palette, a layer's pointers, and so on.
+
+### 4.2 Registers and the ALU
+
+The copper has these registers, all 16 bits except the flags and the stack depth. The CPU and the copper can read and write them at their custom-register addresses (section 6); a copper MOVE to COPX loads X, for example.
+
+| Register | Address | |
+|----------|---------|--|
+| X, Y | COPX, COPY | Working registers: addresses (MOVR) and data |
+| Flags | COPFLAGS | Z (0): the result was 0. N (1): bit 15 of the result. C (2): carry out of an ADD, borrow from a SUB or CMP |
+| R0–R7 | COPR0–COPR7 | Storage: to save X, Y and the flags, to keep values between frames, and to pass values to and from the CPU |
+
+The **ALU** instruction: `fn` (bits 27–25) is the function, `d` (24–23) the register it works on (0 X, 1 Y, 3 the flags; 2 is reserved), and `s` (22–21) the source: 0 the 16-bit value in bits 15–0, 1 X, 2 Y, 3 Rn with n in bits 2–0.
+
+| fn | Name | Does | Flags |
+|----|------|------|-------|
+| 0 | LD | d = source. d may be the flags (bits 2–0 of the source) | Only LD to the flags changes them |
+| 1 | ST | Rn = d (s must be 3). d may be the flags | Unchanged |
+| 2 | ADD | d = d + source | Z, N, C (carry) |
+| 3 | SUB | d = d − source | Z, N, C (borrow: d < source, unsigned) |
+| 4 | AND | d = d AND source | Z, N; C cleared |
+| 5 | OR | d = d OR source | Z, N; C cleared |
+| 6 | CMP | d − source, result not kept | Z, N, C as SUB |
+| 7 | – | Reserved | |
+
+ADD to CMP work on X or Y only: with d = the flags they are reserved. All arithmetic is 16 bits and wraps. Macros: `CLDI`, `CLD`, `CST`, `CADDI`/`CADD`, `CSUBI`/`CSUB`, `CANDI`/`CAND`, `CORI`/`COR`, `CCMPI`/`CCMP`; the `I` forms take a value, the others a register (`CX`, `CY`, `CR0`–`CR7`).
+
+The vertical blank and the COPJMP strobes never change X, Y, the flags or R0–R7.
+
+### 4.3 SKIPC: SKIP on a condition
+
+Skips the next instruction if the condition `cc` (bits 27–24) holds, as the 68000's conditions:
+
+| cc | Name | Skips if | After `CMP d,source` |
+|----|------|----------|----------------------|
+| 0 | EQ | Z | d = source |
+| 1 | NE | not Z | d ≠ source |
+| 2 | LO | C | d < source (unsigned) |
+| 3 | HS | not C | d ≥ source |
+| 4 | MI | N | bit 15 of d − source set |
+| 5 | PL | not N | bit 15 clear |
+| 6 | HI | not C and not Z | d > source |
+| 7 | LS | C or Z | d ≤ source |
+
+Codes 8–15 are reserved. Macros `CSKIPEQ` … `CSKIPLS`. A loop of N passes: `CLDI CY,N` / `loop:` … `CSUBI CY,1` / `CSKIPEQ` / `CJUMP loop`.
+
+### 4.4 CALL and RET
+
+**CALL** pushes the address of the next instruction onto the copper's stack and continues at the address. **RET** (bit 27 set) pops an address and continues there. The stack is inside the copper (the copper does not write memory), **8 entries** deep; COPSP reads how many are in use. A CALL with the stack full, or a RET with it empty, stops the copper and sets COPSTAT.ERR.
+
+At each vertical blank the stack is emptied, unless **COPCON.STKKEEP** is set: then it is kept as it is, and list 1 starts with it. The COPJMP strobes do not change the stack; a CPU write to COPSP empties it.
+
+Macros `CCALL address`, `CRET`.
 
 ## 5. Timing
 
 - **Beam position:** the copper compares against the beam position seen on the memory side (spec 4, section 3.1), a few clocks behind the pixel clock. A WAIT ends within about one pixel of its position.
 - **MOVE after a WAIT:** the next instruction is already fetched, so the write happens 10–20 ns after the WAIT ends. Writes that follow need their own fetches.
+- **Every instruction is one fetch** (two words), the new ones included; an ALU instruction takes one extra clock. JUMP, CALL, RET and a SKIP or SKIPC that skips throw the prefetched instruction away, so the instruction after them is fetched fresh. A loop therefore costs a fetch for every instruction in it, every pass: unrolled MOVEs are faster, loops are shorter.
 - **Fetches:** each instruction is two 16-bit words. At PRI 0 the copper's channel is best effort: it gets cycle 4 and any other cycle nobody else wants (spec 5, section 6), which is usually plenty but not guaranteed on a busy screen. At PRI 1 cycle 4 is its own: at least 20 MB/s, one instruction every 200 ns or better (about 5 pixels at 576p), and much faster in the blanking.
 - **Priority (COPCON.PRI):** a list that must make many writes quickly can raise the copper's priority:
 
@@ -86,7 +169,7 @@ Offsets in the custom register block at `0xE00000`.
 
 | Offset | Name | Access | Bits | Description |
 |--------|------|--------|------|-------------|
-| `0x700` | COPCON | RW | EN (0), IRQEN (1), RESUME (2), PRI (5–4) | Copper on (DMACON.DMAEN and COPEN must also be set); COPINT raises the interrupt; the vertical blank saves list 2's place in COP2LC (section 6.1); priority for memory cycles (section 5): 0 normal, 1 high, 2 nasty |
+| `0x700` | COPCON | RW | EN (0), IRQEN (1), RESUME (2), STKKEEP (3), PRI (5–4) | Copper on (DMACON.DMAEN and COPEN must also be set); COPINT raises the interrupt; the vertical blank saves list 2's place in COP2LC (section 6.1); the vertical blank keeps the stack (section 4.4); priority for memory cycles (section 5): 0 normal, 1 high, 2 nasty |
 | `0x704` | COP1LC | RW | 22–2 | First list: restarted at every vertical blank |
 | `0x708` | COP2LC | RW | 22–2 | Second list: runs when COPJMP2 is written. The vertical blank reloads the copper from COP1LC only. COP2LC is changed by the hardware only with COPCON.RESUME set (section 6.1) |
 | `0x70C` | COPJMP1 | W | – | Strobe: restart at COP1LC now |
@@ -94,10 +177,17 @@ Offsets in the custom register block at `0xE00000`.
 | `0x714` | COPPC | R | 22–2 | The instruction being run |
 | `0x718` | COPSTAT | RW1C | WAITING (0), STOPPED (1), ERR (2), IRQ (3) | ERR (a reserved instruction) and IRQ (set by COPINT) are sticky: write 1 to clear |
 | `0x71C` | COPINT | W | – | Strobe: sets COPSTAT.IRQ. Meant to be written by the copper itself |
+| `0x720` | COPX | RW | 15–0 | X (section 4.2) |
+| `0x724` | COPY | RW | 15–0 | Y |
+| `0x728` | COPFLAGS | RW | Z (0), N (1), C (2) | The flags |
+| `0x72C` | COPSP | RW | 3–0 | Read: entries in use on the stack (0–8). Write (any value): empty the stack |
+| `0x740`–`0x75C` | COPR0–COPR7 | RW | 15–0 | Storage registers R0–R7 |
 
 **Strobes** (COPJMP1, COPJMP2, COPINT) act on any write that reaches their low half (a MOVE to the low half, or a CPU MOVE.W to address + 2, or MOVE.L).
 
-**Starting:** after reset COPCON, COP1LC, COP2LC and COPSTAT are 0. With COPCON.EN, DMACON.COPEN and DMAEN all set, the copper starts from COP1LC at the next vertical blank; a write to COPJMP1 starts it at once. Clearing any of them stops it at once; setting them again starts it at the next vertical blank (or COPJMP1).
+**The copper's registers from the CPU:** COPX, COPY, COPFLAGS and COPR0–7 are 16-bit registers in the low half. The CPU can write them at any time; a write lands between two copper instructions. To hand values to a running list without a race, write them while the copper is stopped or idle, or use storage registers that only one side writes.
+
+**Starting:** after reset COPCON, COP1LC, COP2LC, COPSTAT, X, Y, the flags, R0–R7 and the stack are 0. With COPCON.EN, DMACON.COPEN and DMAEN all set, the copper starts from COP1LC at the next vertical blank; a write to COPJMP1 starts it at once. Clearing any of them stops it at once; setting them again starts it at the next vertical blank (or COPJMP1).
 
 **Interrupt:** source COPPER (2) in the interrupt controller (spec 13) is COPSTAT.IRQ with COPCON.IRQEN, with its own vector; default level 5. The handler clears it by writing 1 to COPSTAT.IRQ.
 
@@ -109,11 +199,13 @@ Offsets in the custom register block at `0xE00000`.
 
 The copper can run a long **background** list, such as a queue of DMA engine jobs, that carries on across frames while list 1 still restarts at every vertical blank. On the Amiga, the vertical blank simply cuts list 2 off. Here, with COPCON.RESUME set:
 
-- The copper keeps an **in list 2** flag. A COPJMP2 strobe sets it. A COPJMP1 strobe, a STOP (or a WAIT for line 2047, or a reserved instruction), and the vertical blank clear it. A JUMP leaves it as it is, so a background list can loop and branch.
+- The copper keeps an **in list 2** flag. A COPJMP2 strobe sets it. A COPJMP1 strobe, a STOP (or a WAIT for line 2047, or a reserved instruction), and the vertical blank clear it. JUMP, CALL, RET and the SKIPs leave it as it is, so a background list can loop, branch and call subroutines.
 - At the vertical blank, if the flag is set, the hardware writes the **resume address** to COP2LC before it reloads from COP1LC. The resume address is the instruction not yet finished: a WAIT still waiting (it runs again, whole), or the next instruction to run. If a high half is held from a MOVE (section 4), the resume address is that MOVE's instead, so the pair is run again whole: the held half is not kept.
 - List 1 ends with a MOVE to COPJMP2, as usual, and list 2 carries on where it was cut off.
 
 Without RESUME (the default), COP2LC is never changed by the hardware, as on the Amiga.
+
+**Only the place is saved.** X, Y, the flags and R0–R7 are never changed by the vertical blank, so a background list finds them as it left them, as long as list 1 does not change them: a list 1 that uses X, Y or the ALU saves what it uses into spare storage registers first (`CST`) and puts it back (`CLD`) before its COPJMP2. The flags are saved the same way (`CST n,CF` … `CLD CF,Rn`), so a cut-off between a CMP and its SKIPC is safe. The stack is emptied at the vertical blank unless COPCON.STKKEEP is set; with STKKEEP, list 1's CALLs must be balanced (each one returned from before its COPJMP2), so that list 2's return addresses stay on top. CALL and RET do not change the "in list 2" flag.
 
 Rules for a background list:
 
@@ -160,12 +252,16 @@ The assembler macros for these (`CMOVE`, `CWAIT`, `CSKIP`, `CJUMP`, `CSTOP`) are
 | Item | Resource |
 |------|----------|
 | Program counter, one prefetched instruction, the high-half latch, beam compare | Logic, about 300–400 LUTs |
+| X, Y, the flags, the 16-bit ALU, the conditions | About 150 LUTs, 35 flip-flops |
+| R0–R7 and the stack (8 × 21 bits) | Distributed RAM, about 20 LUTs; their register-bus reads about 50 LUTs |
+| Total | About 550–650 LUTs |
 
 ## 9. Open points
 
 | # | Item |
 |---|------|
 | C1 | Whether a 32-bit MOVEL (an 8-byte instruction) is worth adding, to set a pointer in one instruction |
+| C4 | A load of X or Y from Chip RAM (a table), which the arithmetic cannot replace |
 | C2 | Exact pixel delay from a WAIT to a palette change, measured on the board |
 | C3 | Whether RESUME should also save the held high half, so that no MOVE is ever repeated |
 
@@ -176,10 +272,12 @@ The assembler macros for these (`CMOVE`, `CWAIT`, `CSKIP`, `CJUMP`, `CSTOP`) are
 - **Halves:** a 32-bit register written by two MOVEs is never seen half-written; the CPU's own halves are not disturbed.
 - **Strobes and lists:** COPJMP1/2 and COP1LC double buffering.
 - **COPINT:** raises the interrupt once per write.
+- **Registers and ALU:** every ALU function and source, every flag result (carry and borrow at the 16-bit edges), every condition, MOVR in all five forms with X+ across the halves rule, all compared with the copper model.
+- **CALL and RET:** nesting to 8, overflow and underflow set ERR; the stack emptied at the vertical blank, or kept with STKKEEP.
 - **RESUME:** a background list cut off at the vertical blank, mid-WAITB and between the halves of a MOVE pair, carries on from the right place; without RESUME, COP2LC is never changed.
 
 ## 11. Later versions
 
-- MOVEL (open point C1), CALL/RET, an ADD instruction
+- MOVEL (open point C1), a load from Chip RAM (open point C4)
 - WAIT with compare masks, if anything needs them
 - A second copper

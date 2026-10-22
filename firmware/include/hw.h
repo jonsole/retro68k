@@ -196,6 +196,8 @@
 #define COPCON_IRQEN_MASK                  0x2u
 #define COPCON_RESUME_SHIFT                2
 #define COPCON_RESUME_MASK                 0x4u
+#define COPCON_STKKEEP_SHIFT               3
+#define COPCON_STKKEEP_MASK                0x8u
 #define COPCON_PRI_SHIFT                   4
 #define COPCON_PRI_MASK                    0x30u
 /* COP1LC: RW, spec 10/6 */
@@ -233,6 +235,33 @@
 /* COPINT: W, spec 10/6 */
 #define COPINT_OFS                         0x71Cu
 #define COPINT                             HW_REG32(CUSTOM_BASE + COPINT_OFS)
+/* COPX: RW, spec 10/6 */
+#define COPX_OFS                           0x720u
+#define COPX                               HW_REG32(CUSTOM_BASE + COPX_OFS)
+#define COPX_VALUE_SHIFT                   0
+#define COPX_VALUE_MASK                    0xFFFFu
+/* COPY: RW, spec 10/6 */
+#define COPY_OFS                           0x724u
+#define COPY                               HW_REG32(CUSTOM_BASE + COPY_OFS)
+#define COPY_VALUE_SHIFT                   0
+#define COPY_VALUE_MASK                    0xFFFFu
+/* COPFLAGS: RW, spec 10/6 */
+#define COPFLAGS_OFS                       0x728u
+#define COPFLAGS                           HW_REG32(CUSTOM_BASE + COPFLAGS_OFS)
+#define COPFLAGS_Z_SHIFT                   0
+#define COPFLAGS_Z_MASK                    0x1u
+#define COPFLAGS_N_SHIFT                   1
+#define COPFLAGS_N_MASK                    0x2u
+#define COPFLAGS_C_SHIFT                   2
+#define COPFLAGS_C_MASK                    0x4u
+/* COPSP: RW, spec 10/6 */
+#define COPSP_OFS                          0x72Cu
+#define COPSP                              HW_REG32(CUSTOM_BASE + COPSP_OFS)
+#define COPSP_DEPTH_SHIFT                  0
+#define COPSP_DEPTH_MASK                   0xFu
+#define COPR_NUM                           8
+#define COPR_OFS(n)                        (0x740u + 4u * (n))
+#define COPR(n)                            HW_REG32(CUSTOM_BASE + COPR_OFS(n))
 /* L(n): 3 x 128 bytes, spec 4/6.2 */
 #define L_NUM                              3
 #define L_SPAN                             0x80u
@@ -1040,5 +1069,34 @@ _Static_assert(sizeof(dmxdesc_t) == 32, "DMXDESC layout");
 #define COP_BLT                            0x8000u  /* bit 15: WAIT also waits for the DMA engine to be idle */
 #define COP_V_SHIFT                        0x10u
 #define COP_H_SHIFT                        0x0u
+#define COP_OP_MOVR                        0x4u  /* MOVE through X and Y */
+#define COP_OP_ALU                         0x5u
+#define COP_OP_SKIPC                       0x6u  /* SKIP on a condition */
+#define COP_OP_CALL                        0x7u  /* CALL and RET */
+#define COP_MR_A                           0x8000000u  /* MOVR bit 27: the register offset is X */
+#define COP_MR_S                           0x4000000u  /* MOVR bit 26: the data is a copper register (bit 24) */
+#define COP_MR_I                           0x2000000u  /* MOVR bit 25: X goes up by 2 afterwards */
+#define COP_MR_X                           0x1000000u  /* MOVR bit 24: the data register is X (else Y) */
+#define COP_FN_SHIFT                       0x19u  /* ALU bits 27-25: the function */
+#define COP_FN_LD                          0x0u
+#define COP_FN_ST                          0x1u
+#define COP_FN_ADD                         0x2u
+#define COP_FN_SUB                         0x3u
+#define COP_FN_AND                         0x4u
+#define COP_FN_OR                          0x5u
+#define COP_FN_CMP                         0x6u
+#define COP_D_SHIFT                        0x17u  /* ALU bits 24-23: the register: 0 X, 1 Y, 3 flags */
+#define COP_S_SHIFT                        0x15u  /* ALU bits 22-21: the source: 0 immediate, 1 X, 2 Y, 3 Rn (n in bits 2-0) */
+#define COP_CC_SHIFT                       0x18u  /* SKIPC bits 27-24: the condition */
+#define COP_CC_EQ                          0x0u
+#define COP_CC_NE                          0x1u
+#define COP_CC_LO                          0x2u
+#define COP_CC_HS                          0x3u
+#define COP_CC_MI                          0x4u
+#define COP_CC_PL                          0x5u
+#define COP_CC_HI                          0x6u
+#define COP_CC_LS                          0x7u
+#define COP_RET                            0x8000000u  /* CALL bit 27: RET */
+#define COP_STACK                          0x8u  /* stack depth */
 
 #endif /* RETRO68K_HW_H */

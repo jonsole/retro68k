@@ -168,6 +168,8 @@ COPCON_IRQEN_B               equ $1
 COPCON_IRQEN_M               equ $2
 COPCON_RESUME_B              equ $2
 COPCON_RESUME_M              equ $4
+COPCON_STKKEEP_B             equ $3
+COPCON_STKKEEP_M             equ $8
 COPCON_PRI_B                 equ $4
 COPCON_PRI_W                 equ $2
 COPCON_PRI_M                 equ $30
@@ -195,6 +197,34 @@ COPSTAT_ERR_M                equ $4
 COPSTAT_IRQ_B                equ $3
 COPSTAT_IRQ_M                equ $8
 COPINT                       equ $71C        ; W, spec 10/6
+COPX                         equ $720        ; RW, spec 10/6
+COPX_VALUE_B                 equ $0
+COPX_VALUE_W                 equ $10
+COPX_VALUE_M                 equ $FFFF
+COPY                         equ $724        ; RW, spec 10/6
+COPY_VALUE_B                 equ $0
+COPY_VALUE_W                 equ $10
+COPY_VALUE_M                 equ $FFFF
+COPFLAGS                     equ $728        ; RW, spec 10/6
+COPFLAGS_Z_B                 equ $0
+COPFLAGS_Z_M                 equ $1
+COPFLAGS_N_B                 equ $1
+COPFLAGS_N_M                 equ $2
+COPFLAGS_C_B                 equ $2
+COPFLAGS_C_M                 equ $4
+COPSP                        equ $72C        ; RW, spec 10/6
+COPSP_DEPTH_B                equ $0
+COPSP_DEPTH_W                equ $4
+COPSP_DEPTH_M                equ $F
+COPR_NUM                     equ $8
+COPR0                        equ $740        ; RW, spec 10/6
+COPR1                        equ $744        ; RW, spec 10/6
+COPR2                        equ $748        ; RW, spec 10/6
+COPR3                        equ $74C        ; RW, spec 10/6
+COPR4                        equ $750        ; RW, spec 10/6
+COPR5                        equ $754        ; RW, spec 10/6
+COPR6                        equ $758        ; RW, spec 10/6
+COPR7                        equ $75C        ; RW, spec 10/6
 ; L0..L2: 3 x 128 bytes, spec 4/6.2
 L_NUM                        equ $3
 L_SPAN                       equ $80
@@ -1204,3 +1234,32 @@ COP_PIXONLY                  equ $8000000    ; bit 27: WAIT/SKIP compare the pix
 COP_BLT                      equ $8000       ; bit 15: WAIT also waits for the DMA engine to be idle
 COP_V_SHIFT                  equ $10
 COP_H_SHIFT                  equ $0
+COP_OP_MOVR                  equ $4          ; MOVE through X and Y
+COP_OP_ALU                   equ $5
+COP_OP_SKIPC                 equ $6          ; SKIP on a condition
+COP_OP_CALL                  equ $7          ; CALL and RET
+COP_MR_A                     equ $8000000    ; MOVR bit 27: the register offset is X
+COP_MR_S                     equ $4000000    ; MOVR bit 26: the data is a copper register (bit 24)
+COP_MR_I                     equ $2000000    ; MOVR bit 25: X goes up by 2 afterwards
+COP_MR_X                     equ $1000000    ; MOVR bit 24: the data register is X (else Y)
+COP_FN_SHIFT                 equ $19         ; ALU bits 27-25: the function
+COP_FN_LD                    equ $0
+COP_FN_ST                    equ $1
+COP_FN_ADD                   equ $2
+COP_FN_SUB                   equ $3
+COP_FN_AND                   equ $4
+COP_FN_OR                    equ $5
+COP_FN_CMP                   equ $6
+COP_D_SHIFT                  equ $17         ; ALU bits 24-23: the register: 0 X, 1 Y, 3 flags
+COP_S_SHIFT                  equ $15         ; ALU bits 22-21: the source: 0 immediate, 1 X, 2 Y, 3 Rn (n in bits 2-0)
+COP_CC_SHIFT                 equ $18         ; SKIPC bits 27-24: the condition
+COP_CC_EQ                    equ $0
+COP_CC_NE                    equ $1
+COP_CC_LO                    equ $2
+COP_CC_HS                    equ $3
+COP_CC_MI                    equ $4
+COP_CC_PL                    equ $5
+COP_CC_HI                    equ $6
+COP_CC_LS                    equ $7
+COP_RET                      equ $8000000    ; CALL bit 27: RET
+COP_STACK                    equ $8          ; stack depth
