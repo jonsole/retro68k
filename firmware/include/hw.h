@@ -392,26 +392,28 @@
 #define DMX_CHERR(n)                       HW_REG32(CUSTOM_BASE + DMX_AT(n) + DMX_CHERR_OFS)
 #define DMX_CHERR_ADDR_SHIFT               0
 #define DMX_CHERR_ADDR_MASK                0xFFFFFFu
-/* SPR(n): 8 x 16 bytes, spec 9/6 */
+/* SPR(n): 8 x 32 bytes, spec 9/6 */
 #define SPR_NUM                            8
-#define SPR_SPAN                           0x10u
+#define SPR_SPAN                           0x20u
 #define SPR_AT(n)                          (0x520u + (n) * SPR_SPAN)
 #define SPR_PT_OFS                         0x0u
 #define SPR_PT(n)                          HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_PT_OFS)
 #define SPR_PT_ADDR_SHIFT                  1
 #define SPR_PT_ADDR_MASK                   0x7FFFFEu
-#define SPR_POS_OFS                        0x4u
-#define SPR_POS(n)                         HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_POS_OFS)
-#define SPR_POS_X_SHIFT                    0
-#define SPR_POS_X_MASK                     0xFFFu
-#define SPR_POS_Y_SHIFT                    16
-#define SPR_POS_Y_MASK                     0xFFF0000u
-#define SPR_CTL_OFS                        0x8u
+#define SPR_H_OFS                          0x4u
+#define SPR_H(n)                           HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_H_OFS)
+#define SPR_H_HSTART_SHIFT                 0
+#define SPR_H_HSTART_MASK                  0xFFFu
+#define SPR_H_HSTOP_SHIFT                  16
+#define SPR_H_HSTOP_MASK                   0xFFF0000u
+#define SPR_V_OFS                          0x8u
+#define SPR_V(n)                           HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_V_OFS)
+#define SPR_V_VSTART_SHIFT                 0
+#define SPR_V_VSTART_MASK                  0x7FFu
+#define SPR_V_VSTOP_SHIFT                  16
+#define SPR_V_VSTOP_MASK                   0x7FF0000u
+#define SPR_CTL_OFS                        0xCu
 #define SPR_CTL(n)                         HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_CTL_OFS)
-#define SPR_CTL_HEIGHT_SHIFT               0
-#define SPR_CTL_HEIGHT_MASK                0x3FFu
-#define SPR_CTL_WIDTH_SHIFT                10
-#define SPR_CTL_WIDTH_MASK                 0xC00u
 #define SPR_CTL_BPP_SHIFT                  12
 #define SPR_CTL_BPP_MASK                   0x3000u
 #define SPR_CTL_HFLIP_SHIFT                14
@@ -426,7 +428,7 @@
 #define SPR_CTL_DEPTH_MASK                 0x300000u
 #define SPR_CTL_PAL_SHIFT                  24
 #define SPR_CTL_PAL_MASK                   0xF000000u
-#define SPR_DAT_OFS                        0xCu
+#define SPR_DAT_OFS                        0x10u
 #define SPR_DAT(n)                         HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_DAT_OFS)
 #define SPR_DAT_DATA_SHIFT                 0
 #define SPR_DAT_DATA_MASK                  0xFFFFu
