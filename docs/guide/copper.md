@@ -1069,31 +1069,107 @@ The **MOVR** instructions are MOVEs that take the register, or the data, or both
 
 The `P` forms step X on to the next register half, so a run of them walks through the palette, or a layer's registers, without naming each one. All the rules of MOVE still hold: a high half is held until its low half, and strobes act on a low-half write.
 
-### Arithmetic and comparing
+### Arithmetic and comparing: the ALU instructions
 
-| Macro | Does | Flags |
-|-------|------|-------|
-| `CLDI d,value` | d = value | (only `CLDI CF`: sets them) |
-| `CLD d,src` | d = src (`CX`, `CY` or `CRn`) | (only `CLD CF`) |
-| `CST CRn,d` | Rn = d (`CX`, `CY` or `CF`) | Unchanged |
-| `CADDI d,value`, `CADD d,src` | d = d + value | Z, N, C (carry) |
-| `CSUBI d,value`, `CSUB d,src` | d = d − value | Z, N, C (borrow) |
-| `CANDI d,value`, `CAND d,src` | d = d AND value | Z, N; C cleared |
-| `CORI d,value`, `COR d,src` | d = d OR value | Z, N; C cleared |
-| `CCMPI d,value`, `CCMP d,src` | Works out d − value, keeps only the flags | Z, N, C |
+Each ALU instruction does one operation on **one of the copper's registers**, X or Y, using a **source**: a number written in the instruction, or another copper register. The result goes back into the register, as in `X = X + 4`.
 
-Here d is `CX` or `CY` (and for `CLD`, `CLDI` and `CST` also `CF`, the flags). All arithmetic is 16 bits and wraps round.
+The register being changed is always written **first**, and the source second:
 
-**SKIPC** skips the next instruction if a condition holds, exactly as the 68000's branches test the flags. After `CCMP d,value`:
+```
+        CADDI   CX,4            ; X = X + 4
+        CSUB    CY,CR2          ; Y = Y - R2
+```
 
-| Macro | Skips if |
-|-------|----------|
-| `CSKIPEQ`, `CSKIPNE` | d = value, d ≠ value |
-| `CSKIPLO`, `CSKIPHS` | d < value, d ≥ value (unsigned) |
-| `CSKIPHI`, `CSKIPLS` | d > value, d ≤ value (unsigned) |
-| `CSKIPMI`, `CSKIPPL` | the result's bit 15 set, clear |
+This is the other way round from the 68000, where `ADD.W #4,D0` puts the source first. Read a copper ALU instruction as an assignment: `CADDI CX,4` is "X = X + 4".
 
-As with SKIP, the instruction skipped is usually a `CJUMP` back to the top of a loop: the loop goes round until the condition holds.
+**Two forms of each instruction.** Every operation has a form for a number and a form for a register. The number form has an `I` (immediate) on the end of its name:
+
+| Form | Source | Example | Means |
+|------|--------|---------|-------|
+| `CADDI` | A 16-bit number in the instruction | `CADDI CX,4` | X = X + 4 |
+| `CADD` | A copper register: `CX`, `CY` or `CR0`–`CR7` | `CADD CX,CR3` | X = X + R3 |
+
+The number can be any 16-bit value or expression, such as `PALETTE+16*4` or `$0604`. The source registers cannot be the custom registers: only X, Y and R0–R7.
+
+**The instructions**
+
+| Macro | Means | Example (X = `$0010` and R3 = `$0003` before) | X after | Flags |
+|-------|-------|-----------------------------------------------|---------|-------|
+| `CLDI d,n` / `CLD d,src` | Load: d = source | `CLDI CX,$0100` | `$0100` | Unchanged |
+| `CST CRn,d` | Store: Rn = d (the register named first is written, as always) | `CST CR3,CX` | `$0010` (R3 = `$0010`) | Unchanged |
+| `CADDI d,n` / `CADD d,src` | Add: d = d + source | `CADD CX,CR3` | `$0013` | Set |
+| `CSUBI d,n` / `CSUB d,src` | Subtract: d = d − source | `CSUBI CX,$0011` | `$FFFF` | Set |
+| `CANDI d,n` / `CAND d,src` | AND: d = d AND source | `CANDI CX,$00F0` | `$0010` | Set |
+| `CORI d,n` / `COR d,src` | OR: d = d OR source | `CORI CX,$0001` | `$0011` | Set |
+| `CCMPI d,n` / `CCMP d,src` | Compare: works out d − source, **keeps only the flags** | `CCMPI CX,$0010` | `$0010` (unchanged) | Set |
+
+Here `d` is `CX` or `CY`. All arithmetic is 16 bits: a result that goes past `$FFFF` wraps round to `$0000` and up, and one that goes below 0 wraps to `$FFFF` and down (as `CSUBI` does in the table).
+
+There is no instruction to load a custom register into X or Y: the copper cannot read the custom registers. Values come from numbers in the list, from the CPU (which can write COPX, COPY and COPR0–7), or from earlier arithmetic.
+
+**The flags.** Add, subtract, AND, OR and compare set three flags, which a SKIPC instruction (below) can test. They mean what the 68000's do:
+
+| Flag | Set when |
+|------|----------|
+| Z, zero | The result is `$0000` |
+| N, negative | Bit 15 of the result is 1 (the result is negative, read as a signed number) |
+| C, carry | `CADD`: the true sum was more than `$FFFF`, so it wrapped. `CSUB` and `CCMP`: the source was bigger than the register (unsigned), so the result wrapped below 0. `CAND` and `COR` always clear C |
+
+`CCMP` exists only to set the flags: it subtracts as `CSUB` does, but leaves the register as it was. Use it just before a SKIPC.
+
+Loads and stores (`CLD`, `CLDI`, `CST`) do not change the flags, with one exception: the flags themselves can be loaded and stored, as the register `CF`, so that a list can save them and put them back:
+
+```
+        CST     CR7,CF          ; R7 = the flags (Z in bit 0, N in bit 1, C in bit 2)
+        ...
+        CLD     CF,CR7          ; the flags = R7
+```
+
+`CF` can be used only with `CLD`, `CLDI` and `CST`.
+
+### Testing the flags: SKIPC
+
+**SKIPC** skips the next instruction if a condition on the flags holds. The conditions are those of the 68000's branches. They are easiest to read as the result of the `CCMP` or `CCMPI` just before:
+
+| Macro | After `CCMPI CX,n`, skips if | Tests |
+|-------|------------------------------|-------|
+| `CSKIPEQ` | X = n | Z |
+| `CSKIPNE` | X ≠ n | not Z |
+| `CSKIPLO` | X < n (unsigned) | C |
+| `CSKIPHS` | X ≥ n (unsigned) | not C |
+| `CSKIPHI` | X > n (unsigned) | not C and not Z |
+| `CSKIPLS` | X ≤ n (unsigned) | C or Z |
+| `CSKIPMI` | bit 15 of X − n is 1 | N |
+| `CSKIPPL` | bit 15 of X − n is 0 | not N |
+
+After `CADD`, `CSUB`, `CAND` or `COR` the same conditions test the result: `CSKIPEQ` after `CSUBI CY,1` skips when Y has just reached 0.
+
+As with SKIP, the instruction skipped is usually a `CJUMP` back to the top of a loop: the loop goes round until the condition holds, then the skip steps over the `CJUMP` and the list carries on. A loop of 8 passes:
+
+```
+        CLDI    CY,8            ; Y = 8
+.loop:  ...                     ; the work: done 8 times
+        CSUBI   CY,1            ; Y = Y - 1: 7, 6, ... 0
+        CSKIPEQ                 ; Y = 0? then skip the CJUMP ...
+        CJUMP   .loop           ; ... else go round again
+        ...                     ; carries on here after the 8th pass
+```
+
+**How an ALU instruction is made up.** Like the others, it is 32 bits. The macros build it; this is for reading a list in memory:
+
+```
+  31 30  28 27  25 24 23 22 21 20      16 15                                 0
+ +--+------+------+-----+-----+----------+-------------------------------------+
+ | 1| 101  |  fn  |  d  |  s  |  00000   |  number (s = 0), or n of Rn (s = 3) |
+ +--+------+------+-----+-----+----------+-------------------------------------+
+   fn: 0 LD, 1 ST, 2 ADD, 3 SUB, 4 AND, 5 OR, 6 CMP (7 reserved)
+   d:  the register changed (for ST: stored): 0 X, 1 Y, 3 the flags (LD, ST only)
+   s:  the source: 0 the number in bits 15-0, 1 X, 2 Y, 3 Rn (n in bits 2-0)
+
+             Figure 5-5: The ALU Instruction
+```
+
+So `CADDI CY,$0604` is `$D4800604`: op 101, fn 2 (ADD), d 1 (Y), s 0 (a number), number `$0604`.
 
 ### Subroutines: CALL and RET
 
