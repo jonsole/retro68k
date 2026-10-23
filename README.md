@@ -37,6 +37,8 @@ The computer runs in simulation (`make -C sim`): fx68k boots the ROM, checks mem
 
 ![Simulated screen after the boot ROM's checks](docs/images/phase2-boot.png)
 
+Where the work stands, how to build and test, and what comes next: [`docs/HANDOFF.md`](docs/HANDOFF.md).
+
 ## Design plan
 
 Decisions, memory map, phases and open questions are in [`docs/design-plan.md`](docs/design-plan.md). Each block has a spec in [`docs/spec/`](docs/spec/).
