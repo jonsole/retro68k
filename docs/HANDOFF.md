@@ -14,7 +14,8 @@ An Amiga-style 68000 computer on the ZX Spectrum Next KS3 board (Xilinx XC7A35T,
 - Check CI (GitHub Actions, `.github/workflows/checks.yml`) after each push. A full run takes about 35 minutes.
 - Every hardware change: spec first (`docs/spec/`), then RTL, then the test, then the guide.
 - Run the tests before pushing RTL; CI does not run the video tests (see below).
-- Keep the design under about 85% of the LUTs, so it routes at 100 MHz.
+- Keep the design under about 85% of the LUTs by Vivado's count, so it routes at 100 MHz. Yosys (the CI check) counts about 35% more than Vivado; it only fails CI past 100%.
+- Run the Vivado build after RTL changes: timing at 100 MHz is met with little margin (+0.26 ns).
 
 ## Tools
 
@@ -25,7 +26,7 @@ An Amiga-style 68000 computer on the ZX Spectrum Next KS3 board (Xilinx XC7A35T,
 | vasm | Build from the vendored copy: `tar xzf tools/vasm/vasm.tar.gz && make -C vasm CPU=m68k SYNTAX=mot`, then put `vasm/` on `PATH` (`vasmm68k_mot`) |
 | Python 3 | Pillow for the PNG output (optional) |
 | Yosys | For the size check (`fpga/ks3/yosys_check.sh`). Its LUT count runs high: Vivado's is about 25% lower |
-| Vivado | 2026.1. `VIVADO=/c/AMDDesignTools/2026.1/Vivado/bin/vivado.bat bash fpga/ks3/build.sh`. Builds a bitstream (`fpga/ks3/build/retro68k_ks3.bit`); timing not met yet (see Next jobs) |
+| Vivado | 2026.1. `VIVADO=/c/AMDDesignTools/2026.1/Vivado/bin/vivado.bat bash fpga/ks3/build.sh`. Builds a bitstream (`fpga/ks3/build/retro68k_ks3.bit`), about 13 minutes; timing met. Not tried on the board yet |
 
 ### Windows
 
@@ -66,7 +67,7 @@ Done and tested:
 | Beam coordinates for every position | all of the above | all of the above |
 | Serial, interrupts, timers | `serial.v`, `intc.v`, `timers.v` | boot |
 
-Size: about 17,100 LUTs (82%) by Yosys; 12,883 (62%) by Vivado, 11.5 of 50 block RAMs.
+Size: 12,771 LUTs (61%) by Vivado, 12.5 of 50 block RAMs; about 17,400 (84%) by Yosys. Timing met at 100 MHz, worst slack +0.26 ns (sprite deadlines, audio).
 
 ### Recent decisions to know about
 
@@ -78,13 +79,12 @@ Size: about 17,100 LUTs (82%) by Yosys; 12,883 (62%) by Vivado, 11.5 of 50 block
 
 In rough order:
 
-1. **Timing at 100 MHz** (the first Vivado build, 23 October 2026). It builds a bitstream, and the pixel clocks and the 40/100 MHz crossings meet timing, but the 100 MHz domain misses by 9–10 ns (it varies from run to run) on about 2,150 paths. By module (`fpga/ks3/build/timing.txt` after a build):
-   - sprite fetcher `sprites.v`: −8.9 ns, up to 31 logic levels (`rp_s2` to `pk`);
-   - bitplane DMA `bpldma.v`: −7.1 ns, up to 29 levels (`left` to the pointer RAMs `pt`);
-   - audio mixer `audio.v`: −2.4 ns into `acc_l0`/`acc_r0`;
-   - register writes from the bus into sprites, copper, DMA, timers: −0.2 to −1.5 ns (perhaps one shared pipeline stage on the register bus);
-   - a few smaller ones (video to `intc`, serial FIFO to the bus).
-   Then try the bitstream on the board.
+1. **Try the bitstream on the board**: HDMI and VGA at 576p, the boot ROM's console, the serial link (`fpga/ks3/README.md` says what to expect). Timing was closed on 23 October 2026 by:
+   - `sprites.v`: the fetch pick is a registered "wants a word" check and a tree of pairs (a FIFO counts as full at 30 words, spec 9 section 4); the size calculator is two stages;
+   - `bpldma.v`: a fetch takes two clocks (pick and read the pointer, then update it), with a holding place so a word every 2 clocks is still possible;
+   - `audio.v`: each multiply has its own clock;
+   - `intc.v`: the pending requests are registered (10 ns more latency, spec 13) and the level search is parallel;
+   - `retro68k.v`: the system reset is copied by Vivado (`max_fanout`).
 2. **DMA engine**: spec 11 needs its v1 rewrite, then the RTL. The scheduler already has its channel (`blt_*` in `dmac.v`).
 3. **SD card and keyboard** (spec 16 for the keyboard).
 4. **Trims**, if room is needed (less pressing now that Vivado counts 62%): timers, the audio engine, the copper's storage registers.

@@ -39,19 +39,29 @@ module intc (
     reg         btn_d;
 
     wire [23:0] raw     = (req & ~(24'd1 << SRC_SOFT)) | ({23'd0, soft} << SRC_SOFT);
-    wire [23:0] pending = raw & intena & {24{master}};
+    // Registered, for timing: the requests come from logic all over the
+    // chip, and the level and vector searches follow (one clock of latency)
+    reg  [23:0] pending;
+    always @(posedge clk) pending <= rst ? 24'd0 : raw & intena & {24{master}};
 
     function [2:0] lvl(input integer n);
         lvl = levels[4*n +: 3];
     endfunction
 
-    // Highest level with a pending source
-    integer n;
+    // Highest level with a pending source: which levels have one (in
+    // parallel, for timing), then the highest of them. Levels 0 and 7 count
+    // as none.
+    integer n, l;
+    reg [6:1] at;
     reg [2:0] maxl;
     always @(*) begin
-        maxl = 3'd0;
+        at = 6'd0;
         for (n = 0; n < 24; n = n + 1)
-            if (pending[n] && lvl(n) != 0 && lvl(n) != 7 && lvl(n) > maxl) maxl = lvl(n);
+            for (l = 1; l <= 6; l = l + 1)
+                if (pending[n] && lvl(n) == l) at[l] = 1'b1;
+        maxl = 3'd0;
+        for (l = 1; l <= 6; l = l + 1)
+            if (at[l]) maxl = l;
     end
 
     // Vector for an acknowledge at iack_level: the lowest pending source at that level

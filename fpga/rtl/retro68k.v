@@ -70,8 +70,10 @@ module retro68k #(
     wire wd_reset;
     wire rst_req  = !btn_s[1] || soft_reset || cmd_reset || cmd_upload || (halted && haltreset) || wd_reset;
     reg  [8:0] rst_cnt;
-    reg        sys_rst;
-    reg        cold;                 // power-on: fx68k's pwrUp
+    // It resets nearly everything: Vivado copies it, so each copy drives
+    // few enough loads to meet timing
+    (* max_fanout = 50 *) reg sys_rst;
+    reg        cold;                // power-on: fx68k's pwrUp
     reg  [7:0] resetwhy;
 
     always @(posedge clk100) begin

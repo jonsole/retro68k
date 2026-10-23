@@ -80,15 +80,21 @@ module audio (
     endfunction
 
     // ================================================================ engine
-    localparam E_IDLE = 3'd0, E_CH = 3'd1, E_RD0 = 3'd2, E_RD1 = 3'd3, E_INT = 3'd4,
-               E_VOL = 3'd5, E_ADV = 3'd6, E_OUT = 3'd7;
-    reg  [2:0]  es;
+    // For timing, each multiply has a clock to itself: E_INT the
+    // interpolation's, E_VOL the volumes'; E_MIX and E_ADV add their results.
+    localparam E_IDLE = 4'd0, E_CH = 4'd1, E_RD0 = 4'd2, E_RD1 = 4'd3, E_INT = 4'd4,
+               E_VOL = 4'd5, E_ADV = 4'd6, E_OUT = 4'd7, E_MIX = 4'd8;
+    reg  [3:0]  es;
     reg  [1:0]  ch;
     reg  [15:0] cnt;
     reg  [22:0] a0, a1;                // byte addresses of s0 and s1
     reg  [15:0] d0, d1;
     reg  signed [15:0] s0, s1, smp;
     reg  signed [25:0] acc_l, acc_r;
+    reg  signed [15:0] s0_r;
+    reg  signed [33:0] ip_r;           // the interpolation's product
+    reg  signed [23:0] pl, pr;         // the sample times each volume
+    reg                padd;           // pl and pr are to be added (E_ADV)
 
     wire [15:0] rate_c = (rate < 16'd200) ? 16'd200 : rate;
     wire        tick = (cnt == 16'd0);
@@ -131,6 +137,7 @@ module audio (
             incl  <= 4'd0;
             incl_q <= 4'd0;
             es    <= E_IDLE;
+            padd  <= 1'b0;
             cnt   <= 16'd0;
             mem_req <= 1'b0;
             out_l <= 16'sd0; out_r <= 16'sd0;
@@ -187,22 +194,32 @@ module audio (
 
                 E_INT: begin : interp
                     reg signed [16:0] diff;
-                    reg signed [33:0] prod;
                     s0   = pick(d0, a0, b16);
                     s1   = pick(d1, a1, b16);
                     diff = s1 - s0;
-                    prod = diff * $signed({1'b0, pos[ch][15:0]});
-                    smp  <= ctrl[ch][1] ? s0 : s0 + prod[31:16];
-                    es   <= E_VOL;
+                    s0_r <= s0;
+                    ip_r <= diff * $signed({1'b0, pos[ch][15:0]});
+                    es   <= E_MIX;
+                end
+
+                E_MIX: begin
+                    smp <= ctrl[ch][1] ? s0_r : s0_r + ip_r[31:16];
+                    es  <= E_VOL;
                 end
 
                 E_VOL: begin
-                    acc_l <= acc_l + smp * $signed({1'b0, vclip(vl[ch])});
-                    acc_r <= acc_r + smp * $signed({1'b0, vclip(vr[ch])});
-                    es    <= E_ADV;
+                    pl   <= smp * $signed({1'b0, vclip(vl[ch])});
+                    pr   <= smp * $signed({1'b0, vclip(vr[ch])});
+                    padd <= 1'b1;
+                    es   <= E_ADV;
                 end
 
                 E_ADV: begin
+                    if (padd) begin
+                        acc_l <= acc_l + pl;
+                        acc_r <= acc_r + pr;
+                    end
+                    padd <= 1'b0;
                     if (on[ch]) begin
                         if (past && ctrl[ch][2]) begin
                             // One-shot: the block is done; stop

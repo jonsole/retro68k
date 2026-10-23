@@ -122,7 +122,7 @@ After reset everything except NMI is off, so the boot ROM can set up its vector 
 
 ## 10. Tests
 
-- **Vectors and levels:** every source gives VECBASE + n at its set level; changing a level takes effect at once.
+- **Vectors and levels:** every source gives VECBASE + n at its set level; changing a level takes effect at once. (The controller registers the pending requests, so a request reaches the CPU one system clock, 10 ns, after it is raised.)
 - **Priority:** several sources at one level are served lowest number first; a higher level interrupts a running lower-level handler.
 - **Masking:** INTENA, the master bit, and the 68000's own mask each block interrupts as expected; nothing is lost while blocked.
 - **Spurious:** a request withdrawn before the acknowledge gives vector 24.

@@ -167,35 +167,61 @@ module bpldma (
     assign      urgent = req && (dl[req_layer] < 10'd14 + {words_left, 2'b00} + words_left);
     assign      deadline = dl[req_layer];
 
+    // A fetch takes two clocks, for timing (memory cycles are two clocks
+    // apart, so this costs no bandwidth):
+    //   A  pick the layer and its data register, and read the pointer and
+    //      the saved line start;
+    //   B  work out the pointer's next value and write it, move the group
+    //      counts on, and hand the request on: to req if it is free, else
+    //      to a one-entry holding place (nxt), so the next request is
+    //      ready when the scheduler takes this one.
+    // B starts again from A if the line starts, or the CPU or copper writes
+    // a pointer or BPLDMA, meanwhile. The pick uses wants and deadline
+    // comparisons registered a clock before; want is kept up to date with
+    // B's own changes, and anything else only makes it late, not wrong.
+    reg         phase;                 // 0: A, 1: B
+    reg  [2:0]  want;
+    reg         dlt [0:8];             // dlt[3a + b]: dl[a] < dl[b]
+    reg  [7:0]  em  [0:2];             // emask, registered
+    reg  [1:0]  pick, last;
+    integer n;
+
     // Who asks next: of the layers with a group being asked for, or able to
     // start one, the one with the nearest deadline; on a tie, the next after
     // the last one served
-    reg  [2:0]  want;
-    reg  [1:0]  pick, last;
-    integer n;
     always @(*) begin : choose
         integer o;
         reg [1:0] c;
         reg       found;
-        for (n = 0; n < 3; n = n + 1)
-            want[n] = (rem[n] != 0) || (left[n] != 0 && !busy[n] && !full[n] && emask[n] != 8'd0);
         found = 1'b0;
         pick  = 2'd0;
         c     = last;
         for (o = 1; o <= 3; o = o + 1) begin
             c = (c == 2'd2) ? 2'd0 : c + 1'b1;        // round-robin order after the last
-            if (want[c] && (!found || dl[c] < dl[pick])) begin
+            if (want[c] && (!found || dlt[3*c + pick])) begin
                 found = 1'b1;
                 pick  = c;
             end
         end
     end
-    // The data register to fill next: high to low
-    wire        gstart  = (rem[pick] == 8'd0);                     // a new group
-    wire [7:0]  gmask   = gstart ? emask[pick] : rem[pick];
-    wire [2:0]  pl_n    = top(gmask);
-    wire [7:0]  rem_n   = gmask & ~(8'd1 << pl_n);
-    wire [4:0]  di      = {pick, pl_n};                            // data register
+    // The data register to fill next: high to low. Worked out for every
+    // layer, so the pick only selects (for timing).
+    reg         gs_l [0:2];
+    reg  [7:0]  gm_l [0:2], rn_l [0:2];
+    reg  [2:0]  pl_l [0:2];
+    always @(*) begin : nextreg
+        integer m;
+        for (m = 0; m < 3; m = m + 1) begin
+            gs_l[m] = (rem[m] == 8'd0);                            // a new group
+            gm_l[m] = gs_l[m] ? em[m] : rem[m];
+            pl_l[m] = top(gm_l[m]);
+            rn_l[m] = gm_l[m] & ~(8'd1 << pl_l[m]);
+        end
+    end
+    wire        gstart  = gs_l[pick];
+    wire [7:0]  gmask   = gm_l[pick];
+    wire [2:0]  pl_n    = pl_l[pick];
+    wire [7:0]  rem_n   = rn_l[pick];
     wire [4:0]  pi      = {pick, chunky[pick] ? 3'd0 : pl_n};      // pointer
 
     // The line's first and last words from each pointer (a chunky layer
@@ -208,29 +234,71 @@ module bpldma (
 
     // The plane pointers and their saved line starts, in two small RAMs
     // (distributed RAM: one write port, reads any time). A pointer changes
-    // only when the DMA asks for a word from it, or when the CPU or copper
-    // writes it: a write has the RAMs to itself for that clock (the fetch
-    // waits one clock), wins, and sets the saved start too.
+    // only when the DMA asks for a word from it (B), or when the CPU or
+    // copper writes it: a write has the RAMs to itself for that clock, wins,
+    // and sets the saved start too.
     reg  [22:0] svm [0:23];
     integer k;
     initial for (k = 0; k < 24; k = k + 1) begin pt[k] = 23'd0; svm[k] = 23'd0; end
     wire        cpu_pw   = rb_wr && sel_pt;
+    wire        dma_w    = rb_wr && sel_dma;
     wire [22:0] cpu_old  = pt[ri];
     wire [22:0] cpu_new  = {rb_be[2] ? rb_wdata[22:16] : cpu_old[22:16], rb_be[1] ? rb_wdata[15:8] : cpu_old[15:8],
                             rb_be[0] ? rb_wdata[7:1] : cpu_old[7:1], 1'b0};
-    wire        fetch_go = !rst && !line_go && !cpu_pw && (!req || ack) && |want;
-    wire [22:0] pt_cur   = pt[pi];
-    wire [22:0] start    = first_w ? pt_cur : svm[pi];       // this line's start
-    wire [22:0] stride   = pv_adv[pick] ? {{7{mod[pick][15]}}, mod[pick]} : 23'd0;
-    wire [22:0] pt_next  = last_w ? wadd(start, stride, wmask[pick]) : wadd(pt_cur, 23'd2, wmask[pick]);
+
+    // A: start a fetch
+    wire        a_go     = !rst && !phase && !line_go && !cpu_pw && !dma_w && |want && gmask != 8'd0;
+    reg  [1:0]  a_pick;
+    reg  [2:0]  a_pl;
+    reg  [4:0]  a_pi;
+    reg         a_gstart, a_first_w, a_last_w;
+    reg  [7:0]  a_rem_n;
+    reg  [22:0] a_pt, a_sv;
+    always @(posedge clk) if (a_go) begin
+        a_pick    <= pick;
+        a_pl      <= pl_n;
+        a_pi      <= pi;
+        a_gstart  <= gstart;
+        a_rem_n   <= rem_n;
+        a_first_w <= first_w;
+        a_last_w  <= last_w;
+        a_pt      <= pt[pi];
+        a_sv      <= svm[pi];
+    end
+
+    // B: finish it, if there is room for the request
+    reg         nxt_v;                 // the holding place
+    reg  [1:0]  nxt_layer;
+    reg  [2:0]  nxt_plane;
+    reg         nxt_last, nxt_gen;
+    reg  [21:1] nxt_addr;
+    wire        b_abort  = line_go || cpu_pw || dma_w;
+    wire        b_go     = !rst && phase && !b_abort && !(req && !ack && nxt_v)
+                           && (!a_gstart || left[a_pick] != 12'd0);
+    wire [22:0] start    = a_first_w ? a_pt : a_sv;                // this line's start
+    wire [22:0] stride   = pv_adv[a_pick] ? {{7{mod[a_pick][15]}}, mod[a_pick]} : 23'd0;
+    wire [22:0] pt_next  = a_last_w ? wadd(start, stride, wmask[a_pick]) : wadd(a_pt, 23'd2, wmask[a_pick]);
     always @(posedge clk) begin
         if (cpu_pw) begin
             pt[ri]  <= cpu_new;
             svm[ri] <= cpu_new;
-        end else if (fetch_go) begin
-            pt[pi] <= pt_next;
-            if (first_w) svm[pi] <= pt_cur;
+        end else if (b_go) begin
+            pt[a_pi] <= pt_next;
+            if (a_first_w) svm[a_pi] <= a_pt;
         end
+    end
+
+    always @(posedge clk) begin
+        for (n = 0; n < 3; n = n + 1) begin
+            em[n] <= emask[n];
+            for (k = 0; k < 3; k = k + 1) dlt[3*n + k] <= dl[n] < dl[k];
+            want[n] <= !rst && !line_go &&
+                       ((b_go && a_pick == n) ? (a_rem_n != 8'd0)
+                        : (rem[n] != 0) || (left[n] != 0 && !busy[n] && !full[n] && em[n] != 8'd0));
+        end
+        if (rst || line_go)  phase <= 1'b0;
+        else if (a_go)       phase <= 1'b1;
+        else if (b_go || b_abort) phase <= 1'b0;
     end
 
     integer i;
@@ -252,6 +320,7 @@ module bpldma (
             gen    <= 3'd0;
             fill_t <= 3'd0;
             busy   <= 3'd0;
+            nxt_v  <= 1'b0;
             pv_adv <= 3'd0;
             firstg <= 3'd0;
             lastg  <= 3'd0;
@@ -296,23 +365,47 @@ module bpldma (
                 busy   <= 3'd0;
                 gen    <= ~gen;
                 req    <= 1'b0;
-            end else if (fetch_go) begin
-                // Ask for the next word
-                req        <= 1'b1;
-                req_layer  <= pick;
-                last       <= pick;
-                addr       <= pt_cur[21:1];
-                rem[pick]  <= rem_n;
-                if (gstart) begin
-                    left[pick]   <= left[pick] - 1'b1;
-                    firstg[pick] <= (left[pick] == ngr[pick]);
-                    lastg[pick]  <= (left[pick] == 12'd1);
-                    busy[pick]   <= 1'b1;
+                nxt_v  <= 1'b0;
+            end else begin
+                // The next request: from the holding place, else from B, as
+                // soon as req is free (or being taken now)
+                if (!req || ack) begin
+                    if (nxt_v) begin
+                        req       <= 1'b1;
+                        req_layer <= nxt_layer;
+                        addr      <= nxt_addr;
+                        q_layer[q_t + (ack ? 1'b1 : 1'b0)] <= nxt_layer;
+                        q_plane[q_t + (ack ? 1'b1 : 1'b0)] <= nxt_plane;
+                        q_last[q_t + (ack ? 1'b1 : 1'b0)]  <= nxt_last;
+                        q_gen[q_t + (ack ? 1'b1 : 1'b0)]   <= nxt_gen;
+                        nxt_v     <= b_go;
+                    end else if (b_go) begin
+                        req       <= 1'b1;
+                        req_layer <= a_pick;
+                        addr      <= a_pt[21:1];
+                        q_layer[q_t + (ack ? 1'b1 : 1'b0)] <= a_pick;
+                        q_plane[q_t + (ack ? 1'b1 : 1'b0)] <= a_pl;
+                        q_last[q_t + (ack ? 1'b1 : 1'b0)]  <= (a_rem_n == 8'd0);
+                        q_gen[q_t + (ack ? 1'b1 : 1'b0)]   <= gen[a_pick];
+                    end
+                end else if (b_go)
+                    nxt_v <= 1'b1;
+                // B: the word is asked for
+                if (b_go) begin
+                    nxt_layer <= a_pick;
+                    nxt_plane <= a_pl;
+                    nxt_last  <= (a_rem_n == 8'd0);
+                    nxt_gen   <= gen[a_pick];
+                    nxt_addr  <= a_pt[21:1];
+                    last      <= a_pick;
+                    rem[a_pick] <= a_rem_n;
+                    if (a_gstart) begin
+                        left[a_pick]   <= left[a_pick] - 1'b1;
+                        firstg[a_pick] <= (left[a_pick] == ngr[a_pick]);
+                        lastg[a_pick]  <= (left[a_pick] == 12'd1);
+                        busy[a_pick]   <= 1'b1;
+                    end
                 end
-                q_layer[q_t + (ack ? 1'b1 : 1'b0)] <= pick;
-                q_plane[q_t + (ack ? 1'b1 : 1'b0)] <= di[2:0];
-                q_last[q_t + (ack ? 1'b1 : 1'b0)]  <= (rem_n == 8'd0);
-                q_gen[q_t + (ack ? 1'b1 : 1'b0)]   <= gen[pick];
             end
 
             // CPU (and later copper) writes win over the DMA's own changes

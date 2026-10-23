@@ -119,13 +119,22 @@ module sprites (
     reg  [10:0] nl [0:7];                      // screen lines shown
     reg  [7:0]  fresh = 8'd0;
     reg  [2:0]  cs = 3'd0;
+    // Two stages, for timing: 1 reads sprite cs's registers and clamps its
+    // window; 2 works out its word counts, a clock later (sprite c2). The
+    // sprite is fresh after stage 2, unless its registers were written
+    // while stage 1 read them.
+    reg  [2:0]  c2;
+    reg         ok2;
+    reg  [12:0] wfull2, wshow2;
+    reg  [10:0] vs2, vec2;
+    reg  [1:0]  bpp2, hmag2;
     always @(posedge clk) begin : sizes
         reg [10:0] hs, he, hsc, xec;
         reg [10:0] vs, ve, vec;
         reg [1:0]  bpp, hmag;
-        reg [12:0] wfull, wshow;
         reg [12:0] srcf, srcs;
         reg [15:0] bf, bs;
+        // stage 1
         hs = m_h[cs][10:0]; he = m_h[cs][21:11]; vs = m_v[cs][10:0]; ve = m_v[cs][21:11];
         bpp = m_c[cs][1:0]; hmag = m_c[cs][3:2];
         r_vs[cs]    <= vs;
@@ -138,21 +147,28 @@ module sprites (
         hsc   = (hs > 11'd864) ? 11'd864 : hs;
         xec   = (he > 11'd864) ? 11'd864 : (he < hsc) ? hsc : he;
         vec   = (ve > 11'd625) ? 11'd625 : ve;
-        wfull = (he > hs) ? {2'd0, he - hs} : 13'd0;
-        wshow = {2'd0, xec - hsc};
-        srcf  = (wfull != 0) ? ((wfull + (13'd1 << hmag) - 1'b1) >> hmag) : 13'd0;
-        srcs  = (wshow != 0) ? ((wshow + (13'd1 << hmag) - 1'b1) >> hmag) : 13'd0;
-        bf    = ({3'd0, srcf} << (bpp + 1'b1)) + 16'd15;
-        bs    = ({3'd0, srcs} << (bpp + 1'b1)) + 16'd15;
         hs_t[cs]  <= hsc[9:0];
         xe_t[cs]  <= xec[9:0];
         wsh[cs]   <= 3'd3 - bpp + hmag;
         ve_c[cs]  <= vec;
-        wf[cs]    <= bf[15:4];
-        wv[cs]    <= (srcs == 13'd0) ? 12'd0 : (bs[15:4] > bf[15:4]) ? bf[15:4] : bs[15:4];
-        nl[cs]    <= (vs < vec) ? vec - vs : 11'd0;
-        cs        <= cs + 1'b1;
-        fresh     <= (fresh | (8'd1 << cs)) & ~((rb_wr && sel_s) ? (8'd1 << sn) : 8'd0);
+        wfull2 <= (he > hs) ? {2'd0, he - hs} : 13'd0;
+        wshow2 <= {2'd0, xec - hsc};
+        vs2    <= vs;
+        vec2   <= vec;
+        bpp2   <= bpp;
+        hmag2  <= hmag;
+        c2     <= cs;
+        ok2    <= !(rb_wr && sel_s && sn == cs);
+        cs     <= cs + 1'b1;
+        // stage 2
+        srcf  = (wfull2 != 0) ? ((wfull2 + (13'd1 << hmag2) - 1'b1) >> hmag2) : 13'd0;
+        srcs  = (wshow2 != 0) ? ((wshow2 + (13'd1 << hmag2) - 1'b1) >> hmag2) : 13'd0;
+        bf    = ({3'd0, srcf} << (bpp2 + 1'b1)) + 16'd15;
+        bs    = ({3'd0, srcs} << (bpp2 + 1'b1)) + 16'd15;
+        wf[c2]    <= bf[15:4];
+        wv[c2]    <= (srcs == 13'd0) ? 12'd0 : (bs[15:4] > bf[15:4]) ? bf[15:4] : bs[15:4];
+        nl[c2]    <= (vs2 < vec2) ? vec2 - vs2 : 11'd0;
+        fresh     <= (fresh | (ok2 ? (8'd1 << c2) : 8'd0)) & ~((rb_wr && sel_s) ? (8'd1 << sn) : 8'd0);
         if (rst) fresh <= 8'd0;            // (cs keeps counting: reset clears the registers one a clock)
     end
 
@@ -214,22 +230,42 @@ module sprites (
     wire        fd_go = |fdone;
 
     // Who asks next (a clock ahead): of the sprites that want a word, the
-    // nearest deadline. A word may be on its way for the last pick, so a
-    // FIFO counts as full one word early.
+    // nearest deadline, the lower number on a tie. For timing, which
+    // sprites want a word is registered first (want), and the pick is a
+    // tree of pairs. want is a clock old and the pick a clock ahead, so
+    // words for the last two picks may be on their way unseen: a FIFO
+    // counts as full two words early. issue checks the state of the moment.
     reg  [7:0]  want;
     reg  [2:0]  pick;
     reg         pick_v;
     reg  [2:0]  pk;                            // the pick, registered
-    always @(*) begin : choose
+    always @(posedge clk) begin : wants
         integer s;
-        pick_v = 1'b0;
-        pick   = 3'd0;
-        for (s = 0; s < 8; s = s + 1) begin
-            want[s] = active[s] && !flushing[s] && alive[s] && ({1'b0, cnt[s]} + infl[s] < 7'd31);
-            if (want[s] && (!pick_v || dl[s] < dl[pick])) begin
-                pick_v = 1'b1;
-                pick   = s[2:0];
+        for (s = 0; s < 8; s = s + 1)
+            want[s] <= !rst && active[s] && !flushing[s] && alive[s] && ({1'b0, cnt[s]} + infl[s] < 7'd30);
+    end
+    // one pair: b wins only if it wants a word and a has none or a later deadline
+    reg         t1v [0:3], t2v [0:1];
+    reg  [2:0]  t1i [0:3], t2i [0:1];
+    reg  [6:0]  t1d [0:3], t2d [0:1];
+    always @(*) begin : choose
+        integer k;
+        for (k = 0; k < 4; k = k + 1)
+            if (want[2*k+1] && (!want[2*k] || dl[2*k+1] < dl[2*k])) begin
+                t1v[k] = 1'b1; t1i[k] = 2*k+1; t1d[k] = dl[2*k+1];
+            end else begin
+                t1v[k] = want[2*k]; t1i[k] = 2*k; t1d[k] = dl[2*k];
             end
+        for (k = 0; k < 2; k = k + 1)
+            if (t1v[2*k+1] && (!t1v[2*k] || t1d[2*k+1] < t1d[2*k])) begin
+                t2v[k] = 1'b1; t2i[k] = t1i[2*k+1]; t2d[k] = t1d[2*k+1];
+            end else begin
+                t2v[k] = t1v[2*k]; t2i[k] = t1i[2*k]; t2d[k] = t1d[2*k];
+            end
+        if (t2v[1] && (!t2v[0] || t2d[1] < t2d[0])) begin
+            pick_v = 1'b1; pick = t2i[1];
+        end else begin
+            pick_v = t2v[0]; pick = t2i[0];
         end
     end
     reg         pk_v;
