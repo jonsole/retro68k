@@ -482,6 +482,12 @@
 #define SPR_DAT(n)                         HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_DAT_OFS)
 #define SPR_DAT_DATA_SHIFT                 0
 #define SPR_DAT_DATA_MASK                  0xFFFFu
+#define SPR_STEP_OFS                       0x14u
+#define SPR_STEP(n)                        HW_REG32(CUSTOM_BASE + SPR_AT(n) + SPR_STEP_OFS)
+#define SPR_STEP_XSTEP_SHIFT               0
+#define SPR_STEP_XSTEP_MASK                0xFFFFu
+#define SPR_STEP_YSTEP_SHIFT               16
+#define SPR_STEP_YSTEP_MASK                0xFFFF0000u
 /* AUD(n): 4 x 32 bytes, spec 6/5 */
 #define AUD_NUM                            4
 #define AUD_SPAN                           0x20u

@@ -235,6 +235,9 @@
 `define RM_SPR_CTL_PAL                      27:24
 `define RM_SPR_DAT                          16'h0010
 `define RM_SPR_DAT_DATA                     15:0
+`define RM_SPR_STEP                         16'h0014
+`define RM_SPR_STEP_XSTEP                   15:0
+`define RM_SPR_STEP_YSTEP                   31:16
 `define RM_AUD_BASE                         16'h0440
 `define RM_AUD_SPAN                         16'h0020
 `define RM_AUD_NUM                          4

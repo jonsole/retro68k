@@ -4,18 +4,18 @@ Status: **v1 scope**
 
 Sprites are small images drawn over (or between) the layers at any position, without touching the layers' memory. Version 1 has eight sprites. As on the Amiga, each has a pointer into Chip RAM for its image (SPRxPT), and its window and settings are plain registers (SPRxH, SPRxV, SPRxCTL) that the CPU or copper writes: the copper resets the pointers every frame, and can reuse a sprite further down the screen by writing its registers again. The images are bigger and more colourful than the Amiga's, and their data is fetched just in time, through the same scheduler as the bitplanes, into a FIFO per sprite.
 
-(An earlier design, with a 64-entry sprite table and fractional scaling, is in git history at commit 7df97fd. It was dropped for size.)
+(An earlier design, with a 64-entry sprite table, is in git history at commit 7df97fd. It was dropped for size.)
 
 ## 1. Summary
 
 | Item | Value |
 |------|-------|
 | Sprites | 8 (SPR0–SPR7). Each can be reused further down the screen by the copper rewriting its registers |
-| Window | HSTART–HSTOP across, VSTART–VSTOP down, like a layer's window. The image's size follows from the window and the magnify |
+| Window | HSTART–HSTOP across, VSTART–VSTOP down, like a layer's window. The image's size follows from the window and the scale |
 | Size | Any, as a layer's: set by the window. Only the memory budget limits it (section 5) |
 | Colours | 2, 4 or 8 bits per pixel. 2 and 4 bpp: 3 or 15 colours + transparent, from any 16-colour block of the sprite palette; 8 bpp: 255 colours + transparent, the whole sprite palette. The sprites have a 256-colour palette of their own, separate from the layers' |
 | Position | Any pixel; clipped at the left, right and bottom edges by the hardware, at the top by software (section 3) |
-| Magnify | ×1, ×2 or ×4, across and down separately |
+| Scaling | Fractional, across and down separately: a 16-bit step per axis, in source pixels per screen pixel (5.11 fixed point), from 16× bigger (`0x0080`) through normal size (`0x0800`) to 1/16× (`0x8000`) |
 | Depth | Per sprite: in front of all layers, between any two (in PRIO order), or behind all |
 | Collisions | Sprite–sprite and sprite–layer, per pixel, latched (as the Amiga's CLXDAT) |
 | Data registers | A 32-word FIFO per sprite, streaming: lines of any length pass through it |
@@ -29,7 +29,7 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Pointers | SPRxPT, rewritten by the copper each frame | The same |
 | Position and settings | SPRxPOS, SPRxCTL (HSTART, VSTART, VSTOP): fetched by the DMA from control words in the sprite's data, or written by the CPU/copper | SPRxH, SPRxV (start and stop across and down: a window, as a layer has), SPRxCTL: plain registers, written by the CPU or copper only; the data in memory is image only |
 | Reuse down the screen | The data holds more control words after each sprite | The copper writes the sprite's registers again, after a WAIT |
-| Settings | Position, height | A window (any size), bits per pixel, magnify, depth among the layers, palette block |
+| Settings | Position, height | A window (any size), bits per pixel, scale, depth among the layers, palette block |
 | Width | 16 pixels (lores) | Any: set by the window |
 | Colours | 3 + transparent; 15 with two attached sprites | 3, 15 or 255 + transparent, every sprite |
 | Pixel format | Two bitplanes | Chunky: 2, 4 or 8 bits per pixel, first pixel in the high bits |
@@ -37,15 +37,15 @@ Sprites are small images drawn over (or between) the layers at any position, wit
 | Fetch | Two words per sprite per line, in fixed slots in the horizontal blank | Just in time, deadline first; early when cycles are free |
 | Manual mode | Write SPRxDATA/B with DMA off | Push words into SPRxDAT with the sprite's DMA off |
 | Priority | Fixed in pairs against the playfields | Per sprite, any depth among the layers |
-| Magnify | None | ×1, ×2, ×4 across and down |
+| Scaling | None | Fractional, 16× bigger to 1/16×, across and down separately |
 | Collision | CLXDAT | SPRCOLL: per sprite, against the other sprites and each layer |
 
 ## 3. Sprites: pointer, position and settings
 
-Each sprite has three registers (section 6):
+Each sprite has four registers (section 6):
 
 - **SPRxPT** points at the sprite's image in Chip RAM: its lines one after another, top line first, each in whole words (section 3, below). As a plane pointer does, it moves through the image as it is fetched, so the hardware does not reset it: the copper (or the CPU) writes the eight pointers in every vertical blank.
-- **SPRxH** and **SPRxV** give the sprite's window, and **SPRxCTL** its settings. They are plain registers: the CPU or copper writes them, and they stay as written until written again. The image in memory is pixels only.
+- **SPRxH** and **SPRxV** give the sprite's window, **SPRxCTL** its settings and **SPRxSTEP** its scale. They are plain registers: the CPU or copper writes them, and they stay as written until written again. The image in memory is pixels only.
 
 **The window** (SPRxH, SPRxV), as a layer's (spec 4, section 4.3), in beam coordinates (spec 4, section 3.3: the picture is pixels 144–863, lines 49–624):
 
@@ -56,7 +56,7 @@ Each sprite has three registers (section 6):
 | SPRxV | 10–0 | VSTART | First beam line of the sprite (0–624; 625 or more: not shown). Lines before 49 are in the vertical blank: fetched, not shown |
 | SPRxV | 26–16 | VSTOP | Beam line just after the sprite (no higher than 625 counts) |
 
-The image's size follows from the window: **source width** = (HSTOP − HSTART) ÷ HMAG pixels and **source height** = (VSTOP − VSTART) ÷ VMAG lines, each rounded up. A source line is stored in whole words, ⌈source width × BPP ÷ 16⌉ of them. There is no size limit: lines of any length stream through the FIFO (section 4); only the memory budget (section 5) limits how big and how many sprites can be.
+The image's size follows from the window and the scale (section 3.2): **source width** = ⌈(HSTOP − HSTART) × XSTEP ÷ 2048⌉ pixels and **source height** = ⌈(VSTOP − VSTART) × YSTEP ÷ 2048⌉ lines. At normal size (step `0x0800`) the image is the window's size. A source line is stored in whole words, ⌈source width × BPP ÷ 16⌉ of them. There is no size limit: lines of any length stream through the FIFO (section 4); only the memory budget (section 5) limits how big and how many sprites can be.
 
 **Clipping:** the hardware clips at all four edges. A sprite's line is a beam line, and its frame the beam's frame, so a sprite can start up to 144 pixels left of the picture (HSTART 0) and up to 49 lines above it (VSTART 0): those pixels and lines are fetched and used up, but not shown. Pixels past the right edge and lines past the bottom are neither fetched nor shown. The DMA needs a little time after the frame starts (and after the copper writes SPRxPT) to fetch a sprite's first words, so a sprite should not start on beam lines 0–1; such lines are in the blank anyway.
 
@@ -65,8 +65,6 @@ The image's size follows from the window: **source width** = (HSTOP − HSTART) 
 | Bits | Field | Meaning |
 |------|-------|---------|
 | 13–12 | BPP | 0 = 2, 1 = 4, 2 = 8 bits per pixel |
-| 17–16 | HMAG | Each source pixel shown 1, 2 or 4 times across (0, 1, 2) |
-| 19–18 | VMAG | Each source line shown on 1, 2 or 4 screen lines (0, 1, 2) |
 | 21–20 | DEPTH | 0 = in front of all layers; 1 = behind the front layer; 2 = behind the middle layer; 3 = behind all layers (in PRIO order) |
 | 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the sprite palette (colour = PAL × 16 + value). Not used at 8 bpp |
 
@@ -74,21 +72,35 @@ A sprite shows inside its window once per frame. A sprite whose DMA is on (SPRDM
 
 **Fetching:** as long as the sprite's window still has lines to come in this frame, the DMA keeps its FIFO filled: from the start of the frame (beam line 0, the start of the vertical blank) until the window's last line has been fetched. So a sprite's first line is fetched ahead too, before VSTART.
 
-**Starting.** At the start of each frame (beam line 0, pixel 0), and whenever SPRxPT, SPRxH, SPRxV or SPRxCTL is written, the sprite starts again: its FIFO is emptied, and it will fetch its image from SPRxPT and show it from VSTART. (It is the copper's job to point SPRxPT at the image's first line, as for bitplanes.)
+**Starting.** At the start of each frame (beam line 0, pixel 0), and whenever SPRxPT, SPRxH, SPRxV, SPRxCTL or SPRxSTEP is written, the sprite starts again: its FIFO is emptied, and it will fetch its image from SPRxPT and show it from VSTART. (It is the copper's job to point SPRxPT at the image's first line, as for bitplanes.)
 
 **Reusing a sprite further down the screen**, as Amiga programs do with their control words: after the sprite's last line, the copper WAITs, then writes the sprite's PT, window and CTL for its next use. The new use must start on a later line than the old one ends, and the writes must come after the old use's last line has been shown.
 
-**How the pointer moves.** Each word fetched moves SPRxPT on by 2. At the end of each source line the pointer goes to that line's start + one line (⌈source width × BPP ÷ 16⌉ words). On the repeated lines of VMAG it goes back to the line's start, so the line is fetched again.
+**How the pointer moves.** Each word fetched moves SPRxPT on by 2. At the end of each screen line the pointer goes to the start of the source line the next screen line shows: that line's start + k lines (k × ⌈source width × BPP ÷ 16⌉ words), where k is how many source lines the step moves on. When the sprite is bigger down (YSTEP below `0x0800`), k is often 0: the pointer goes back to the line's start, and the line is fetched again. When it is smaller, lines in between are skipped: neither fetched nor shown.
 
 ### 3.1 Pixels and colours
 
 Image lines are **chunky**, as chunky layers are: 2, 4 or 8 bits per pixel, packed in words, the first pixel in the highest bits. A value of 0 is transparent. Other values are entries of the **sprite palette**, SPRPALETTE (`0xE04C00`–`0xE04FFF`, spec 4, section 6.3), which the sprites share and the layers do not use: at 8 bpp the value itself; at 2 and 4 bpp, PAL × 16 + the value. With VIDCON.SHAREPAL set, sprites use PALETTE0 instead, as the layers then do.
 
-### 3.2 Magnify
+### 3.2 Scaling
+
+**SPRxSTEP** holds two steps, **XSTEP** (bits 15–0) and **YSTEP** (31–16): source pixels (or lines) per screen pixel (or line), in 5.11 fixed point.
+
+| Step | Size |
+|------|------|
+| `0x0080` | 16× bigger |
+| `0x0200` | 4× bigger |
+| `0x0400` | 2× bigger |
+| `0x0800` | Normal |
+| `0x0C00` | 2/3 |
+| `0x1000` | Half |
+| `0x8000` | 1/16 |
+
+- **Which source pixel:** screen pixel i of the window (i = 0 at HSTART) shows source pixel ⌊i × XSTEP ÷ 2048⌋ of its line; screen line j of the window (j = 0 at VSTART) shows source line ⌊j × YSTEP ÷ 2048⌋. So the first pixel and line always show the image's first, and every step works the same, with no rounding to pick.
+- **Limits:** steps below `0x0080` count as `0x0080`, steps above `0x8000` as `0x8000`. A step of 0 counts as `0x0800`, so a sprite whose SPRxSTEP was never written is normal size.
+- **Cost** (section 5): bigger across, a word lasts more screen pixels; smaller across, fewer, since every source pixel of a line is fetched, the skipped ones too (they stream through the FIFO). Bigger down, a line is fetched again for each screen line it shows on (the FIFO cannot replay a line); smaller down, the lines skipped are not fetched at all.
 
 There is no flip: for an object that faces either way, store both images.
-
-- **HMAG** repeats each pixel 1, 2 or 4 times across; **VMAG** shows each source line on 1, 2 or 4 screen lines. A repeated line is fetched again (the FIFO cannot replay a line), so VMAG costs memory cycles on every screen line, and HMAG divides the cost across a line (section 5).
 
 ### 3.3 Depth and priority
 
@@ -110,7 +122,7 @@ Each sprite has a **FIFO of 32 words**, its data registers. The DMA pushes the i
 Sprites and layers share one budget, ordered by deadline. The display's own memory cycles (1 and 3 of each slot, spec 5) give about **12 words per 16 screen pixels** for certain; cycles the CPU, audio and copper leave free give more.
 
 - A **layer** needs, per 16 source pixels, 1 word per plane (planar) or b words at b bpp (chunky); at 2× scale across, half that per 16 screen pixels.
-- A **sprite** needs BPP words per 16 source pixels while the beam is over it (2, 4 or 8); with HMAG ×2, half that per 16 screen pixels.
+- A **sprite** needs BPP words per 16 source pixels while the beam is over it (2, 4 or 8): BPP × XSTEP ÷ 2048 words per 16 screen pixels. Twice as big across (`0x0400`), half that; half size across (`0x1000`), twice.
 - Sprites side by side do not add up; sprites over the same pixels at the same time do. Each FIFO's lead (32 words) lets a sprite fetch ahead into quieter stretches of the line, so short overlaps (up to about the lead's width: 64 pixels at 8 bpp, 256 at 2 bpp) are smoothed out; longer overlaps of wide sprites are limited by the budget at that moment, as the table shows.
 
 Sprites stacked over the same 16 screen pixels, guaranteed (more when cycles are free):
@@ -142,13 +154,14 @@ Sprite n (0–7) at `0x520 + n × 0x20`:
 | `+0x04` | SPRxH | RW | HSTART (11–0), HSTOP (27–16), signed | The window across (section 3). Written by the CPU or copper |
 | `+0x08` | SPRxV | RW | VSTART (10–0), VSTOP (26–16) | The window down |
 | `+0x0C` | SPRxCTL | RW | as section 3 | Settings |
+| `+0x14` | SPRxSTEP | RW | XSTEP (15–0), YSTEP (31–16) | Scale (section 3.2). 0 counts as `0x0800` (normal) |
 | `+0x10` | SPRxDAT | W, R | write: 15–0; read: COUNT (5–0) | Write: push a word into the FIFO (manual mode). Read: words in the FIFO (0–32) |
 
 VIDSTAT bit 7, **SPRUNDER** (spec 4, section 6.1): a sprite's FIFO ran dry while it was being drawn. Sticky, with an enable in VIDINTEN; raises VIDERR like OVERRUN.
 
 DMACON bit 5, **SPREN**: sprite DMA on (spec 5, section 8).
 
-**When writes take effect:** a write to SPRxPT, SPRxH, SPRxV or SPRxCTL starts the sprite again (section 3): its FIFO is emptied, and the new settings apply from the next line. SPRDMA at once (a sprite whose DMA is turned off keeps what is in its FIFO).
+**When writes take effect:** a write to SPRxPT, SPRxH, SPRxV, SPRxCTL or SPRxSTEP starts the sprite again (section 3): its FIFO is emptied, and the new settings apply from the next line. SPRDMA at once (a sprite whose DMA is turned off keeps what is in its FIFO).
 
 ## 7. Examples
 
@@ -167,6 +180,14 @@ In the copper list, every frame (in the vertical blank):
 ```
 
 To move the ship, write SPR0H and SPR0V and then SPR0PT (from the CPU, or with copper MOVEs in the vertical blank). SPRxPT always goes last: each of these writes starts the sprite again from SPRxPT, which moves as the image is fetched.
+
+The same ship at 1.5× its size: a 48 × 36 window, and steps of 2048 ÷ 1.5 = `0x0555` across and down (the image is still 32 × 24: ⌈48 × 0x555 ÷ 2048⌉ = 32):
+
+```
+    move.l  #((VID_X0+200+48)<<16)|(VID_X0+200),SPR0+SPR_H(a4)
+    move.l  #((VID_Y0+100+36)<<16)|(VID_Y0+100),SPR0+SPR_V(a4)
+    move.l  #($0555<<16)|$0555,SPR0+SPR_STEP(a4)
+```
 
 Reusing sprite 0 for a second ship lower down, from line 300: after the first ship's last line (123), the copper writes sprite 0 again:
 
@@ -199,7 +220,7 @@ To keep it small, the per-sprite state lives in distributed RAM, worked on one s
 
 ## 10. Tests
 
-- **Golden images:** sprites of many window sizes, at every depth and magnify, clipped at all four edges, reused down the screen, at every DEPTH against layers in different PRIO orders, over transparent layer pixels, compared pixel by pixel with the Python video model extended with sprites.
+- **Golden images:** sprites of many window sizes, at every depth and many scales (bigger, smaller, odd steps, different across and down, the limits), clipped at all four edges, reused down the screen, at every DEPTH against layers in different PRIO orders, over transparent layer pixels, compared pixel by pixel with the Python video model extended with sprites.
 - **Collisions:** known overlaps set exactly the expected SPRCOLL bits.
 - **Manual mode:** a sprite fed by the CPU through SPRxDAT; an underrun sets SPRUNDER.
 - **Stress:** sprites stacked over the same pixels with layers of each depth, to measure section 5's table.
@@ -207,5 +228,4 @@ To keep it small, the per-sprite state lives in distributed RAM, worked on one s
 ## 11. Later versions
 
 - A sprite table, so that the copper need not rewrite sprites to reuse them
-- Fractional scaling
 - Sprites in direct-colour mode at any depth
