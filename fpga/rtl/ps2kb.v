@@ -63,7 +63,7 @@ module ps2kb (
     reg  [7:0]  fifo [0:15];
     reg  [3:0]  fh, ft;
     reg  [4:0]  fcount;
-    wire        f_pop  = rb_rd && sel && off == `RM_KBDATA && fcount != 5'd0;
+    wire        f_pop  = rb_rd && sel && off == `RM_KBDATA && rb_be[0] && fcount != 5'd0;   // the low half takes a byte
     reg         f_push;
     reg  [7:0]  f_byte;
     assign irq = |({irqf[4:1], fcount != 5'd0} & irqen);

@@ -59,7 +59,7 @@ Every instruction is 32 bits, at a 4-byte-aligned address. Bit 31 says which kin
 
 | Instruction | Does |
 |-------------|------|
-| **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. The copper follows the halves rule (spec 3, section 2) with its own latch, separate from the CPU's: a high-half write is held until a low-half write to the same register, which writes both halves at once, so a 32-bit register is written whole. Other instructions (other MOVEs, WAITs) may come in between; a high-half write to another register replaces the held one. A low-half write on its own keeps the register's current high half. 16-bit registers (BPLxDAT, BPLSTRIDE, DMACON, the strobes) need one MOVE, to their low half |
+| **MOVE** | Writes the 16-bit data to the register half at that byte offset in the custom block (`0xE00000` + offset). An offset with bit 1 clear is a high half, with bit 1 set a low half. Each MOVE writes its half at once, keeping the other half (spec 3, section 2), as on the Amiga: a 32-bit register (a BPLxPT) takes two MOVEs, high half first, and holds the new high half and the old low half in between. A palette entry is the exception: its high half is held (one for the copper, apart from the CPU's) until the copper's next MOVE to its low half, so a colour changes all at once. 16-bit registers (BPLxDAT, BPLSTRIDE, DMACON, the strobes) need one MOVE, to their low half |
 | **WAIT** | Waits until the beam has reached the position (section 3): it ends on the position itself. A position the beam never reaches (pixel 864 or more, line 625 or more) waits until the next frame. With **P** set (pixel only), the line is ignored: it waits until the pixel position is reached on the current line, or on the next line if it has already passed. With **B** set, it also waits until the DMA engine (spec 11) is idle: no job running or waiting to start, including one a MOVE just before started |
 | **SKIP** | If the beam has reached the position, skips the next instruction. With P set, compares the pixel position only |
 | **JUMP** | Continues at the address |
@@ -186,7 +186,7 @@ Offsets in the custom register block at `0xE00000`.
 
 **The copper's registers from the CPU:** COPX, COPY, COPFLAGS and COPR0–7 are 16-bit registers in the low half. The CPU can write them at any time; a write lands between two copper instructions. To hand values to a running list without a race, write them while the copper is stopped or idle, or use storage registers that only one side writes.
 
-**Restarting** (the vertical blank, COPJMP1, COPJMP2) throws away the prefetched instruction; the vertical blank also drops a held high half (RESUME has already saved its MOVE's address).
+**Restarting** (the vertical blank, COPJMP1, COPJMP2) throws away the prefetched instruction.
 
 **Starting:** after reset COPCON, COP1LC, COP2LC, COPSTAT, X, Y, the flags, R0–R7 and the stack are 0. With COPCON.EN, DMACON.COPEN and DMAEN all set, the copper starts from COP1LC at the next vertical blank; a write to COPJMP1 starts it at once. Clearing any of them stops it at once; setting them again starts it at the next vertical blank (or COPJMP1).
 
@@ -201,7 +201,7 @@ Offsets in the custom register block at `0xE00000`.
 The copper can run a long **background** list, such as a queue of DMA engine jobs, that carries on across frames while list 1 still restarts at every vertical blank. On the Amiga, the vertical blank simply cuts list 2 off. Here, with COPCON.RESUME set:
 
 - The copper keeps an **in list 2** flag. A COPJMP2 strobe sets it. A COPJMP1 strobe, a STOP (or a WAIT for line 2047, or a reserved instruction), and the vertical blank clear it. JUMP, CALL, RET and the SKIPs leave it as it is, so a background list can loop, branch and call subroutines.
-- At the vertical blank, if the flag is set, the hardware writes the **resume address** to COP2LC before it reloads from COP1LC. The resume address is the instruction not yet finished: a WAIT still waiting (it runs again, whole), or the next instruction to run. If a high half is held from a MOVE (section 4), the resume address is that MOVE's instead, so the pair is run again whole: the held half is not kept.
+- At the vertical blank, if the flag is set, the hardware writes the **resume address** to COP2LC before it reloads from COP1LC. The resume address is the instruction not yet finished: a WAIT still waiting (it runs again, whole), or the next instruction to run. (A palette entry's high half the copper had held stays held across the cut-off, so the pair's low half still writes the whole colour, unless list 1 writes a palette high half first.)
 - List 1 ends with a MOVE to COPJMP2, as usual, and list 2 carries on where it was cut off.
 
 Without RESUME (the default), COP2LC is never changed by the hardware, as on the Amiga.
@@ -220,11 +220,11 @@ Rules for a background list:
 Resetting a 4-plane layer's pointers each frame and making a colour bar on lines 100–107 (`L1`, `BPLxPT` and `PALETTE` as in `hw.inc`):
 
 ```
-    MOVE  L1+L_BPL0PT,   picture>>16          ; high half (held) ...
-    MOVE  L1+L_BPL0PT+2, picture & $FFFF      ; ... low half: BPL0PT written whole
+    MOVE  L1+L_BPL0PT,   picture>>16          ; high half ...
+    MOVE  L1+L_BPL0PT+2, picture & $FFFF      ; ... low half (in the blank: the pointer is not in use)
     ...                                       ; the same for BPL1PT-BPL3PT
     WAIT  100, 0
-    MOVE  PALETTE,   $00FF                    ; colour 0, high half: red = $FF (held) ...
+    MOVE  PALETTE,   $00FF                    ; colour 0, high half: red = $FF (held: a palette entry) ...
     MOVE  PALETTE+2, $0000                    ; ... low half: green, blue = 0: colour 0 is red
     WAIT  108, 0
     MOVE  PALETTE,   $0000                    ; back to black
@@ -232,7 +232,7 @@ Resetting a 4-plane layer's pointers each frame and making a colour bar on lines
     STOP
 ```
 
-A palette entry is a 32-bit register (`0x00RRGGBB`), so a colour change is two MOVEs: the high half (red) first, then the low half (green and blue), which writes the entry at once. To change only green and blue, one MOVE to the low half is enough: it keeps the entry's current red. Because the high half is held until the low half, a list can MOVE the high half before a WAIT and the low half after it, so that the whole 24-bit colour changes exactly at the WAIT.
+A palette entry is a 32-bit register (`0x00RRGGBB`), so a colour change is two MOVEs: the high half (red) first, then the low half (green and blue), which writes the entry at once. To change only green and blue, one MOVE to the low half is enough: it keeps the entry's current red. Because a palette entry's high half is held until its low half, a list can MOVE the high half before a WAIT and the low half after it, so that the whole 24-bit colour changes exactly at the WAIT. (Other registers have no such hold: each MOVE takes effect at once.)
 
 A per-line effect without unrolling (a raster bar that moves one colour per line), using a pixel-only WAIT and a loop:
 
@@ -264,7 +264,6 @@ The assembler macros for these (`CMOVE`, `CWAIT`, `CSKIP`, `CJUMP`, `CSTOP`) are
 | C1 | Whether a 32-bit MOVEL (an 8-byte instruction) is worth adding, to set a pointer in one instruction |
 | C4 | A load of X or Y from Chip RAM (a table), which the arithmetic cannot replace |
 | C2 | Exact pixel delay from a WAIT to a palette change. In simulation: the write after a WAIT shows at the WAIT's pixel (0 pixels late); each further write takes a fetch, about 4 pixels. To be confirmed on the board |
-| C3 | Whether RESUME should also save the held high half, so that no MOVE is ever repeated |
 
 ## 10. Tests
 

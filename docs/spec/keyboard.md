@@ -39,7 +39,7 @@ Later versions may add more (section 6).
 ### 3.2 Reading the FIFO
 
 - KBSTAT.COUNT says how many bytes are waiting (0–16).
-- Reading the low half of KBDATA takes one byte from the FIFO. A MOVE.B or MOVE.W of its low half (`KBDATA+3`, `KBDATA+2`) or a MOVE.L of KBDATA all work. (A read of the high half alone also takes a byte, and loses it: don't.)
+- Reading the low half of KBDATA takes one byte from the FIFO. A MOVE.B or MOVE.W of its low half (`KBDATA+3`, `KBDATA+2`) or a MOVE.L of KBDATA (high half, then low) all take exactly one. Reading the high half alone takes nothing.
 - If the FIFO is empty, the read returns KBDATA.EMPTY set and no byte.
 - KBIRQ.DATA is 1 while the FIFO is not empty. It is not sticky. With KBIRQEN.DATA set, this gives the interrupt.
 

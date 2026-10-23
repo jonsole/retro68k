@@ -107,10 +107,6 @@ module copper (
     reg         stale;                 // ... and it is to be dropped
 
     // The halves latch (spec 3, section 2)
-    reg         hl_v;
-    reg  [14:2] hl_tag;
-    reg  [15:0] hl_data;
-    reg  [22:2] hl_pc;                 // the high-half MOVE's address
 
     // A WAIT in progress
     reg  [11:0] w_fo;
@@ -203,7 +199,6 @@ module copper (
             mem_req <= 1'b0;
             outst <= 1'b0;
             stale <= 1'b0;
-            hl_v <= 1'b0;
             cw_req <= 1'b0;
         end else begin
             // ---- execute
@@ -311,9 +306,8 @@ module copper (
             end
             if (vblank && en) begin
                 if (copcon[2] && in2)
-                    lc2 <= hl_v ? hl_pc : (xs == X_RUN || xs == X_GAP || xs == X_OFF || (xs == X_WR && cw_go)) ? npc : xpc;
+                    lc2 <= (xs == X_RUN || xs == X_GAP || xs == X_OFF || (xs == X_WR && cw_go)) ? npc : xpc;
                 in2 <= 1'b0;
-                hl_v <= 1'b0;
                 if (!copcon[3]) sp <= 4'd0;
                 restart(lc1);
             end
@@ -390,22 +384,15 @@ module copper (
         endcase
     end
 
-    // A register write: a high half is held; a low half goes out with the held high half
+    // A register write: its half, at once (spec 3, section 2; a palette entry
+    // holds its high half itself, video.v)
     task do_write(input [15:0] o, input [15:0] d);
         begin
-            if (!o[1]) begin
-                hl_v    <= 1'b1;
-                hl_tag  <= o[14:2];
-                hl_data <= d;
-                hl_pc   <= npc;            // this MOVE's own address (npc advances at the clock's end)
-            end else begin
-                cw_req   <= 1'b1;
-                cw_addr  <= {8'hE0, 1'b0, o[14:2]};
-                cw_wdata <= {hl_data, d};
-                cw_be    <= {(hl_v && hl_tag == o[14:2]) ? 2'b11 : 2'b00, 2'b11};
-                hl_v     <= 1'b0;
-                xs       <= X_WR;
-            end
+            cw_req   <= 1'b1;
+            cw_addr  <= {8'hE0, 1'b0, o[14:2]};
+            cw_wdata <= {d, d};
+            cw_be    <= o[1] ? 4'b0011 : 4'b1100;
+            xs       <= X_WR;
         end
     endtask
 

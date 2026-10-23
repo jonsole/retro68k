@@ -130,7 +130,6 @@ module bus_if #(
     wire        in_system = (a24[23:16] == 8'hF0);
     // INTENA's two halves are separate set/clear registers: each half is written
     // at once, not held (spec 3, section 2)
-    wire        in_plain  = (a24[23:2] == (`RM_SYSTEM_BASE + `RM_INTENA) >> 2);
     wire        hw_area   = (a24[23:21] == 3'b111);                      // E00000-FFFFFF
 
     reg [2:0] target;
@@ -164,7 +163,6 @@ module bus_if #(
     reg [2:0]  state;
     reg [2:0]  tgt;            // target of the current cycle
     reg        rd_half_hi;     // register read: high half
-    reg        plain;          // text screen or font
 
     wire       lanes  = !q_uds_n || !q_lds_n;
     wire [1:0] be     = {!q_uds_n, !q_lds_n};
@@ -173,13 +171,6 @@ module bus_if #(
     reg        wp;             // m_req holds a posted write
 
     // Register halves (spec 3, section 2)
-    reg        wh_valid;       // a high half is held
-    reg [23:2] wh_tag;
-    reg [15:0] wh_data;
-    reg [1:0]  wh_be;
-    reg        rh_valid;       // a captured 32-bit value is held
-    reg [23:2] rh_tag;
-    reg [31:0] rh_data;
 
     // ROM port
     reg        rom_rd_go, rom_wr_go;
@@ -213,8 +204,6 @@ module bus_if #(
             berr_want  <= 1'b0;
             m_req      <= 1'b0;
             wp         <= 1'b0;
-            wh_valid   <= 1'b0;
-            rh_valid   <= 1'b0;
             dout_hold  <= 16'd0;
         end else case (state)
             S_IDLE: if (!q_as_n && !(m_req && !m_ack)) begin
@@ -241,19 +230,13 @@ module bus_if #(
                     end
                     T_REG: begin
                         rb_addr <= q_addr[23:2];
-                        plain   <= in_plain;
                         if (q_rw) begin
+                            // a read of one half: the units with a read side
+                            // effect see which (spec 3, section 2)
                             rd_half_hi <= !q_addr[1];
-                            if (!in_plain && q_addr[1] && rh_valid && rh_tag == q_addr[23:2]) begin
-                                // Low half after a high-half read: the captured value
-                                dout_hold  <= rh_data[15:0];
-                                rh_valid   <= 1'b0;
-                                dtack_want <= 1'b1;
-                                state      <= S_DONE;
-                            end else begin
-                                rb_rd <= 1'b1;
-                                state <= S_REG_WAIT;
-                            end
+                            rb_be      <= q_addr[1] ? 4'b0011 : 4'b1100;
+                            rb_rd      <= 1'b1;
+                            state      <= S_REG_WAIT;
                         end else begin
                             dtack_want <= 1'b1;
                             state      <= S_LANES;
@@ -290,11 +273,6 @@ module bus_if #(
 
             S_REG_RD: begin
                 dout_hold <= rd_half_hi ? rb_rdata[31:16] : rb_rdata[15:0];
-                if (rd_half_hi && !plain) begin
-                    rh_valid <= 1'b1;
-                    rh_tag   <= rb_addr;
-                    rh_data  <= rb_rdata;
-                end
                 dtack_want <= 1'b1;
                 state      <= S_DONE;
             end
@@ -316,22 +294,10 @@ module bus_if #(
                         wp      <= 1'b1;
                     end
                     T_REG: begin
-                        if (plain) begin
-                            // Plain memory: write this half now
-                            rb_wr    <= 1'b1;
-                            rb_wdata <= {q_dout, q_dout};
-                            rb_be    <= q_addr[1] ? {2'b00, be} : {be, 2'b00};
-                        end else if (!q_addr[1]) begin
-                            wh_valid <= 1'b1;
-                            wh_tag   <= q_addr[23:2];
-                            wh_data  <= q_dout;
-                            wh_be    <= be;
-                        end else begin
-                            rb_wr    <= 1'b1;
-                            rb_wdata <= {wh_data, q_dout};
-                            rb_be    <= {(wh_valid && wh_tag == q_addr[23:2]) ? wh_be : 2'b00, be};
-                            wh_valid <= 1'b0;
-                        end
+                        // this half (or byte), at once (spec 3, section 2)
+                        rb_wr    <= 1'b1;
+                        rb_wdata <= {q_dout, q_dout};
+                        rb_be    <= q_addr[1] ? {2'b00, be} : {be, 2'b00};
                     end
                     default: ;   // ROM write happens through rom_wr_go
                 endcase

@@ -30,22 +30,15 @@ This spec also replaces spec 2 (memory map), which is folded in here.
 ## 2. Rules for all registers
 
 1. **Size and order.** Every register is 32 bits wide, at an address that is a multiple of 4, stored big-endian as the 68000 expects. Its **high half** is at the register's address and its **low half** at address + 2.
-2. **Writing in halves (CPU and copper).**
-   - A write to the high half is held, not applied.
-   - The next write to the low half of the same register writes both halves at once.
-   - A low-half write on its own keeps the register's current high half.
-   - A byte write behaves like a 16-bit write that keeps the other byte.
+2. **Writing in halves.** Each 16-bit half is written on its own, as soon as it arrives, keeping the other half; a byte write keeps the other byte. The 68000's MOVE.L is two 16-bit writes, the high half first (in every addressing mode except −(An)), and the copper writes a half per MOVE, as the Amiga's registers were written. So between the two halves of a 32-bit register's write, the register holds the new high half and the old low half: write registers the hardware is using (plane pointers, sprite pointers, COP2LC) where it is not using them, in the blank or from the copper, as on the Amiga.
 
-   The 68000's MOVE.L writes the high word first in every addressing mode except −(An), so ordinary code just works. DMA jobs write all 32 bits at once.
+   **Palette entries are the exception:** a colour must change all at once, even in the middle of a line. A write to a palette entry's high half is held, one for each writer (the CPU, the copper and the DMA engine), until the same writer's next write to that entry's low half, which writes both halves together. A low-half write on its own keeps the entry's red. A high-half write to another entry replaces the held one (spec 4, section 4.6).
 
-   **Don't use CLR.L on registers.** The 68000's CLR.L writes the low word first (seen in simulation with fx68k), so the high half would be held and never written. It also reads the register first, which takes a byte out of a FIFO data register. Use `MOVE.L #0,...` instead.
-3. **Reading in halves.**
-   - Reading the high half captures the whole register at that moment.
-   - The next read of the low half returns the captured value, so a MOVE.L always gets a matching pair.
-   - A low-half read on its own returns the current low half.
-4. **Reading has no side effects,** except the three FIFO data registers in the system block (SERDATA, KBDATA, SDDATA), where reading takes data out. None of these are in the custom block, so DMA and the copper can never disturb anything by reading.
+   **Don't use CLR.L on a FIFO data register** (SERDATA, KBDATA): the 68000's CLR.L reads the register first, which takes a byte out. `MOVE.L #0,...` is always safe.
+3. **Reading in halves.** Each half read returns that half as it is at that moment. A MOVE.L of a register that changes (BEAMPOS, a timer's COUNT) can catch the two halves at different moments; read such a register twice, or read its halves on their own. **TIME** is the exception: reading the high half of TIMEHI captures all 64 bits for the reads of the rest (spec 12, section 3).
+4. **Reading has no side effects,** except in the system block: reading the **low half** of a FIFO data register (SERDATA, KBDATA) takes a byte out (a MOVE.L, high half then low, takes one), reading SERDROP's low half clears it, and reading TIMEHI's high half captures TIME. None of these are in the custom block, so DMA and the copper can never disturb anything by reading.
 5. **Sticky flags** (marked W1C below) are cleared by writing 1 to them. Writing 0 leaves them alone.
-6. **Set/clear registers** (DMACON, INTENA, BPLDMA): in each 16-bit set/clear half, the top bit = 1 sets the other bits written as 1; = 0 clears them. DMACON is one such half, in the low half. INTENA has two, and each is written at once on its own (it is not held as rule 2 says), so a `MOVE.W` to either half, or a `MOVE.L` to both, works. Byte writes are ignored.
+6. **Set/clear registers** (DMACON, INTENA, BPLDMA): in each 16-bit set/clear half, the top bit = 1 sets the other bits written as 1; = 0 clears them. DMACON is one such half, in the low half. INTENA has two, so a `MOVE.W` to either half, or a `MOVE.L` to both, works. Byte writes are ignored.
 7. **Unused bits** read as 0; write them as 0.
 8. **Unused addresses** inside the custom and system blocks read as 0 and ignore writes. Only the unmapped regions in section 1 give bus errors.
 9. **Timing.** A register write takes effect as described in its spec: some at once (palette), some at a fixed point (layer settings before each line).
@@ -324,6 +317,6 @@ GitHub runs `python3 tools/regmap.py --verify` on every push, which fails if the
 ## 8. Tests
 
 - **Decoding:** read every listed register after reset and check its reset value; read every free address and check 0; access every unmapped region and check a bus error.
-- **Halves rules:** for a sample of registers in both blocks, check held high halves, low-half commits, low-half-only writes, byte writes, and captured reads.
+- **Halves rules:** for a sample of registers in both blocks, check that each half and each byte is written on its own; palette entries held per writer (the CPU and copper interleaved); FIFO reads taking a byte only from the low half; and captured reads.
 - **Access rights:** the copper can't reach the system block; DMA can't reach the system block; PROTECT blocks user mode.
 - **Generated files:** the assembler, C and Verilog files from the generator agree with this spec.

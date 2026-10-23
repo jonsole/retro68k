@@ -182,7 +182,7 @@ directed:   lea     D_AREA,a1           ; 16 long words of test data (palette co
             cmp.l   #SYSTEM,DMX0+DMX_CHERR(a4)
             bne     failed
             move.l  #DMX_CHSTAT_ERR_M|DMX_CHSTAT_DONE_M,DMX0+DMX_CHSTAT(a4)
-            lea     j_misreg(pc),a1     ; a register job 6 bytes long: an error
+            lea     j_misreg(pc),a1     ; a reserved OP (7): an error
             lea     s_t9(pc),a0
             bsr     runjob
             btst    #DMX_CHSTAT_ERR_B,d0
@@ -323,7 +323,7 @@ j_fillreg:  dc.l   FILL8, 0,            CUSTOM+BGCOLOR,             4,      1, 0
 j_todram:   dc.l   COPY8, D_AREA,       CUSTOM+DESCRAM+$700,        16,     1, 0, 0, 0
 j_fromdram: dc.l   COPY8, CUSTOM+DESCRAM+$700, D_AREA+$500,         16,     1, 0, 0, 0
 j_bad:      dc.l   COPY8, D_AREA,       SYSTEM,                     4,      1, 0, 0, 0
-j_misreg:   dc.l   COPY8, D_AREA,       CUSTOM+BGCOLOR,             6,      1, 0, 0, 0
+j_misreg:   dc.l   7|COPY8, D_AREA,     D_AREA+$100,                4,      1, 0, 0, 0
 j_ch1:      dc.l   FILL8, 0,            D_AREA+$600,                32,     1, 0, $A5A5A5A5, 0
 j_start1:   dc.l   COPY8, D_AREA+$700,  CUSTOM+DMX1+DMX_CHCTRL,     4,      1, 0, 0, 0
 j_big:      dc.l   FILL8, 0,            $0A0000,                    $10000, 1, 0, 0, 0
@@ -341,7 +341,7 @@ s_t5:       dc.b    "FAIL: T5 a register to Chip RAM",13,10,0
 s_t6:       dc.b    "FAIL: T6 FILL a register",13,10,0
 s_t7:       dc.b    "FAIL: T7 the descriptor RAM as data",13,10,0
 s_t8:       dc.b    "FAIL: T8 the system area is an error",13,10,0
-s_t9:       dc.b    "FAIL: T9 a misaligned register job is an error",13,10,0
+s_t9:       dc.b    "FAIL: T9 a reserved OP is an error",13,10,0
 s_t10:      dc.b    "FAIL: T10 a COPY into CHCTRL starts a channel",13,10,0
 s_t11:      dc.b    "FAIL: T11 job registers while busy, STOP",13,10,0
 s_t12:      dc.b    "FAIL: T12 PAUSE",13,10,0

@@ -243,57 +243,45 @@ Write DMACON with `MOVE.W` to `DMACON+2` or with `MOVE.L` to `DMACON`. A byte wr
 
 ## Working with the Hardware Registers
 
-Every register in the custom and system blocks follows the same rules. They let a 16-bit CPU work safely with 32-bit registers, and they are worth learning well, because breaking them gives bugs that are hard to find.
+Every register in the custom and system blocks follows the same rules. They are simple, as on the Amiga: the 68000 reads and writes a 32-bit register as two 16-bit halves, and each half is a write or read of its own.
 
 ### Rule 1: Registers Are 32 Bits, in Two Halves
 
 Each register is a long word at an address that is a multiple of 4. As always on the 68000, the **high half** (bits 31–16) is at the register's address and the **low half** (bits 15–0) at the address + 2.
 
-### Rule 2: Write the High Half First, Then the Low Half
+### Rule 2: Each Half Is Written on Its Own
 
-The 68000 moves a long word as two 16-bit bus cycles. So that the hardware never sees half of a new value, a register changes only when its low half is written:
-
-- A write to the **high half** is held, not applied.
-- The next write to the **low half** of the same register applies both halves at once.
-- A write to the low half on its own keeps the register's current high half.
-- A byte write behaves like a 16-bit write that keeps the other byte. A byte write to the high half is held like any other high-half write.
-
-`MOVE.L` to memory writes the high word first in every addressing mode except `-(An)`, so ordinary code just works:
+The 68000 moves a long word as two 16-bit bus cycles, the high word first (in every addressing mode except `-(An)`). Each half goes into the register as soon as it is written, keeping the other half; a byte write keeps the other byte:
 
 ```asm
         lea     SYSTEM,a5
-        move.l  #(64<<SERLEVEL_RXLEVEL_B)|256,SERLEVEL(a5)  ; both halves at once
+        move.l  #(64<<SERLEVEL_RXLEVEL_B)|256,SERLEVEL(a5)  ; the high half, then the low half
 ```
 
-**Do not use CLR.L on a register.** The 68000's CLR.L writes the low word first, so the high half is held and never applied. It also reads the register before writing it, which takes a byte out of a FIFO data register such as SERDATA. Write zero with `MOVE.L #0` instead:
+So between the two writes of a `MOVE.L`, the register holds the new high half and the old low half, for about 200 ns. That does not matter for most registers. For one the hardware is using as you write it, such as a plane pointer or a sprite pointer, write it where the hardware is not using it: in the vertical blank, or from the copper, as on the Amiga.
 
-```asm
-        clr.l   SYSCON(a5)              ; WRONG: high half is never written
-        move.l  #0,SYSCON(a5)           ; right
-```
+**Palette entries are the exception.** A colour must change all at once, even in the middle of a line, so a write to an entry's high half (red) is held until the next write to the same entry's low half (green and blue), which writes the whole colour. A `MOVE.L` to a palette entry is always seen whole. The CPU, the copper and the DMA engine each have their own hold, so they cannot mix up each other's colours.
 
-For the same reason, never write a register with `MOVE.L` to a `-(An)` address, which also writes the low word first.
+**Do not use CLR.L on a FIFO data register** such as SERDATA: the 68000's CLR.L reads the register before writing it, which takes a byte out. `MOVE.L #0` is always safe.
 
 ### Rule 3: 16-Bit Registers Live in the Low Half
 
 Registers with 16 or fewer bits, such as DMACON, keep their value in the low half. Write them with `MOVE.W` to the register's address + 2, or with `MOVE.L` to the register's address.
 
-### Rule 4: Reading Gives a Matching Pair
+### Rule 4: Each Half Is Read on Its Own
 
-- Reading the high half captures the whole register at that moment.
-- The next read of the low half returns the captured low half, so a `MOVE.L` always gets two halves from the same moment, even for a counter that is changing.
-- A read of the low half on its own returns the current low half.
+Each half read returns that half as it is at that moment:
 
 ```asm
-        move.l  SYSID(a5),d0            ; the whole register
+        move.l  SYSID(a5),d0            ; the whole register (two reads)
         move.w  SERSTAT+2(a5),d1        ; just the low half: TXSPACE
 ```
 
-Because the captured value waits for its low-half read, do not read a high half on its own and then come back much later for the low half: you would get the old captured value. Use `MOVE.L` for the whole register, or a `MOVE.W` or `MOVE.B` of the low half alone.
+So a `MOVE.L` of a register that is changing, such as BEAMPOS or a timer's COUNT, can catch the two halves at different moments: BEAMPOS's line from one moment and its pixel from the next. Read such a register twice and check, or read only the half you need. **TIME** is the exception: reading TIMEHI's high half captures all 64 bits, so `MOVE.L TIMEHI` then `MOVE.L TIMELO` always gives one moment (Interrupts and Timers chapter).
 
 ### Rule 5: Reading Has No Side Effects, Except for FIFOs
 
-Reading a register does not change it, with a few exceptions in the system block: reading the FIFO data registers (such as SERDATA) takes data out, and reading SERDROP clears it. None of these are in the custom block, so DMA hardware can never disturb anything by reading.
+Reading a register does not change it, with a few exceptions in the system block: reading the **low half** of a FIFO data register (SERDATA, KBDATA) takes a byte out, reading SERDROP's low half clears it, and reading TIMEHI's high half captures TIME. A `MOVE.L` of SERDATA (the high half, then the low) takes exactly one byte. None of these are in the custom block, so DMA hardware can never disturb anything by reading.
 
 ### Rule 6: Sticky Flags Are Cleared by Writing 1
 

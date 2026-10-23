@@ -385,12 +385,9 @@ A job's source and destination can be any of these:
 
 Anything else, including the system area at `$F00000` (interrupts, timers, serial, SD card), stops the channel with an error, so a runaway job cannot upset interrupts or the console.
 
-The palettes and the descriptor RAM behave as memory: any job can use them. The **registers** are written as whole long words, exactly as a CPU MOVE.L writes them, so a job that touches them must keep these rules, or it stops with an error:
+The custom block (registers, palettes, descriptor RAM) behaves as memory: any job can use it. Each word a job writes is a write of that register half, exactly as a CPU or copper write of it (the halves rule, Introduction chapter). So a COPY of four long words from memory to `CUSTOM+L0+L_WINX` sets layer 0's window and scroll in one job, and a COPY into another channel's CHCTRL starts that channel: one chain can start others. A COPY from `CUSTOM+BEAMPOS` to memory, repeated by the copper, keeps a log of beam positions (each half read as it is at that moment). Reading a register never changes it, so a DMA read is always safe.
 
-- COPY or FILL (only COPY reads registers), at 8 bpp, forwards;
-- addresses, WIDTH and strides multiples of 4.
-
-So a COPY of four long words from memory to `CUSTOM+L0+L_WINX` sets layer 0's window and scroll in one job, and a COPY of one long word into another channel's CHCTRL starts that channel: one chain can start others. A COPY from `CUSTOM+BEAMPOS` to memory, repeated by the copper, keeps a log of beam positions. Reading a register never changes it, so a DMA read is always safe.
+Palette entries keep their hold: the engine's write of an entry's high half waits for its write of the low half. So a job that loads colours must run forwards (DESC clear) and cover whole entries.
 
 ```asm
         ; load 256 colours into PALETTE1 from a table in Chip RAM
@@ -450,7 +447,7 @@ dmx3_int:   move.l  #1<<3,DMXINT(a4)            ; channel 3's interrupt: clear i
 
 **STOP** (CHCTRL bit 2) ends a running chain after its current group of words; DONE is set. **PAUSE** (bit 3) holds a channel while set, and lets it carry on when cleared: write CHCTRL again with PAUSE clear (and no START or RUN).
 
-**Errors** stop only the channel concerned: ERR is set, **CHERR** holds the address that caused it, CHDESC the descriptor, and the channel's DMXINT bit is set. The errors are: an address outside the areas above (or a write to the ROM), a register job breaking the register rules, OP 5–7, or a source and destination kind that do not go together (FILL from memory, KEYCOPY from a port, and so on).
+**Errors** stop only the channel concerned: ERR is set, **CHERR** holds the address that caused it, CHDESC the descriptor, and the channel's DMXINT bit is set. The errors are: an address outside the areas above (or a write to the ROM), OP 5–7, or a source and destination kind that do not go together (FILL from memory, KEYCOPY from a port, and so on).
 
 ---
 
