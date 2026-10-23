@@ -366,7 +366,8 @@ module tb;
     initial for (si = 0; si < 8; si = si + 1) frame_spt[si] = 23'd0;
     always @(posedge clk100) if (dut.rb_wr && dut.rb_addr[23:16] == 8'hE0 && {dut.rb_addr[15:2], 2'b00} >= 16'h0520
                                  && {dut.rb_addr[15:2], 2'b00} < 16'h0620 && dut.rb_addr[4:2] == 3'd0)
-        frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5] = dut.rb_wdata[22:0];
+        frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5] = dut.rb_be[0] ? {frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5][22:16], dut.rb_wdata[15:0]}
+                                                                   : {dut.rb_wdata[22:16], frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5][15:0]};
     // Every write to a sprite's registers (not SPRxDAT), with the frame and
     // the beam, so the model can replay changes made while sprites are drawn
     integer slog = 0;

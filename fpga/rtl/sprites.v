@@ -400,7 +400,7 @@ module sprites (
     // The registers: written by halves (merged with the old value)
     wire [31:0] h_v = merge({5'd0, m_h[sn][21:11], 5'd0, m_h[sn][10:0]}, rb_wdata, rb_be);
     wire [31:0] v_v = merge({5'd0, m_v[sn][21:11], 5'd0, m_v[sn][10:0]}, rb_wdata, rb_be);
-    wire [31:0] c_v = merge({4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, 2'd0, m_c[sn][1:0], 12'd0}, rb_wdata, rb_be);
+    wire [31:0] c_v = merge({4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, m_c[sn][1:0], 12'd0}, rb_wdata, rb_be);
     wire [31:0] s_v = merge(m_s[sn], rb_wdata, rb_be);
     wire [2:0]  ra  = rst ? cs : sn;
     always @(posedge clk) begin
@@ -549,7 +549,7 @@ module sprites (
             3'd0: rb_rdata <= {9'd0, m_lst[sn]};
             3'd1: rb_rdata <= {5'd0, m_h[sn][21:11], 5'd0, m_h[sn][10:0]};
             3'd2: rb_rdata <= {5'd0, m_v[sn][21:11], 5'd0, m_v[sn][10:0]};
-            3'd3: rb_rdata <= {4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, 2'd0, m_c[sn][1:0], 12'd0};
+            3'd3: rb_rdata <= {4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, m_c[sn][1:0], 12'd0};
             3'd4: rb_rdata <= {26'd0, cnt[sn]};
             3'd5: rb_rdata <= m_s[sn];
             default: ;
