@@ -2,6 +2,8 @@
 ; vgen.py put in Chip RAM, then keeps the plane pointers reset in every
 ; vertical blank. After a few frames it prints PASS; the testbench then
 ; dumps the frame and the video state, and vmodel.py checks every pixel.
+; All four palettes (PALETTE0-2, SPRPALETTE) get different colours, so a
+; pixel coloured from the wrong palette shows.
 ;
 ;   default    palette screen: chunky and planar, scaling, fine scroll,
 ;              modulo, a vertically flipped layer, transparency, priority,
@@ -12,6 +14,7 @@
 ;              plane 0's DMA off, constant data from BPL0DAT)
 ;   -DSPRITES  the 8 sprites (spec 9) over two layers: every size, depth and
 ;              format, magnify, clipping at every edge, collisions
+;   -DSPRITES -DSHARE   the same with VIDCON.SHAREPAL: everything uses PALETTE0
 ;
 ; Keep the layouts in step with vgen.py.
 
@@ -27,10 +30,10 @@ start:      move.w  #$2700,sr
             lea     CUSTOM,a4
             move.l  #SERCON_EN_M|SERCON_TXDROP_M,SERCON(a5)
 
-            ; palette: a spread of colours
-            lea     PALETTE(a4),a0
+            ; palettes: a spread of colours through all four
+            lea     PALETTE0(a4),a0
             move.l  #$123456,d1
-            move.w  #256-1,d0
+            move.w  #4*256-1,d0
 .pal:       move.l  d1,(a0)+
             add.l   #$3A5F17,d1
             and.l   #$FFFFFF,d1
@@ -85,7 +88,11 @@ s_pass:     dc.b    "PASS",13,10,0
 
     ifd SPRITES
 ; ---------------------------------------------------------------- sprites
+    ifd SHARE
+VIDCON_VALUE equ VIDCON_EN_M|VIDCON_SHAREPAL_M
+    else
 VIDCON_VALUE equ VIDCON_EN_M
+    endif
 
 ; L0: chunky 4 bpp, 2x by 2x, the whole screen (360 x 288 source), transparent
 L0_DATA     equ $100000

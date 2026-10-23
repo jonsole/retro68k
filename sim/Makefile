@@ -56,13 +56,14 @@ frame: $(BUILD)/tb.vvp $(BUILD)/boot.hex $(BUILD)/microrom.mem
 
 # Video test (spec 4): random pictures in every layer format, checked pixel by
 # pixel against a Python model (vtest/vmodel.py); a palette screen and a
-# direct-colour screen and a sprite screen
-VTESTS = pal direct spr
+# direct-colour screen and a sprite screen, and the sprite screen again
+# with every layer and sprite on PALETTE0 (VIDCON.SHAREPAL)
+VTESTS = pal direct spr share
 vtest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
 	@set -e; for t in $(VTESTS); do \
 	    d=$(BUILD)/vtest_$$t; mkdir -p $$d; \
 	    flag=; gen=; [ $$t = direct ] && flag=-DDIRECT && gen=--direct; \
-	    [ $$t = spr ] && flag=-DSPRITES && gen=--sprites; \
+	    [ $$t = spr ] && flag=-DSPRITES && gen=--sprites; 	    [ $$t = share ] && flag="-DSPRITES -DSHARE" && gen=--sprites; \
 	    $(VASM) -quiet -Fbin $$flag -I $(ROOT)/firmware/include -o $$d/vtest.bin vtest/vtest.s; \
 	    python3 $(ROOT)/tools/bin2hex.py $$d/vtest.bin $$d/vtest.hex; \
 	    python3 vtest/vgen.py $$d/ram.hex $$gen; \

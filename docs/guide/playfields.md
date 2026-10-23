@@ -189,11 +189,11 @@ At the end of each line, the hardware moves every plane pointer of the layer to 
 
 ### Step 5: Set the colours
 
-The palette has 256 entries at `PALETTE` in the custom block (`$E04000`), each a long word `$00RRGGBB`. A 4-plane layer uses 16 of them: entries 0–15 unless you choose another block with the palette offset (step 6). The background colour, BGCOLOR, shows wherever no layer has a pixel.
+Each layer has its own palette of 256 entries, each a long word `$00RRGGBB`. Layer 0's is PALETTE0 in the custom block (`$E04000`). A 4-plane layer uses 16 of them: entries 0–15 unless you choose another block with the palette offset (step 6). The background colour, BGCOLOR, shows wherever no layer has a pixel.
 
 ```asm
         lea     colours(pc),a1
-        lea     PALETTE(a4),a2
+        lea     PALETTE0(a4),a2
         moveq   #16-1,d0
 .col:   move.l  (a1)+,(a2)+
         dbra    d0,.col
@@ -289,7 +289,7 @@ start:      move.w  #$2700,sr           ; no interrupts while we set up
             move.l  #ROWBYTES,L_BPLSTRIDE(a0)
             ; step 5: the colours
             lea     colours(pc),a1
-            lea     PALETTE(a4),a2
+            lea     PALETTE0(a4),a2
             moveq   #16-1,d0
 .col:       move.l  (a1)+,(a2)+
             dbra    d0,.col
@@ -1114,14 +1114,14 @@ start:      move.w  #$2700,sr
             ; layer 0 in front, then layer 1; layer 2 in no slot (3)
             move.l  #(3<<PRIO_BACK_B)|(1<<PRIO_MIDDLE_B)|(0<<PRIO_FRONT_B),PRIO(a4)
 
-            ; colours 16-23 for layer 0, 32-47 for layer 1
+            ; colours 16-23 of layer 0's palette, 32-47 of layer 1's
             lea     fg_colours(pc),a1
-            lea     PALETTE+16*4(a4),a2
+            lea     PALETTE0+16*4(a4),a2
             moveq   #8-1,d0
 .c0:        move.l  (a1)+,(a2)+
             dbra    d0,.c0
             lea     bk_colours(pc),a1
-            lea     PALETTE+32*4(a4),a2
+            lea     PALETTE1+32*4(a4),a2
             moveq   #16-1,d0
 .c1:        move.l  (a1)+,(a2)+
             dbra    d0,.c1
@@ -1252,12 +1252,21 @@ bk_colours: dc.l    $101010,$202020,$303030,$404040,$505050,$606060,$707070,$808
 
 ## Colour Registers and Palette Offsets
 
-### The palette
+### The palettes
 
-The palette has 256 entries of 24-bit colour. It is memory-mapped at `PALETTE` in the custom block, `$E04000`–`$E043FF`: entry n is the long word at `PALETTE + n × 4`, holding `$00RRGGBB`. The top byte reads as 0; write it as 0.
+There are four palettes, each of 256 entries of 24-bit colour: one for each layer and one for the sprites. A layer takes its colours from its own palette only, so three 8-bit layers can show 765 different colours at once, plus the background. They are memory-mapped in the custom block:
+
+| Palette | Used by | Address |
+|---------|---------|---------|
+| PALETTE0 | Layer 0 | `$E04000`–`$E043FF` |
+| PALETTE1 | Layer 1 | `$E04400`–`$E047FF` |
+| PALETTE2 | Layer 2 | `$E04800`–`$E04BFF` |
+| SPRPALETTE | The sprites (Chapter 4) | `$E04C00`–`$E04FFF` |
+
+Entry n of a palette is the long word at its address + n × 4, holding `$00RRGGBB`. The top byte reads as 0; write it as 0. After reset the palettes hold nothing useful: set every colour you use.
 
 ```asm
-        move.l  #$FF8000,PALETTE+5*4(a4)        ; colour 5 = orange
+        move.l  #$FF8000,PALETTE1+5*4(a4)       ; layer 1's colour 5 = orange
 ```
 
 You can read and write any entry at any time. A write takes effect from the next pixel, so you can change colours in the middle of a line; there is no need to wait for the vertical blank, although changing a colour while it is on screen shows the change from that point on. Write each entry with one `MOVE.L` so the colour never shows half-changed.
@@ -1288,7 +1297,11 @@ CTRL.PALOFS (bits 15–12) picks one of 16 blocks of 16 colours. So up to 16 sha
                 Figure 3-10: Palette Offsets
 ```
 
-A deep layer and shallow layers share the same 256 entries. If you show a 32-colour layer (5 planes, entries 0–31) with a 16-colour layer, give the 16-colour layer a PALOFS of 2 or more so they do not clash.
+Each layer picks its block from its own palette, so the layers in the figure could all use PALOFS 0 without clashing; it shows the blocks only.
+
+### One palette for everything (SHAREPAL)
+
+With **VIDCON.SHAREPAL** (bit 5) set, every layer and every sprite takes its colours from PALETTE0, as on a machine with one palette; PALETTE1, PALETTE2 and SPRPALETTE are then not used. One write then changes a colour everywhere it shows, for example copper colour bars that should run through all three layers. The layers then share PALETTE0's 256 entries: a deep layer and shallow layers clash unless you keep them apart, for example a 32-colour layer (5 planes, entries 0–31) with a 16-colour layer at PALOFS 2 or more.
 
 ### The background colour
 
@@ -1300,7 +1313,9 @@ BGCOLOR (`$RRGGBB` in bits 23–0) is not part of the palette. It shows wherever
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| PALETTE | `$4000`–`$43FF` | RW | 256 × `$00RRGGBB`; takes effect at the next pixel |
+| PALETTE0–2 | `$4000`, `$4400`, `$4800` | RW | Layers 0–2's palettes, each 256 × `$00RRGGBB`; takes effect at the next pixel |
+| SPRPALETTE | `$4C00` | RW | The sprites' palette, 256 × `$00RRGGBB` |
+| VIDCON.SHAREPAL | `$000`, bit 5 | RW | 1: every layer and sprite uses PALETTE0 |
 | BGCOLOR | `$018` | RW | Background colour `$RRGGBB`; read at the start of each line |
 | CTRL.PALOFS | Ln + `$00`, bits 15–12 | RW | Colour block for layers of up to 4 bits per pixel |
 | VIDCON.BLANKALL | `$000`, bit 2 | RW | 1: show only the background colour |
@@ -1568,8 +1583,8 @@ start:      move.w  #$2700,sr
             move.l  #0,L1+L_CTRL(a4)
             move.l  #0,L2+L_CTRL(a4)
             move.l  #$000040,BGCOLOR(a4)
-            move.l  #$202020,PALETTE+0*4(a4)
-            move.l  #$FFC000,PALETTE+1*4(a4)
+            move.l  #$202020,PALETTE0+0*4(a4)
+            move.l  #$FFC000,PALETTE0+1*4(a4)
             lea     L0(a4),a0
             move.l  #((VID_X0+232)<<16)|(VID_X0+232+32*8),L_WINX(a0)   ; 256 screen pixels, centred
             move.l  #(VID_Y0<<16)|(VID_Y0+VID_H),L_WINY(a0)            ; every line
@@ -1751,7 +1766,7 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 
 | Name | Offset | Access | Function |
 |------|--------|--------|----------|
-| VIDCON | `$000` | RW | EN (0): display on. BLANKALL (2): background colour only. DIRECT (4): direct colour |
+| VIDCON | `$000` | RW | EN (0): display on. BLANKALL (2): background colour only. DIRECT (4): direct colour. SHAREPAL (5): everything on PALETTE0 |
 | VIDSTAT | `$004` | W1C | VBLANK (0), LINE (1), OVERRUN L0 (4), L1 (5), L2 (6), SPRUNDER (7, sprites); INVBLANK (8, R) |
 | VIDINTEN | `$008` | RW | Enables for VIDSTAT bits 0, 1, 4–7 |
 | BEAMPOS | `$00C` | R | `vline` (26–16), `hpixel` (10–0), beam coordinates |
@@ -1761,7 +1776,8 @@ All offsets are from CUSTOM (`$E00000`). Layer n's registers are at Ln + offset,
 | PRIO | `$01C` | RW | FRONT (1–0), MIDDLE (3–2), BACK (5–4); 3 = no layer |
 | VIDSIZE | `$020` | R | VVISIBLE (26–16), HVISIBLE (10–0) |
 | DMACON | `$094` | SC | BPLEN (8), DMAEN (9): both needed for bitplane DMA; SPREN (5): sprites; SETCLR (15). 16 bits, low half at `$096` |
-| PALETTE | `$4000`–`$43FF` | RW | 256 × `$00RRGGBB` |
+| PALETTE0–2 | `$4000`–`$4BFF` | RW | Layers 0–2's palettes, each 256 × `$00RRGGBB`, `$400` bytes apart |
+| SPRPALETTE | `$4C00`–`$4FFF` | RW | The sprites' palette |
 
 ### Layer registers
 

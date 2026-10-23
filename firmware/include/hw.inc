@@ -27,6 +27,8 @@ VIDCON_BLANKALL_B            equ $2
 VIDCON_BLANKALL_M            equ $4
 VIDCON_DIRECT_B              equ $4
 VIDCON_DIRECT_M              equ $10
+VIDCON_SHAREPAL_B            equ $5
+VIDCON_SHAREPAL_M            equ $20
 VIDSTAT                      equ $4          ; RW1C, spec 4/6.1
 VIDSTAT_VBLANK_B             equ $0
 VIDSTAT_VBLANK_M             equ $1
@@ -609,8 +611,14 @@ AUD3_LEN                     equ $4A8
 AUD3_STEP                    equ $4AC
 AUD3_VOL                     equ $4B0
 AUD3_POS                     equ $4B4
-PALETTE                      equ $4000       ; RW, spec 4/6.3
-PALETTE_SIZE                 equ $400
+PALETTE0                     equ $4000       ; RW, spec 4/6.3
+PALETTE0_SIZE                equ $400
+PALETTE1                     equ $4400       ; RW, spec 4/6.3
+PALETTE1_SIZE                equ $400
+PALETTE2                     equ $4800       ; RW, spec 4/6.3
+PALETTE2_SIZE                equ $400
+SPRPALETTE                   equ $4C00       ; RW, spec 4/6.3
+SPRPALETTE_SIZE              equ $400
 DESCRAM                      equ $6000       ; RW, spec 11/8
 DESCRAM_SIZE                 equ $800
 

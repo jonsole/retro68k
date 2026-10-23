@@ -148,15 +148,15 @@ expect:     dc.l    COPR0,$FFFF,$1234           ; MOVE to its own register
             dc.l    COPR1,$FFFF,$1000           ; $00F0 + $0F10
             dc.l    COPR6,$FFFF,$AAAA           ; CALL ... RET
             dc.l    COPR7,$FFFF,$5555           ; nested CALL
-            dc.l    PALETTE+1*4,$FFFFFF,$123456 ; MOVR through X, X+
-            dc.l    PALETTE+2*4,$FFFFFF,$117788 ; ... data from Y
-            dc.l    PALETTE+3*4,$FFFF,$3031     ; AND, OR
-            dc.l    PALETTE+4*4,$FFFF,$0296     ; the conditions
-            dc.l    PALETTE+5*4,$FFFF,$0006     ; flags after 5 - 6: N, C
-            dc.l    PALETTE+6*4,$FFFF,$0005     ; LD to the flags, read back
-            dc.l    PALETTE+7*4,$FFFF,$0004     ; flags after $FFFF + 2: C
-            dc.l    PALETTE+8*4,$FFFF,$FFFF     ; 5 - 6
-            dc.l    PALETTE+9*4,$FFFF,30        ; counted loop: 10 x 3
+            dc.l    PALETTE0+1*4,$FFFFFF,$123456 ; MOVR through X, X+
+            dc.l    PALETTE0+2*4,$FFFFFF,$117788 ; ... data from Y
+            dc.l    PALETTE0+3*4,$FFFF,$3031     ; AND, OR
+            dc.l    PALETTE0+4*4,$FFFF,$0296     ; the conditions
+            dc.l    PALETTE0+5*4,$FFFF,$0006     ; flags after 5 - 6: N, C
+            dc.l    PALETTE0+6*4,$FFFF,$0005     ; LD to the flags, read back
+            dc.l    PALETTE0+7*4,$FFFF,$0004     ; flags after $FFFF + 2: C
+            dc.l    PALETTE0+8*4,$FFFF,$FFFF     ; 5 - 6
+            dc.l    PALETTE0+9*4,$FFFF,30        ; counted loop: 10 x 3
             dc.l    COPSTAT,$C,$8               ; IRQ set (COPINT), ERR clear
             dc.l    COPSP,$F,0                  ; the stack empty again
             dc.l    -1
@@ -170,7 +170,7 @@ expect:     dc.l    COPR0,$FFFF,$1234           ; MOVE to its own register
 clist:      CST     CR2,CX                      ; save list 2's registers
             CST     CR5,CY
             CST     CR3,CF
-            CMOVEL  PALETTE,$000000             ; colour 0 black for the top
+            CMOVEL  PALETTE0,$000000             ; colour 0 black for the top
 
             CMOVE   COPR0+2,$1234
 
@@ -182,14 +182,14 @@ clist:      CST     CR2,CX                      ; save list 2's registers
             CADDI   CY,2                        ; Y = 1, carry
             CST     CR7,CF
             CLD     CX,CR7
-            CMOVR   PALETTE+7*4+2,CX
+            CMOVR   PALETTE0+7*4+2,CX
 
             CLDI    CY,5
             CSUBI   CY,6                        ; Y = $FFFF, borrow, negative
             CST     CR7,CF
-            CMOVR   PALETTE+8*4+2,CY
+            CMOVR   PALETTE0+8*4+2,CY
             CLD     CX,CR7
-            CMOVR   PALETTE+5*4+2,CX
+            CMOVR   PALETTE0+5*4+2,CX
 
             ; counted loop: Y = 3 x 10
             CLDI    CY,0
@@ -198,13 +198,13 @@ loop1:      CADDI   CY,3
             CSUBI   CX,1
             CSKIPEQ
             CJUMP   RAMLIST+(loop1-clist)
-            CMOVR   PALETTE+9*4+2,CY
+            CMOVR   PALETTE0+9*4+2,CY
 
             ; subroutines, two deep
             CCALL   RAMLIST+(sub1-clist)
 
             ; MOVR through X with X+
-            CLDI    CX,PALETTE+1*4
+            CLDI    CX,PALETTE0+1*4
             CMOVXP  $0012
             CMOVXP  $3456
             CLDI    CY,$7788
@@ -215,7 +215,7 @@ loop1:      CADDI   CY,3
             CLDI    CX,$F0F0
             CANDI   CX,$3C3C                    ; $3030
             CORI    CX,$0001                    ; $3031
-            CMOVR   PALETTE+3*4+2,CX
+            CMOVR   PALETTE0+3*4+2,CX
 
             ; conditions: each wrong skip shows as a missing bit, each
             ; wrong non-skip as an extra bit; expected $0296
@@ -251,13 +251,13 @@ loop1:      CADDI   CY,3
             CCMPI   CX,6
             CSKIPPL
             CORI    CY,$0200
-            CMOVR   PALETTE+4*4+2,CY
+            CMOVR   PALETTE0+4*4+2,CY
 
             ; LD to the flags, then read them back
             CLDI    CF,5
             CST     CR7,CF
             CLD     CX,CR7
-            CMOVR   PALETTE+6*4+2,CX
+            CMOVR   PALETTE0+6*4+2,CX
             CCALL   RAMLIST+(sub2-clist)        ; R7 = $5555 again
 
             CMOVE   COPINT+2,0
@@ -265,22 +265,22 @@ loop1:      CADDI   CY,3
             ; ---- the picture
             ; each colour's high half before the WAIT (held), its low half
             ; after it: the whole colour changes exactly at the position
-            CMOVE   PALETTE,$00FF
+            CMOVE   PALETTE0,$00FF
             CWAIT   VID_Y0+100,VID_X0+200
-            CMOVE   PALETTE+2,$0000             ; red
-            CMOVE   PALETTE,$0000
+            CMOVE   PALETTE0+2,$0000             ; red
+            CMOVE   PALETTE0,$0000
             CWAIT   VID_Y0+100,VID_X0+500
-            CMOVE   PALETTE+2,$FF00             ; green
+            CMOVE   PALETTE0+2,$FF00             ; green
             CWAIT   VID_Y0+200,0                ; the blank before picture line 200
             CLDI    CY,$0010
 loop2:      CWAITP  VID_X0+360
-            CMOVR   PALETTE+2,CY                ; green and blue = Y, red kept (0)
+            CMOVR   PALETTE0+2,CY                ; green and blue = Y, red kept (0)
             CADDI   CY,$0808
             CSKIP   VID_Y0+209,VID_X0+400
             CJUMP   RAMLIST+(loop2-clist)
-            CMOVE   PALETTE,$0000
+            CMOVE   PALETTE0,$0000
             CWAIT   VID_Y0+300,VID_X0+0
-            CMOVE   PALETTE+2,$00FF             ; blue
+            CMOVE   PALETTE0+2,$00FF             ; blue
 
             ; ---- on to list 2, with its registers back
             CLD     CX,CR2

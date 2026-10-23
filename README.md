@@ -7,7 +7,7 @@ A homebrew Motorola 68000 computer with Amiga-style shared memory and an FPGA ha
 - **CPU:** 68000 at 20 MHz, the fx68k core inside the FPGA
 - **Memory:** 4 MB of Amiga-style Chip RAM in fast SRAM, shared with DMA in fixed memory cycles; the CPU has its own cycle in every slot, and waits only when the display would otherwise be late, as on the Amiga; one Agnus-like scheduler gives out every cycle
 - **ROM:** boot ROM with a monitor, held in FPGA block RAM
-- **Video:** HDMI and VGA in one mode, 576p (720×576 at 50 Hz, the digital form of PAL; a PAL Amiga screen sits in a centred window); 3 bitmap layers, planar or chunky, with Amiga-style bitplane pointers; scaling 1–8×; 256-colour palette or direct colour; a copper (MOVE, WAIT, SKIP)
+- **Video:** HDMI and VGA in one mode, 576p (720×576 at 50 Hz, the digital form of PAL; a PAL Amiga screen sits in a centred window); 3 bitmap layers, planar or chunky, with Amiga-style bitplane pointers; scaling 1–8×; a 256-colour palette per layer (or one shared) or direct colour; a copper (MOVE, WAIT, SKIP)
 - **Audio:** 4 Paula-style channels of 8-bit samples, sigma-delta output
 - **DMA engine:** one channel for copies and fills in Chip RAM, in 1D or 2D
 - **I/O:** USB serial (FT232H module), SD card (SPI), PS/2 keyboard, timers, interrupts

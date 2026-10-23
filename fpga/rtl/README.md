@@ -16,7 +16,7 @@ Written (phase 2, version 1):
 | `serial.v` | USB serial: FT232H async FIFO interface, 2 KB FIFOs, control commands | 14 |
 | `intc.v` | Interrupt controller: 24 vectored sources, programmable levels, NMI | 13 |
 | `timers.v` | 64-bit time counter, 4 chainable timers (clock, lines, frames), watchdog | 12 |
-| `video.v` | Video: one mode, 576p (720 × 576 at 50 Hz, 27 MHz pixel clock, asynchronous to the system clock), palette, background, 3 bitmap layers, priority, direct colour, beam position, VBLANK, LINE and OVERRUN, DMACON | 4, 5 |
+| `video.v` | Video: one mode, 576p (720 × 576 at 50 Hz, 27 MHz pixel clock, asynchronous to the system clock), palettes (one per layer, one for the sprites), background, 3 bitmap layers, priority, direct colour, beam position, VBLANK, LINE and OVERRUN, DMACON | 4, 5 |
 | `bpldma.v` | Bitplane pointers, modulo, data registers and fetch | 4, 5 |
 | `layer_pix.v` | One layer's shifters: planar or chunky, scroll, scaling, transparency | 4 |
 | `fifo8.v` | Byte FIFO in block RAM | |

@@ -168,7 +168,7 @@ The XC7A35T has 100 blocks of 18 Kb (2 KB each).
 |------|--------|-------|
 | fx68k microcode | 3 | From the trial synthesis (D10) |
 | Boot ROM, 32 KB | 16 | |
-| Video: palettes | 2 | Spec 4, section 7: four 256-entry palettes in one 1024 × 24 RAM, dual port. No line buffers, text screen or font; the plane registers are built from logic |
+| Video: palettes | 4 | Spec 4, section 7: four 256-entry palettes in one 1024 × 24 RAM, kept twice (one copy for CPU reads, one for the pixels). No line buffers, text screen or font; the plane registers are built from logic |
 | USB serial FIFOs | 2 | Spec 14 |
 | Keyboard byte FIFO | 1 | Spec 16 |
 | **Total** | **24 of 100** | |

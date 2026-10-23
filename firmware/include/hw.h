@@ -31,6 +31,8 @@
 #define VIDCON_BLANKALL_MASK               0x4u
 #define VIDCON_DIRECT_SHIFT                4
 #define VIDCON_DIRECT_MASK                 0x10u
+#define VIDCON_SHAREPAL_SHIFT              5
+#define VIDCON_SHAREPAL_MASK               0x20u
 /* VIDSTAT: RW1C, spec 4/6.1 */
 #define VIDSTAT_OFS                        0x4u
 #define VIDSTAT                            HW_REG32(CUSTOM_BASE + VIDSTAT_OFS)
@@ -462,9 +464,18 @@
 #define AUD_POS(n)                         HW_REG32(CUSTOM_BASE + AUD_AT(n) + AUD_POS_OFS)
 #define AUD_POS_SAMPLE_SHIFT               0
 #define AUD_POS_SAMPLE_MASK                0x7FFFFFu
-#define PALETTE_OFS                        0x4000u
-#define PALETTE_SIZE                       0x400u
-#define PALETTE                            ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + PALETTE_OFS))
+#define PALETTE0_OFS                       0x4000u
+#define PALETTE0_SIZE                      0x400u
+#define PALETTE0                           ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + PALETTE0_OFS))
+#define PALETTE1_OFS                       0x4400u
+#define PALETTE1_SIZE                      0x400u
+#define PALETTE1                           ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + PALETTE1_OFS))
+#define PALETTE2_OFS                       0x4800u
+#define PALETTE2_SIZE                      0x400u
+#define PALETTE2                           ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + PALETTE2_OFS))
+#define SPRPALETTE_OFS                     0x4C00u
+#define SPRPALETTE_SIZE                    0x400u
+#define SPRPALETTE                         ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + SPRPALETTE_OFS))
 #define DESCRAM_OFS                        0x6000u
 #define DESCRAM_SIZE                       0x800u
 #define DESCRAM                            ((volatile uint32_t *)(uintptr_t)(CUSTOM_BASE + DESCRAM_OFS))

@@ -1,6 +1,6 @@
 ; Copper instruction macros (spec 10, section 4), for vasm (Motorola syntax).
 ; Include hw.inc first. Register names are offsets in the custom block,
-; as in hw.inc (for example L1+L_BPL0PT, BGCOLOR, PALETTE+4*n).
+; as in hw.inc (for example L1+L_BPL0PT, BGCOLOR, PALETTE0+4*n).
 ;
 ;   CMOVE   reg,value       write 16 bits to a register half
 ;   CMOVEL  reg,value       write a 32-bit register: two MOVEs, high half first

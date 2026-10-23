@@ -29,7 +29,7 @@ block ROM     0xF80000 0x008000 "Boot ROM"
 block CUSTOM 0xE00000 0x10000 "Custom registers: video, DMA engine, audio, copper"
 
 # Video (spec 4)
-reg 0x000 VIDCON     RW   4/6.1  EN=0 BLANKALL=2 DIRECT=4
+reg 0x000 VIDCON     RW   4/6.1  EN=0 BLANKALL=2 DIRECT=4 SHAREPAL=5
 reg 0x004 VIDSTAT    RW1C 4/6.1  VBLANK=0 LINE=1 OVERRUN=6:4 SPRUNDER=7 INVBLANK=8
 reg 0x008 VIDINTEN   RW   4/6.1  VBLANK=0 LINE=1 OVERRUN=6:4 SPRUNDER=7
 reg 0x00C BEAMPOS    R    4/3.3  VLINE=26:16 HPIXEL=10:0
@@ -121,7 +121,10 @@ reg 0x72C COPSP   RW   10/6  DEPTH=3:0
 regs COPR 8 0x740 RW 10/6
 
 # Memory areas in the custom block
-area PALETTE 0x4000 0x0400 RW 4/6.3
+area PALETTE0   0x4000 0x0400 RW 4/6.3
+area PALETTE1   0x4400 0x0400 RW 4/6.3
+area PALETTE2   0x4800 0x0400 RW 4/6.3
+area SPRPALETTE 0x4C00 0x0400 RW 4/6.3
 area DESCRAM 0x6000 0x0800 RW 11/8
 
 # ---------------------------------------------------------------- system block

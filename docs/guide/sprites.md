@@ -92,9 +92,9 @@ The window also sets the image's size: there is no separate width or height regi
 | 17–16 | HMAG | Magnify across: 0 = ×1, 1 = ×2, 2 = ×4 |
 | 19–18 | VMAG | Magnify down: 0 = ×1, 1 = ×2, 2 = ×4 |
 | 21–20 | DEPTH | 0 = in front of all layers … 3 = behind all layers |
-| 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the palette |
+| 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the sprite palette |
 
-For a 4-bit sprite in colours 32–47 (palette block 2), in front of everything:
+For a 4-bit sprite in colours 32–47 of the sprite palette (block 2), in front of everything:
 
 ```asm
         move.l  #(1<<SPR_CTL_BPP_B)|(2<<SPR_CTL_PAL_B),SPR0+SPR_CTL(a4)
@@ -129,8 +129,8 @@ start:      move.w  #$2700,sr
             lea     CUSTOM,a4
             bsr     draw
 
-            ; colours 33-47: from dark red to yellow
-            lea     PALETTE+33*4(a4),a0
+            ; sprite colours 33-47: from dark red to yellow
+            lea     SPRPALETTE+33*4(a4),a0
             move.l  #$400000,d0
             moveq   #15-1,d1
 .col:       move.l  d0,(a0)+
@@ -223,11 +223,13 @@ The ball goes half off each edge of the picture before it bounces: the hardware 
 |-----|-----------------|---------|----------------------|
 | 0: 2 bits | 8 | 3 + transparent | PAL × 16 + 1 to PAL × 16 + 3 |
 | 1: 4 bits | 4 | 15 + transparent | PAL × 16 + 1 to PAL × 16 + 15 |
-| 2: 8 bits | 2 | 255 + transparent | 1 to 255: the whole palette |
+| 2: 8 bits | 2 | 255 + transparent | 1 to 255: the whole sprite palette |
 
-A sprite shares the 256-entry palette with the layers. At 2 and 4 bits per pixel, PAL in SPRxCTL picks a 16-colour block of the palette, exactly as a layer's PALOFS does: a pixel value v shows colour PAL × 16 + v. At 8 bits, the value is the colour number and PAL is not used. Value 0 is always transparent, at every depth.
+The sprites share a palette of their own, **SPRPALETTE** (256 entries at `$E04C00`, laid out as the layers' palettes: entry n is the long word at `SPRPALETTE + n × 4`, `$00RRGGBB`). The layers do not use it, so sprite colours never clash with the scenery's. At 2 and 4 bits per pixel, PAL in SPRxCTL picks a 16-colour block of it, exactly as a layer's PALOFS does in the layer's palette: a pixel value v shows colour PAL × 16 + v. At 8 bits, the value is the colour number and PAL is not used. Value 0 is always transparent, at every depth.
 
-Giving sprites blocks of their own (for example PAL 14 and 15 for all sprites, if the layers use blocks 0 to 13) lets you change sprite colours without touching the layers'.
+Giving each sprite, or each kind of object, a block of its own lets you change one object's colours without touching the others'.
+
+With **VIDCON.SHAREPAL** set, sprites take their colours from PALETTE0 instead, as every layer then does (Chapter 3, "One palette for everything"); PAL then picks a block of PALETTE0.
 
 ### Line length
 
@@ -381,7 +383,7 @@ Depth is how a sprite goes behind scenery: in a dual-playfield screen with the s
 
 Depth is per sprite and can be changed at any time with SPRxCTL (in the vertical blank: a CTL write restarts the sprite).
 
-In **direct colour** mode (VIDCON.DIRECT) the layers make one picture together, so there is nothing to go between: sprites are drawn in front of the whole picture, in their palette colours, and DEPTH is not used.
+In **direct colour** mode (VIDCON.DIRECT) the layers make one picture together, so there is nothing to go between: sprites are drawn in front of the whole picture, in their colours from SPRPALETTE, and DEPTH is not used.
 
 ---
 
@@ -532,7 +534,7 @@ This is useful for sprites whose image is computed rather than stored, and for e
 ```asm
 ; Example 4-4: sprite 0, fed by the copper, is a 16-pixel-wide beam down
 ; lines 100-399 whose pattern changes on every line. 2 bpp: 2 words a line.
-; The CPU set SPR0's DMA off (SPRDMA) and its palette colours 4*16+1 to +3.
+; The CPU set SPR0's DMA off (SPRDMA) and sprite colours 4*16+1 to +3 (SPRPALETTE).
 
             include "hw.inc"
             include "copper.inc"

@@ -54,7 +54,7 @@ If you have written Amiga copper lists, you will feel at home. The instructions 
 
 - Examples are 68000 assembly language for vasm, in Motorola syntax. They start with `include "hw.inc"` and then `include "copper.inc"`, which gives the copper instruction macros.
 - In ordinary code **a4 holds CUSTOM** (`$E00000`) and **a5 holds SYSTEM** (`$F00000`), as in the other chapters.
-- In a copper list, a register is named by its **offset in the custom block**, exactly as `hw.inc` gives it: `BGCOLOR`, `L0+L_BPL0PT`, `PALETTE+5*4`. No base register is involved, because the copper can write only the custom block.
+- In a copper list, a register is named by its **offset in the custom block**, exactly as `hw.inc` gives it: `BGCOLOR`, `L0+L_BPL0PT`, `PALETTE0+5*4`. No base register is involved, because the copper can write only the custom block.
 - Copper instructions are written with the macros (`CMOVE`, `CMOVEL`, `CWAIT`, `CWAITP`, `CWAITB`, `CSKIP`, `CSKIPP`, `CJUMP`, `CSTOP`, and those of "The Copper's Registers and Arithmetic"). In the text, the instructions themselves are written MOVE, WAIT and so on.
 - Positions in WAIT and SKIP are **beam coordinates** (see "The beam position" below). The examples use `VID_X0` (144) and `VID_Y0` (49) from `hw.inc`, the first picture pixel and line: picture line L is beam line `VID_Y0+L`, and pixel 0 of a line is the start of its horizontal blank. In the text, a line or pixel of the screen ("line 100") is a picture position unless it is called a beam line or beam pixel; WAIT and SKIP operands are always beam positions.
 
@@ -170,18 +170,18 @@ A plane pointer is 23 bits, so it always needs both halves: `CMOVEL`. Setting th
 
 ### Changing colours
 
-A palette entry is a 32-bit register, `$00RRGGBB`, at `PALETTE + 4 × n`. The high half holds red (`$00RR`), the low half green and blue (`$GGBB`). BGCOLOR, the background colour, is laid out the same way.
+A palette entry is a 32-bit register, `$00RRGGBB`: layer 0's colour n is at `PALETTE0 + 4 × n` (layers 1 and 2 have PALETTE1 and PALETTE2, the sprites SPRPALETTE; Chapter 3). The examples here colour layer 0. The high half holds red (`$00RR`), the low half green and blue (`$GGBB`). BGCOLOR, the background colour, is laid out the same way.
 
 - To set a whole colour, use `CMOVEL`:
 
   ```asm
-          CMOVEL  PALETTE+1*4,$FF8000     ; colour 1 = orange
+          CMOVEL  PALETTE0+1*4,$FF8000     ; colour 1 = orange
   ```
 
 - To change only green and blue, one MOVE to the low half does it, and keeps the entry's red:
 
   ```asm
-          CMOVE   PALETTE+1*4+2,$FF00     ; colour 1: green $FF, blue $00, red kept
+          CMOVE   PALETTE0+1*4+2,$FF00     ; colour 1: green $FF, blue $00, red kept
   ```
 
 Palette writes take effect at once, from the next pixel, so the copper can change a colour in the middle of a line. BGCOLOR is read at the start of each line's picture, so a change made in a line's horizontal blank shows on that line, and one made during its picture shows from the next line. "Copper Timing" gives the details.
@@ -525,7 +525,7 @@ start:      move.w  #$2700,sr           ; no interrupts
             move.l  #0,L_SCROLLX(a0)
             move.l  #ROWBYTES,L_BPLSTRIDE(a0)   ; 40 bytes per plane line
             lea     colours(pc),a1
-            lea     PALETTE(a4),a2
+            lea     PALETTE0(a4),a2
             moveq   #16-1,d0
 .col:       move.l  (a1)+,(a2)+
             dbra    d0,.col
@@ -943,13 +943,13 @@ copper_list:
             CMOVEL  L0+L_BPL2PT,SCREEN+2*PLANESIZE
             CMOVEL  L0+L_BPL3PT,SCREEN+3*PLANESIZE
             CWAIT   VID_Y0+200,0            ; the start of line 200
-midline:    CMOVE   PALETTE+2*4,$0000       ; colour 2's new high half: held
+midline:    CMOVE   PALETTE0+2*4,$0000       ; colour 2's new high half: held
             CWAITP  VID_X0+360              ; the middle of this line
-            CMOVE   PALETTE+2*4+2,$80FF     ; colour 2 = $0080FF, exactly here
-            CMOVE   PALETTE+1*4+2,$FF00     ; colour 1 = $FFFF00, a fetch later
+            CMOVE   PALETTE0+2*4+2,$80FF     ; colour 2 = $0080FF, exactly here
+            CMOVE   PALETTE0+1*4+2,$FF00     ; colour 1 = $FFFF00, a fetch later
             CWAITP  0                       ; the next line's horizontal blank
-            CMOVEL  PALETTE+2*4,$FF0000     ; both back for the next line
-            CMOVE   PALETTE+1*4+2,$FFFF
+            CMOVEL  PALETTE0+2*4,$FF0000     ; both back for the next line
+            CMOVE   PALETTE0+1*4+2,$FFFF
             CSKIP   VID_Y0+300,0            ; past line 299? leave the loop
             CJUMP   midline
             CSTOP
@@ -1040,7 +1040,7 @@ The Amiga's copper could only write constants. This copper also has a few regist
 | R0–R7 | 16 bits each | COPR0–COPR7, `$740`–`$75C` | Storage: saving X, Y and the flags, values kept between frames, values passed to and from the CPU |
 | The stack | 8 return addresses | COPSP, `$72C`, reads how many | CALL and RET |
 
-All of them except the stack's contents can be read and written by the CPU, at their addresses in the custom block, and by the copper itself with an ordinary MOVE: `CMOVE COPX+2,PALETTE` loads X. They are 16-bit registers, in the low half. Nothing resets them at the vertical blank: X, Y, the flags and R0–R7 keep their values from frame to frame. (The stack is emptied at each vertical blank, unless COPCON.STKKEEP is set.)
+All of them except the stack's contents can be read and written by the CPU, at their addresses in the custom block, and by the copper itself with an ordinary MOVE: `CMOVE COPX+2,PALETTE0` loads X. They are 16-bit registers, in the low half. Nothing resets them at the vertical blank: X, Y, the flags and R0–R7 keep their values from frame to frame. (The stack is emptied at each vertical blank, unless COPCON.STKKEEP is set.)
 
 In this chapter, and in `copper.inc`, the registers are named `CX`, `CY`, `CF` and `CR0`–`CR7` when they are operands of an instruction.
 
@@ -1066,7 +1066,7 @@ As with every copper instruction, the register written is named first:
 |-------|--------|----|-----------------------------------------------|--------|
 | `CMOVX n` | The number n | The register half at X | `CMOVX $00FF` | BGCOLOR's low half = `$00FF` |
 | `CMOVXP n` | The number n | The register half at X, then X = X + 2 | `CMOVXP $00FF` | The same, and X = `BGCOLOR+4` |
-| `CMOVR reg,CY` | Y | reg (`CMOVR reg,CX`: X) | `CMOVR PALETTE+2,CY` | Colour 0's low half = `$1234` |
+| `CMOVR reg,CY` | Y | reg (`CMOVR reg,CX`: X) | `CMOVR PALETTE0+2,CY` | Colour 0's low half = `$1234` |
 | `CMOVXR CY` | Y | The register half at X (`CMOVXR CX`: X) | `CMOVXR CY` | BGCOLOR's low half = `$1234` |
 | `CMOVXRP CY` | Y | The register half at X, then X = X + 2 | `CMOVXRP CY` | The same, and X = `BGCOLOR+4` |
 
@@ -1075,7 +1075,7 @@ None of them change the flags.
 **Stepping through registers: the P forms.** The forms ending in `P` add 2 to X after the write, as the 68000's `(A0)+` does. Two steps of 2 take X from a register's high half to its low half, then on to the next register, so a run of P forms walks through consecutive registers without naming each one. For example, to write a whole palette entry, then move on to the next:
 
 ```
-        CLDI    CX,PALETTE+5*4  ; X = colour 5, high half
+        CLDI    CX,PALETTE0+5*4  ; X = colour 5, high half
         CMOVXP  $00FF           ; red = $FF (held); X = colour 5, low half
         CMOVXRP CY              ; green, blue = Y: colour 5 written whole;
                                 ; X = colour 6, high half
@@ -1119,7 +1119,7 @@ This is the other way round from the 68000, where `ADD.W #4,D0` puts the source 
 | `CADDI` | A 16-bit number in the instruction | `CADDI CX,4` | X = X + 4 |
 | `CADD` | A copper register: `CX`, `CY` or `CR0`–`CR7` | `CADD CX,CR3` | X = X + R3 |
 
-The number can be any 16-bit value or expression, such as `PALETTE+16*4` or `$0604`. The source registers cannot be the custom registers: only X, Y and R0–R7.
+The number can be any 16-bit value or expression, such as `PALETTE0+16*4` or `$0604`. The source registers cannot be the custom registers: only X, Y and R0–R7.
 
 **The instructions**
 
@@ -1219,12 +1219,12 @@ This list fills colours 16–47 with a gradient from black towards cyan: 32 colo
 ; and blue.
 
             cnop    0,4
-gradient:   CLDI    CX,PALETTE+16*4     ; colour 16, high half
+gradient:   CLDI    CX,PALETTE0+16*4     ; colour 16, high half
             CLDI    CY,$0000
 .loop:      CMOVXP  $0000               ; red = 0 (held), X on to the low half
             CMOVXRP CY                  ; green, blue = Y: the entry is written
             CADDI   CY,$0604            ; green + 6, blue + 4
-            CCMPI   CX,PALETTE+48*4     ; past colour 47?
+            CCMPI   CX,PALETTE0+48*4     ; past colour 47?
             CSKIPHS
             CJUMP   .loop
             CSTOP
@@ -1329,12 +1329,12 @@ jobs:       CLDI    CY,JOBS&$FFFF       ; the first descriptor
             CSTOP
 
 gradient_sub:                           ; Example 5-13, as a subroutine
-            CLDI    CX,PALETTE+16*4
+            CLDI    CX,PALETTE0+16*4
             CLDI    CY,$0000
 .loop:      CMOVXP  $0000
             CMOVXRP CY
             CADDI   CY,$0604
-            CCMPI   CX,PALETTE+48*4
+            CCMPI   CX,PALETTE0+48*4
             CSKIPHS
             CJUMP   .loop
             CRET

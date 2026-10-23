@@ -26,6 +26,9 @@ module tb;
     wire        ft_rxf_n, ft_txe_n, ft_d_oe, ft_rd_n, ft_wr_n, ft_siwu_n;
     wire [7:0]  ft_d, ft_d_o;
 
+    integer scan = 0, ls = 0, npass = 0, need = 1, serial_test = 0, echo_at = 0;
+    // Sprite debug counters (+sprdbg)
+    integer spr_acks = 0, spr_rv = 0, spr_fw = 0, spr_px = 0;
     reg         dma_req = 0, dma_we = 0;
     reg  [21:1] dma_addr = 0;
     reg  [15:0] dma_wdata = 0;
@@ -365,7 +368,7 @@ module tb;
             $fwrite(f, "sprcoll %0d\n", dut.vid.spr.coll);
             $fclose(f);
             f = $fopen("vstate_pal.hex", "w");
-            for (i = 0; i < 256; i = i + 1) $fwrite(f, "%h\n", dut.vid.pal[i]);
+            for (i = 0; i < 1024; i = i + 1) $fwrite(f, "%h\n", dut.vid.pal[i]);   // PALETTE0-2, SPRPALETTE
             $fclose(f);
         end
     endtask
@@ -421,7 +424,6 @@ module tb;
         end
     endtask
 
-    integer scan = 0, ls = 0, npass = 0, need = 1, serial_test = 0, echo_at = 0;
     initial begin
         serial_test = $test$plusargs("serial");
         if (serial_test) need = 2;
@@ -468,8 +470,6 @@ module tb;
         end
     end
 
-    // Sprite debug counters (+sprdbg)
-    integer spr_acks = 0, spr_rv = 0, spr_fw = 0, spr_px = 0;
     always @(posedge clk100) begin
         if (dut.spr_ack) spr_acks = spr_acks + 1;
         if (dut.spr_rvalid) spr_rv = spr_rv + 1;

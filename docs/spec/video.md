@@ -337,7 +337,7 @@ Entry i of palette p is at `0xE04000 + p × 0x400 + i × 4`. Bits 31–24 read a
 
 | Item | Resource |
 |------|----------|
-| Palettes, 4 × 256 × 24 bits | One RAM of 1024 × 24 (the address is the palette number and the index): 2 RAMB18, as the single 256-entry palette took (a RAMB18 is 18 bits wide, so 24 bits took two either way). One copy, true dual port: the CPU side at 100 MHz, the pixel side reads |
+| Palettes, 4 × 256 × 24 bits | A RAM of 1024 × 24 (the address is the palette number and the index), kept twice and written together from the CPU side at 100 MHz: one copy is read back by the CPU, the other by the pixel side. Each copy is a simple one-write, one-read RAM, which every tool maps the same way: one RAMB36 each, 2 in all (the single 256-entry palette took one) |
 | The pixel pipeline | The priority stage passes on, with the winning pixel's index, which palette it is from (2 bits): a few LUTs |
 | 24 pointers, 24 data registers, 24 shift registers | Logic |
 | Clocks | One MMCM, shared with the rest of the design |

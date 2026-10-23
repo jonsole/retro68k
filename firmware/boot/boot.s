@@ -395,8 +395,8 @@ rowaddr:    lea     CON,a0
 ; palette, clear the console, layer 0 = the console over the whole screen, video on
 screen_init:
             lea     CUSTOM,a4
-            move.l  #$0000AA,PALETTE+0*4(a4)    ; console: blue
-            move.l  #$FFFFFF,PALETTE+1*4(a4)    ; and white
+            move.l  #$0000AA,PALETTE0+0*4(a4)   ; console: blue
+            move.l  #$FFFFFF,PALETTE0+1*4(a4)   ; and white
             lea     CON+CON_ROWS*16*CON_LINE,a0
             moveq   #0,d1
             moveq   #0,d2
@@ -487,10 +487,10 @@ softirq:    move.l  #SOFTINT_CLR_M,SOFTINT(a5)
 
 ; layer 1: a 64 x 32 picture at BITMAP in 4 interleaved planes, pixel
 ; (x, y) = (x xor y) and 15, shown 2x in front of the text; colours 16-31
-; (PALOFS 1): colour 16 + i = (16i, 255 - 16i, $80)
+; of its own palette, PALETTE1 (PALOFS 1): colour 16 + i = (16i, 255 - 16i, $80)
 bitmap_init:
             lea     CUSTOM,a4
-            lea     PALETTE+16*4(a4),a0
+            lea     PALETTE1+16*4(a4),a0
             moveq   #0,d0
 .pal:       move.w  d0,d2
             lsl.w   #4,d2                       ; 16i

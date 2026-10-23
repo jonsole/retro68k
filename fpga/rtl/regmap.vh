@@ -21,6 +21,7 @@
 `define RM_VIDCON_EN                        0
 `define RM_VIDCON_BLANKALL                  2
 `define RM_VIDCON_DIRECT                    4
+`define RM_VIDCON_SHAREPAL                  5
 `define RM_VIDSTAT                          16'h0004
 `define RM_VIDSTAT_VBLANK                   0
 `define RM_VIDSTAT_LINE                     1
@@ -226,8 +227,14 @@
 `define RM_AUD_VOL_R                        6:0
 `define RM_AUD_POS                          16'h0014
 `define RM_AUD_POS_SAMPLE                   22:0
-`define RM_PALETTE_BASE                     16'h4000
-`define RM_PALETTE_SIZE                     17'h00400
+`define RM_PALETTE0_BASE                    16'h4000
+`define RM_PALETTE0_SIZE                    17'h00400
+`define RM_PALETTE1_BASE                    16'h4400
+`define RM_PALETTE1_SIZE                    17'h00400
+`define RM_PALETTE2_BASE                    16'h4800
+`define RM_PALETTE2_SIZE                    17'h00400
+`define RM_SPRPALETTE_BASE                  16'h4C00
+`define RM_SPRPALETTE_SIZE                  17'h00400
 `define RM_DESCRAM_BASE                     16'h6000
 `define RM_DESCRAM_SIZE                     17'h00800
 

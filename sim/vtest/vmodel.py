@@ -70,6 +70,10 @@ X0, Y0 = 144, 49                                  # the picture's first pixel an
 def render(regs, layers, bpt, pal, ram):
     W, H = regs["hvis"], regs["vvis"]
     direct = (regs["vidcon"] >> 4) & 1
+    share = (regs["vidcon"] >> 5) & 1
+    # palette p's entry i (spec 4, section 4.6): p 0-2 a layer's, 3 the sprites';
+    # with VIDCON.SHAREPAL everything uses PALETTE0
+    col_of = lambda p, i: pal[(0 if share else p) * 256 + i]
     blankall = (regs["vidcon"] >> 2) & 1
     prio = regs["prio"]
     word = lambda a: ram.get((a & 0x7FFFFF) >> 1, 0)
@@ -144,7 +148,7 @@ def render(regs, layers, bpt, pal, ram):
                 img.append(regs["bg"])
             elif direct:
                 if here:
-                    img.append(pal[here[0][1]])           # sprites in front, palette colours
+                    img.append(col_of(3, here[0][1]))     # sprites in front, SPRPALETTE colours
                     continue
                 rgb = 0
                 for n in range(3):
@@ -157,13 +161,13 @@ def render(regs, layers, bpt, pal, ram):
                 for p in (3, 2, 1, 0):
                     for n, idx, dep in reversed(here):
                         if dep == p:
-                            col = pal[idx]
+                            col = col_of(3, idx)
                     if p > 0:
                         l = (prio >> (2 * (p - 1))) & 3
                         if l < 3:
                             op, idx, _ = out[y][l][0][x]
                             if op:
-                                col = pal[idx]
+                                col = col_of(l, idx)
                 img.append(col)
     regs["coll_model"] = coll
     return W, H, img

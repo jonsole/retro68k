@@ -1,5 +1,5 @@
-// Video (spec 4): 576p (720x576 at 50 Hz, CEA-861, 27 MHz), a 256-colour
-// palette, background colour,
+// Video (spec 4): 576p (720x576 at 50 Hz, CEA-861, 27 MHz), four 256-colour
+// palettes (one per layer, one for the sprites), background colour,
 // three bitmap layers (chunky 1/2/4/8 bpp or planar 1-8 planes, Amiga-style:
 // plane pointers, modulo and data registers, bpldma.v), priority, beam
 // position, VBLANK, LINE and OVERRUN.
@@ -85,9 +85,9 @@ module video (
     wire [8:0] blk = off[15:7];                                // layers: 2, 3, 4
     wire sel_lay   = in_custom && (blk >= 9'd2) && (blk <= 9'd4) && (off[6:5] == 2'b00);
     wire [1:0] ln  = blk[1:0] - 2'd2;
-    wire sel_pal   = in_custom && (off[15:10] == 6'b010000);   // 0x4000-0x43FF
+    wire sel_pal   = in_custom && (off[15:12] == 4'h4);        // 0x4000-0x4FFF: PALETTE0-2, SPRPALETTE
 
-    reg  [4:0]  vidcon;                // DIRECT (4), BLANKALL (2), EN (0)
+    reg  [5:0]  vidcon;                // SHAREPAL (5), DIRECT (4), BLANKALL (2), EN (0)
     reg  [7:0]  vidstat;               // sticky flags; INVBLANK (bit 8) is live, below
     reg  [7:0]  vidinten;
     reg  [10:0] lc_v;                  // LINECMP
@@ -131,7 +131,7 @@ module video (
 
     always @(posedge clk) begin
         if (rst) begin
-            vidcon   <= 5'd0;
+            vidcon   <= 6'd0;
             vidstat  <= 8'd0;
             vidinten <= 8'd0;
             lc_v     <= 11'd0;
@@ -173,7 +173,7 @@ module video (
             if (rb_wr && sel_glob) begin : wglobal
                 reg [31:0] v;
                 case (off)
-                    `RM_VIDCON:   begin v = merge({27'd0, vidcon}, rb_wdata, rb_be); vidcon <= {v[4], 1'b0, v[2], 1'b0, v[0]}; end
+                    `RM_VIDCON:   begin v = merge({26'd0, vidcon}, rb_wdata, rb_be); vidcon <= {v[5], v[4], 1'b0, v[2], 1'b0, v[0]}; end
                     `RM_VIDSTAT:  if (rb_be[0]) vidstat <= vidstat & ~rb_wdata[7:0];
                     `RM_VIDINTEN: begin v = merge({24'd0, vidinten}, rb_wdata, rb_be); vidinten <= v[7:0] & 8'hF3; end
                     `RM_LINECMP:  begin v = merge({5'd0, lc_v, 16'd0}, rb_wdata, rb_be); lc_v <= v[26:16]; end
@@ -197,7 +197,7 @@ module video (
             default: ;
         endcase
         if (rb_rd && sel_glob) case (off)
-            `RM_VIDCON:     reg_q <= {27'd0, vidcon};
+            `RM_VIDCON:     reg_q <= {26'd0, vidcon};
             `RM_VIDSTAT:    reg_q <= {23'd0, p_invblank, vidstat};
             `RM_VIDINTEN:   reg_q <= {24'd0, vidinten};
             `RM_BEAMPOS:    reg_q <= {5'd0, s_vc, 5'd0, s_hc};
@@ -211,6 +211,8 @@ module video (
         endcase
     end
 
+    reg         line_t;
+    wire [31:0] spr_q;
     reg  [2:0] lt_s;
     always @(posedge clk) lt_s <= {lt_s[1:0], line_t};
     assign line_tick  = lt_s[2] != lt_s[1];
@@ -221,36 +223,36 @@ module video (
     assign irq_line   = irqflags[1];
     assign irq_viderr = |irqflags[7:4];
 
-    // ================================================================ palette
-    // Kept twice, written together from the CPU side (100 MHz, 32-bit with
-    // byte enables): one copy is read back by the CPU, the other by the
-    // pixel side. Simple one-write, one-read block RAMs map the same way in
-    // every tool.
-    reg [31:0] pal [0:255], pal_c [0:255];       // 0x00RRGGBB
+    // ================================================================ palettes
+    // PALETTE0-2 (L0-L2) and SPRPALETTE (section 6.3): one RAM of 1024 x 24,
+    // addressed by {palette, index}. Kept twice, written together from the
+    // CPU side (100 MHz, with byte enables; bits 31-24 are not stored): one
+    // copy is read back by the CPU, the other by the pixel side. Simple
+    // one-write, one-read block RAMs map the same way in every tool.
+    reg [23:0] pal [0:1023], pal_c [0:1023];     // RRGGBB
     integer k;
-    initial for (k = 0; k < 256; k = k + 1) begin pal[k] = 32'd0; pal_c[k] = 32'd0; end
+    initial for (k = 0; k < 1024; k = k + 1) begin pal[k] = 24'd0; pal_c[k] = 24'd0; end
 
-    reg [31:0] pal_qa;
+    wire [9:0] pal_a = rb_addr[11:2];
+    reg [23:0] pal_qa;
     always @(posedge clk) if (rb_wr && sel_pal) begin
-        if (rb_be[3]) pal[rb_addr[9:2]][31:24] <= rb_wdata[31:24];
-        if (rb_be[2]) pal[rb_addr[9:2]][23:16] <= rb_wdata[23:16];
-        if (rb_be[1]) pal[rb_addr[9:2]][15:8]  <= rb_wdata[15:8];
-        if (rb_be[0]) pal[rb_addr[9:2]][7:0]   <= rb_wdata[7:0];
+        if (rb_be[2]) pal[pal_a][23:16] <= rb_wdata[23:16];
+        if (rb_be[1]) pal[pal_a][15:8]  <= rb_wdata[15:8];
+        if (rb_be[0]) pal[pal_a][7:0]   <= rb_wdata[7:0];
     end
     always @(posedge clk) begin
         if (rb_wr && sel_pal) begin
-            if (rb_be[3]) pal_c[rb_addr[9:2]][31:24] <= rb_wdata[31:24];
-            if (rb_be[2]) pal_c[rb_addr[9:2]][23:16] <= rb_wdata[23:16];
-            if (rb_be[1]) pal_c[rb_addr[9:2]][15:8]  <= rb_wdata[15:8];
-            if (rb_be[0]) pal_c[rb_addr[9:2]][7:0]   <= rb_wdata[7:0];
+            if (rb_be[2]) pal_c[pal_a][23:16] <= rb_wdata[23:16];
+            if (rb_be[1]) pal_c[pal_a][15:8]  <= rb_wdata[15:8];
+            if (rb_be[0]) pal_c[pal_a][7:0]   <= rb_wdata[7:0];
         end
-        pal_qa <= pal_c[rb_addr[9:2]];
+        pal_qa <= pal_c[pal_a];
     end
     reg pal_hit;
     always @(posedge clk) pal_hit <= rb_rd && sel_pal;
 
     wire [31:0] dma_q;
-    assign rb_rdata = reg_q | dma_q | spr_q | (pal_hit ? {8'd0, pal_qa[23:0]} : 32'd0);
+    assign rb_rdata = reg_q | dma_q | spr_q | (pal_hit ? {8'd0, pal_qa} : 32'd0);
 
     // ================================================================ pixel domain
     reg [1:0] rst_p;
@@ -331,7 +333,6 @@ module video (
     reg  [11:0] f_groups [0:2];
     reg  [2:0]  f_planes [0:2];
     reg  [1:0]  f_hs [0:2];
-    reg         line_t;
     // This line's settings, for the layer units
     reg  [2:0]  c_act, c_planar, c_transp;
     reg  [10:0] c_xs [0:2], c_xe [0:2];
@@ -412,7 +413,6 @@ module video (
     );
 
     // ---- sprites (spec 9): the fetcher and FIFOs (100 MHz), and a unit per sprite
-    wire [31:0] spr_q;
     wire [79:0] sp_hs, sp_xe;
     wire [87:0] sp_vs, sp_ve;
     wire [15:0] sp_lb, sp_hmag, sp_depth;
@@ -499,9 +499,9 @@ module video (
     wire       hs0  = en_p && (hc >= HSS) && (hc < HSE);
     wire       vs0  = en_p && (vc >= VSS) && (vc < VSE);
     reg  [2:0] vis_d, hs_d, vs_d;
-    reg  [7:0] pidx2;
+    reg  [9:0] pidx2;                  // {palette, index}: 0-2 a layer's, 3 the sprites'
     reg        opaque2, opaque3;
-    reg [31:0] pal_q3;
+    reg [23:0] pal_q3;
     reg [23:0] dc3;                    // direct colour (section 4.9)
     reg        direct2, direct3;
 
@@ -553,21 +553,24 @@ module video (
         // 2: the front-most opaque layer or sprite (section 4.8; spec 9, 3.3).
         // From the front: sprites of DEPTH 0, the front layer, DEPTH 1, the
         // middle layer, DEPTH 2, the back layer, DEPTH 3. PRIO value 3 names
-        // no layer. Among sprites, the lower number is in front.
+        // no layer. Among sprites, the lower number is in front. The winner's
+        // palette goes with its index: the layer's own, or SPRPALETTE (3);
+        // with VIDCON.SHAREPAL, PALETTE0 for all (section 4.6).
         begin : pix
             integer p, n;
             reg       any, sany;
             reg [7:0] fix, sfix;
-            reg [1:0] l;
+            reg [1:0] l, fpal;
             any = 1'b0;
             fix = 8'd0;
+            fpal = 2'd0;
             for (p = 3; p >= 0; p = p - 1) begin
                 // sprites of DEPTH p (behind layer p - 1 in PRIO order)
                 for (n = 7; n >= 0; n = n - 1)
-                    if (s_op[n] && c_sdep[n] == p) begin any = 1'b1; fix = s_idx[n]; end
+                    if (s_op[n] && c_sdep[n] == p) begin any = 1'b1; fix = s_idx[n]; fpal = 2'd3; end
                 if (p > 0) begin
                     l = prio_l[2*(p-1) +: 2];
-                    if (l != 2'd3 && bl_op[l]) begin any = 1'b1; fix = bl_idx[l]; end
+                    if (l != 2'd3 && bl_op[l]) begin any = 1'b1; fix = bl_idx[l]; fpal = l; end
                 end
             end
             // the front-most sprite, for direct colour
@@ -576,7 +579,9 @@ module video (
             for (n = 7; n >= 0; n = n - 1)
                 if (s_op[n]) begin sany = 1'b1; sfix = s_idx[n]; end
             opaque2 <= any;
-            pidx2   <= vidcon[4] ? sfix : fix;
+            if (vidcon[5])      pidx2 <= {2'd0, vidcon[4] ? sfix : fix};
+            else if (vidcon[4]) pidx2 <= {2'd3, sfix};
+            else                pidx2 <= {fpal, fix};
             // Direct colour: on every visible pixel; a layer not showing gives
             // 0; sprites are in front, in palette colours
             direct2 <= vidcon[4] && !sany;
@@ -592,6 +597,6 @@ module video (
         de    <= vis_d[2];
         hsync <= hs_d[2] ^ !SPOL;
         vsync <= vs_d[2] ^ !SPOL;
-        rgb   <= !vis_d[2] ? 24'd0 : !opaque3 ? bg_l : direct3 ? dc3 : pal_q3[23:0];
+        rgb   <= !vis_d[2] ? 24'd0 : !opaque3 ? bg_l : direct3 ? dc3 : pal_q3;
     end
 endmodule
