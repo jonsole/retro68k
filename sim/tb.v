@@ -367,10 +367,19 @@ module tb;
     always @(posedge clk100) if (dut.rb_wr && dut.rb_addr[23:16] == 8'hE0 && {dut.rb_addr[15:2], 2'b00} >= 16'h0520
                                  && {dut.rb_addr[15:2], 2'b00} < 16'h0620 && dut.rb_addr[4:2] == 3'd0)
         frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5] = dut.rb_wdata[22:0];
+    // Every write to a sprite's registers (not SPRxDAT), with the frame and
+    // the beam, so the model can replay changes made while sprites are drawn
+    integer slog = 0;
+    initial if ($test$plusargs("frame")) slog = $fopen("vstate_spr.txt", "w");
+    always @(posedge clk100) if (slog != 0 && dut.vid.spr.rb_wr && dut.vid.spr.sel_s && dut.vid.spr.sr != 3'd4)
+        $fwrite(slog, "%0d %0d %0d %0d %0d %0d %0d\n", dut.vid.s_frames, dut.vid.s_vc, dut.vid.s_hc,
+                dut.vid.spr.sn, dut.vid.spr.sr, dut.vid.spr.rb_wdata, dut.vid.spr.rb_be);
     task write_state;
         integer f, i, n;
         begin
+            if (slog != 0) $fflush(slog);
             f = $fopen("vstate_regs.txt", "w");
+            $fwrite(f, "frame %0d\n", dut.vid.s_frames - 1'b1);   // the frame grabbed (the next has just started)
             $fwrite(f, "hvis %0d\nvvis %0d\nprio %0d\nbg %0d\nvidcon %0d\nvidstat %0d\n",
                     dut.vid.HVIS, dut.vid.VVIS, dut.vid.prio, dut.vid.bgcolor, dut.vid.vidcon, dut.vid.vidstat);
             // Layer registers, and the plane pointers as taken for line 0
@@ -514,11 +523,10 @@ module tb;
     end
     always @(posedge dut.vid.clk_pix) if (|dut.vid.s_op) spr_px = spr_px + 1;
     always @(posedge clk100) if ($test$plusargs("sprdbg") && dut.vid.frame_tick)
-        $display("%t frame: alive %b flushing %b fresh %b want %b pk_v %b req %b wp0 %0d infl0 %0d dl0 %0d",
-                 $realtime, dut.vid.spr.alive, dut.vid.spr.flushing, dut.vid.spr.fresh, dut.vid.spr.want,
+        $display("%t frame: alive %b flushing %b run %b want %b pk_v %b req %b wp0 %0d infl0 %0d dl0 %0d",
+                 $realtime, dut.vid.spr.alive, dut.vid.spr.flushing, dut.vid.spr.run, dut.vid.spr.want,
                  dut.vid.spr.pk_v, dut.vid.spr.mem_req, dut.vid.spr.wp[0], dut.vid.spr.infl[0], dut.vid.spr.dl[0]);
-    always @(posedge clk100) if ($test$plusargs("sprdbg") && dut.vid.spr.fd_go)
-        $display("%t flush done %0d: wv %0d nl %0d", $realtime, dut.vid.spr.fd, dut.vid.spr.f_wv, dut.vid.spr.nl[dut.vid.spr.fd]);
+
 
     reg xseen = 0;
     always @(posedge clk100) if ($test$plusargs("xstop") && !xseen && !dut.vid.spr.rst && (^{dut.spr_req, dut.spr_ack, dut.spr_urgent} === 1'bx || (dut.spr_req && ^dut.spr_deadline === 1'bx))) begin : xdump

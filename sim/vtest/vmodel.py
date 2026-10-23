@@ -5,8 +5,10 @@ by pixel with the frame the simulation showed.
 
     vmodel.py BUILD_DIR RAM.hex [OUT.png]
 
-BUILD_DIR holds frame.ppm, vstate_regs.txt and vstate_pal.hex. Exits 1 on
-any difference, or if a layer ran out of data (VIDSTAT.OVERRUN).
+BUILD_DIR holds frame.ppm, vstate_regs.txt, vstate_spr.txt (every write to
+the sprites' registers, with the frame and beam position) and
+vstate_pal.hex. Exits 1 on any difference, or if a layer ran out of data
+(VIDSTAT.OVERRUN).
 """
 import sys
 
@@ -44,6 +46,10 @@ def load_state(d):
             regs[f[0]] = int(f[1])
     pal = [int(l, 16) & 0xFFFFFF for l in open(d + "/vstate_pal.hex")]
     regs["pdma"], regs["dat"], regs["sprites"] = pdma, dat, sprites
+    try:
+        regs["sprlog"] = [tuple(int(x) for x in l.split()) for l in open(d + "/vstate_spr.txt") if l.strip()]
+    except FileNotFoundError:
+        regs["sprlog"] = []
     return regs, layers, bpt, pal
 
 
@@ -173,45 +179,85 @@ def render(regs, layers, bpt, pal, ram):
     return W, H, img
 
 
+def merge(old, new, be):
+    """A write by bytes (spec 3, section 2)."""
+    return sum((new if (be >> b) & 1 else old) & (0xFF << (8 * b)) for b in range(4))
+
+
 def render_sprites(regs, ram, W, H):
-    """Each visible pixel: the opaque sprites there, lowest number first."""
+    """Each visible pixel: the opaque sprites there, lowest number first.
+
+    Replays the frame's writes to the sprites' registers (spec 9, section 3):
+    a write acts from the next line (the line after next if it came at the
+    very end of a line, after the settings were taken); a CTL write starts
+    the sprite; the vertical blank stops every sprite. At the start of each
+    line a running sprite whose window covers it shows, its image line
+    moved on by YSTEP (not on its first line, or after a PT write)."""
     word = lambda a: ram.get((a & 0x7FFFFF) >> 1, 0)
-    sgn = lambda v: v - 4096 if v & 0x800 else v
     grid = [[[] for _ in range(W)] for _ in range(H)]
-    for n, S in enumerate(regs["sprites"]):
-        if not S["dma"]:
-            continue
-        # beam coordinates: the line is beam pixels 0-863, the picture 144-863
-        hs, he = min(S["hs"], 864) - X0, S["he"] - X0
-        hs_c, xe = hs, max(min(he, 720), hs)
-        vs, ve = S["vs"] - Y0, min(S["ve"], 625) - Y0
-        lb = S["bpp"] + 1
-        bpp, ppw = 1 << lb, 16 >> lb
-        # the scale (spec 9, section 3.2): 5.11 source pixels per screen pixel
-        lim = lambda s: 0x800 if s == 0 else max(0x80, min(0x8000, s))
-        xs, ys = lim(S["xstep"]), lim(S["ystep"])
-        srcf = -(-(he - hs) * xs // 2048) if he > hs else 0
-        srcs = -(-(xe - hs_c) * xs // 2048) if xe > hs_c else 0
-        wf = (srcf * bpp + 15) // 16
-        wv = min((srcs * bpp + 15) // 16, wf) if srcs else 0
-        if wv == 0 or vs >= ve:
-            continue
-        stride = 2 * wf
-        for y in range(max(vs, 0), ve):
-            sl = (y - vs) * ys >> 11
-            start = S["pt"] + sl * stride
+    F = regs.get("frame", 0)
+    R = [[0] * 6 for _ in range(8)]                # as written: PT, H, V, CTL, DAT, STEP
+    ev = []
+    for i, (fr, line, h, n, r, val, be) in enumerate(regs["sprlog"]):
+        if fr < F:
+            R[n][r] = merge(R[n][r], val, be)
+        elif fr == F:
+            ev.append((line + 1 if h < 836 else line + 2, i, n, r, val, be))
+    ev.sort()
+    run, pend, yf = [False] * 8, [False] * 8, [0] * 8
+    lst = [R[n][0] & 0x7FFFFE for n in range(8)]
+    lim = lambda s: 0x800 if s == 0 else max(0x80, min(0x8000, s))
+    j = 0
+    for y in range(1, 625):                         # beam lines (the vertical blank stops every sprite at line 0)
+        while j < len(ev) and ev[j][0] <= y:
+            _, _, n, r, val, be = ev[j]
+            j += 1
+            if r == 0:
+                lst[n] = merge(lst[n], val, be) & 0x7FFFFE
+                pend[n] = False
+            else:
+                R[n][r] = merge(R[n][r], val, be)
+            if r == 3:
+                run[n], pend[n] = True, False
+        for n in range(8):
+            if not run[n] or not regs["sprites"][n]["dma"]:
+                continue
+            Hr, Vr, Cr, Sr = R[n][1], R[n][2], R[n][3], R[n][5]
+            # beam coordinates: the line is beam pixels 0-863, the picture 144-863
+            hs, he = min(Hr & 0x7FF, 864) - X0, ((Hr >> 16) & 0x7FF) - X0
+            hs_c, xe = hs, max(min(he, 720), hs)
+            vs, ve = Vr & 0x7FF, min((Vr >> 16) & 0x7FF, 625)
+            b = (Cr >> 12) & 3
+            lb = (2 if b == 3 else b) + 1
+            bpp, ppw = 1 << lb, 16 >> lb
+            depth, pal = (Cr >> 20) & 3, (Cr >> 24) & 15
+            # the scale (spec 9, section 3.2): 5.11 source pixels per screen pixel
+            xs, ys = lim(Sr & 0xFFFF), lim(Sr >> 16)
+            srcf = -(-(he - hs) * xs // 2048) if he > hs else 0
+            srcs = -(-(xe - hs_c) * xs // 2048) if xe > hs_c else 0
+            wf = (srcf * bpp + 15) // 16
+            wv = min((srcs * bpp + 15) // 16, wf) if srcs else 0
+            if wv == 0 or not (vs <= y < ve):
+                continue
+            if pend[n]:
+                s = yf[n] + (ys & 0x7FF)
+                yf[n] = s & 0x7FF
+                lst[n] = (lst[n] + ((ys >> 11) + (s >> 11)) * 2 * wf) & 0x7FFFFF
+            else:
+                yf[n] = 0
+            pend[n] = True
+            if y < Y0:
+                continue
             seq = []
             for k in range(wv):
-                a = start + 2 * k
-                w = word(a)
-                px = [(w >> (16 - bpp * (i + 1))) & (bpp_mask(bpp)) for i in range(ppw)]
-                seq += px
+                w = word(lst[n] + 2 * k)
+                seq += [(w >> (16 - bpp * (i + 1))) & bpp_mask(bpp) for i in range(ppw)]
             for x in range(max(hs_c, 0), min(xe, W)):
                 i = (x - hs_c) * xs >> 11
                 v = seq[i] if i < len(seq) else 0
                 if v:
-                    idx = v if bpp == 8 else (S["pal"] << 4) | (v & 15)
-                    grid[y][x].append((n, idx, S["depth"]))
+                    idx = v if bpp == 8 else (pal << 4) | (v & 15)
+                    grid[y - Y0][x].append((n, idx, depth))
     return grid
 
 

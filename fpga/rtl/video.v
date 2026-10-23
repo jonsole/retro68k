@@ -442,7 +442,7 @@ module video (
 
     // ---- sprites (spec 9): the fetcher and FIFOs (100 MHz), and a unit per sprite
     wire [79:0] sp_hs, sp_xe;
-    wire [87:0] sp_vs, sp_ve;
+    wire [7:0]  sp_act;
     wire [15:0] sp_lb, sp_depth;
     wire [127:0] sp_xstep;
     wire [7:0]  sp_dma;
@@ -459,24 +459,24 @@ module video (
         .dmacon(dmacon), .vblank(frame_tick), .beam_v(s_vc), .beam_h(s_hc),
         .mem_req(spr_req), .mem_addr(spr_addr), .mem_deadline(spr_deadline), .mem_urgent(spr_urgent),
         .mem_ack(spr_ack), .mem_rvalid(spr_rvalid), .mem_rdata(disp_rdata),
-        .p_hs(sp_hs), .p_xe(sp_xe), .p_vs(sp_vs), .p_ve(sp_ve), .p_lb(sp_lb),
+        .p_hs(sp_hs), .p_xe(sp_xe), .p_act(sp_act), .p_lb(sp_lb),
         .p_xstep(sp_xstep), .p_depth(sp_depth), .p_pal(sp_pal), .p_dma(sp_dma),
         .fifo_ra(sp_ra), .fifo_rd(sp_rd), .wp_g(sp_wpg), .rp_g(sp_rpg), .flush_t(sp_fl), .flush_ack_t(sp_fla),
         .coll_line(coll_line), .coll_t(coll_t)
     );
 
     // A sprite's line is a beam line: from the start of its horizontal blank
-    // (beam pixel 0); its settings are taken at beam pixel 863 of the line before
-    wire [10:0] ny = (bv == VTOT - 1'b1) ? 11'd0 : bv + 1'b1;
+    // (beam pixel 0); its settings are taken at beam pixel 12, after the
+    // sprite side's line-start pass (so HSTART must be 16 or more)
     reg  [7:0]  c_sact, c_sdma;
     reg  [9:0]  c_shs [0:7], c_sxe [0:7];
     reg  [1:0]  c_slb [0:7], c_sdep [0:7];
     reg  [15:0] c_sxs [0:7];
     reg  [3:0]  c_spal [0:7];
-    always @(posedge clk_pix) if (hc == HVIS - 1'b1 || !en_p) begin : sset
+    always @(posedge clk_pix) if (hc == HVIS + 11'd12 || !en_p) begin : sset
         integer n;
         for (n = 0; n < 8; n = n + 1) begin
-            c_sact[n]  <= en_p && ny >= sp_vs[11*n +: 11] && ny < sp_ve[11*n +: 11];
+            c_sact[n]  <= en_p && sp_act[n];
             c_shs[n]   <= sp_hs[10*n +: 10];
             c_sxe[n]   <= sp_xe[10*n +: 10];
             c_slb[n]   <= sp_lb[2*n +: 2];
