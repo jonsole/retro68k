@@ -5,7 +5,8 @@
 module timers (
     input  wire        clk,            // 100 MHz
     input  wire        por,            // the time counter only starts at power-on
-    input  wire        rst,
+    input  wire        rst,            // device reset: the general timers
+    input  wire        wd_rst,         // full reset: the watchdog too (not the RESET instruction)
 
     input  wire        rb_rd,
     input  wire        rb_wr,
@@ -69,6 +70,12 @@ module timers (
         uf        <= 4'd0;
         dma_start <= 4'd0;
         wd_reset  <= 1'b0;
+        // Watchdog countdown (before the register writes below, so a kick wins)
+        if (us_tick) ms_div <= (ms_div == 10'd999) ? 10'd0 : ms_div + 1'b1;
+        if (wd_en && ms_tick) begin
+            if (wd_left == 16'd0) wd_reset <= 1'b1;
+            else wd_left <= wd_left - 1'b1;
+        end
         if (rst) begin
             for (n = 0; n < 4; n = n + 1) begin
                 ctrl[n]     <= 8'd0;
@@ -78,11 +85,6 @@ module timers (
                 count[n]    <= 32'd0;
             end
             under   <= 4'd0;
-            wd_en   <= 1'b0;
-            wd_lock <= 1'b0;
-            wd_time <= 16'd1000;
-            wd_left <= 16'd1000;
-            ms_div  <= 10'd0;
             dma_ch  <= 8'd0;
         end else begin
             // Timers
@@ -98,13 +100,6 @@ module timers (
                     end else
                         count[n] <= count[n] - 1'b1;
                 end
-            end
-
-            // Watchdog
-            if (us_tick) ms_div <= (ms_div == 10'd999) ? 10'd0 : ms_div + 1'b1;
-            if (wd_en && ms_tick) begin
-                if (wd_left == 16'd0) wd_reset <= 1'b1;
-                else wd_left <= wd_left - 1'b1;
             end
 
             if (rb_wr && sel) begin
@@ -139,6 +134,16 @@ module timers (
                     default: ;
                 endcase
             end
+        end
+
+        // Watchdog: only a full reset stops it (after the writes above, so it wins)
+        if (wd_rst) begin
+            wd_en    <= 1'b0;
+            wd_lock  <= 1'b0;
+            wd_time  <= 16'd1000;
+            wd_left  <= 16'd1000;
+            ms_div   <= 10'd0;
+            wd_reset <= 1'b0;
         end
 
         // Reads. Reading TIMEHI captures the low half for TIMELO (spec 12, section 3).

@@ -21,7 +21,7 @@ RTL_SRC := $(RTL)/timebase.v $(RTL)/cpu_fx68k.v $(RTL)/sram_ctl.v $(RTL)/dmac.v 
            $(RTL)/bootrom.v $(RTL)/fifo8.v $(RTL)/sysregs.v $(RTL)/serial.v $(RTL)/intc.v $(RTL)/timers.v $(RTL)/layer_pix.v $(RTL)/bpldma.v $(RTL)/sprite_pix.v $(RTL)/sprites.v $(RTL)/video.v $(RTL)/copper.v $(RTL)/audio.v $(RTL)/dmx.v $(RTL)/sdspi.v $(RTL)/ps2kb.v $(RTL)/retro68k.v
 SIM_SRC := $(RTL)/platform/sim/oddr.v sram_model.v ft232h_model.v sd_model.v ps2_model.v tb.v
 
-.PHONY: vtest ctest atest dtest iotest all run frame clean
+.PHONY: vtest ctest atest dtest iotest rtest all run frame clean
 all: run
 
 $(BUILD):
@@ -111,6 +111,17 @@ iotest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
 	cp $(BUILD)/microrom.mem $(BUILD)/nanorom.mem $$d/; \
 	(cd $$d && $(VVP) -n ../tb.vvp +rom=iotest.hex +iotest > sim.log); \
 	grep -a "^FAIL\|^PASS\|^---- io" $$d/sim.log || true; \
+	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }
+
+# RESET instruction test (spec 7, section 2.4): the devices are reset, the
+# CPU, overlay, memory, watchdog, RESETWHY and time counter are not
+rtest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
+	@set -e; d=$(BUILD)/rtest; mkdir -p $$d; \
+	$(VASM) -quiet -Fbin -I $(ROOT)/firmware/include -o $$d/rtest.bin rtest/rtest.s; \
+	python3 $(ROOT)/tools/bin2hex.py $$d/rtest.bin $$d/rtest.hex; \
+	cp $(BUILD)/microrom.mem $(BUILD)/nanorom.mem $$d/; \
+	(cd $$d && $(VVP) -n ../tb.vvp +rom=rtest.hex > sim.log); \
+	grep -a "^FAIL\|^PASS" $$d/sim.log || true; \
 	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }
 
 # Audio test (spec 6): four channels, every output sample checked against

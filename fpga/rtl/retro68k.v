@@ -103,6 +103,22 @@ module retro68k #(
         end
     end
 
+    // The device reset (spec 7, section 2.4): every reset, and the 68000's
+    // RESET instruction (fx68k drives its reset output low for 124 clocks).
+    // It resets the custom hardware, the interrupt controller, the timers
+    // (not the watchdog or the time counter), the SD card and keyboard
+    // controllers. The CPU, the bus, the system registers (overlay,
+    // RESETWHY), the memory scheduler and the USB link keep sys_rst: reads
+    // on their way when RESET starts come back while their device is still
+    // held in reset, and are ignored.
+    wire       c_reset_n;
+    reg  [2:0] ri_s;
+    (* max_fanout = 50 *) reg dev_rst = 1'b1;
+    always @(posedge clk100) begin
+        ri_s    <= {ri_s[1:0], !c_reset_n};
+        dev_rst <= sys_rst || ri_s[2];
+    end
+
     // fx68k's reset inputs cross like its other inputs (they change at 10 or 30 ns)
     // and so does IPL, from the interrupt controller
     reg cpu_rst = 1'b1, cpu_cold = 1'b1;
@@ -115,7 +131,7 @@ module retro68k #(
     end
 
     // ---------------------------------------------------------------- CPU
-    wire        c_as_n, c_uds_n, c_lds_n, c_rw, c_reset_n;
+    wire        c_as_n, c_uds_n, c_lds_n, c_rw;
     wire [2:0]  c_fc;
     wire [23:1] c_addr;
     wire [15:0] c_dout;
@@ -284,7 +300,7 @@ module retro68k #(
     wire [15:0] dmacon;
     wire [10:0] beam_v, beam_h;
     video vid (
-        .clk(clk100), .rst(sys_rst),
+        .clk(clk100), .rst(dev_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be), .rb_who(rb_who),
         .rb_rdata(rd_vid),
         .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
@@ -302,7 +318,7 @@ module retro68k #(
     // ---------------------------------------------------------------- copper (spec 10)
     wire cop_irq;
     copper cop (
-        .clk(clk100), .rst(sys_rst),
+        .clk(clk100), .rst(dev_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_cop),
         .cw_req(cw_req), .cw_addr(cw_addr), .cw_wdata(cw_wdata), .cw_be(cw_be), .cw_go(cw_go),
@@ -315,7 +331,7 @@ module retro68k #(
 
     // ---------------------------------------------------------------- DMA engine and blitter (spec 11)
     dmx #(.CHIP_TOP({CHIPMB[3:0], 20'd0})) dx (
-        .clk(clk100), .rst(sys_rst),
+        .clk(clk100), .rst(dev_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_dmx),
         .dx_req(dx_req), .dx_we(dx_we), .dx_addr(dx_addr), .dx_wdata(dx_wdata), .dx_be(dx_be),
@@ -333,7 +349,7 @@ module retro68k #(
     // ---------------------------------------------------------------- audio (spec 6)
     wire aud_irq;
     audio aud (
-        .clk(clk100), .rst(sys_rst),
+        .clk(clk100), .rst(dev_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_aud), .dmacon(dmacon),
         .mem_req(aud_req), .mem_addr(aud_addr), .mem_ack(aud_ack),
@@ -344,7 +360,7 @@ module retro68k #(
 
     // ---------------------------------------------------------------- timers (spec 12)
     timers tmr (
-        .clk(clk100), .por(por100), .rst(sys_rst),
+        .clk(clk100), .por(por100), .rst(dev_rst), .wd_rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_tmr),
         .us_tick(us_tick), .line_tick(line_tick), .frame_tick(frame_tick),
@@ -353,7 +369,7 @@ module retro68k #(
 
     // ---------------------------------------------------------------- SD card (spec 15)
     sdspi sd (
-        .clk(clk100), .rst(sys_rst),
+        .clk(clk100), .rst(dev_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_sd),
         .sd_sclk(sd_sclk), .sd_mosi(sd_mosi), .sd_miso(sd_miso), .sd_cs0_n(sd_cs0_n), .sd_cs1_n(sd_cs1_n),
@@ -363,7 +379,7 @@ module retro68k #(
     // ---------------------------------------------------------------- PS/2 keyboard (spec 16)
     wire kb_irq;
     ps2kb kb (
-        .clk(clk100), .rst(sys_rst),
+        .clk(clk100), .rst(dev_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_kb),
         .ps2_clk_i(ps2_clk_i), .ps2_data_i(ps2_data_i), .ps2_clk_low(ps2_clk_low), .ps2_data_low(ps2_data_low),
@@ -375,7 +391,7 @@ module retro68k #(
     always @(posedge clk100) nmi_s <= {nmi_s[0], buttons[0]};
 
     intc ic (
-        .clk(clk100), .rst(sys_rst),
+        .clk(clk100), .rst(dev_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_int),
         .req({6'd0, kb_irq, 1'b0, ser_irq, tmr_irq, 1'b0, aud_irq, 1'b0, dmx_irq, irq_viderr, cop_irq, irq_line, irq_vblank}),

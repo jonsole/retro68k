@@ -46,6 +46,7 @@ All from `sim/` unless noted. See `sim/README.md` for more options.
 | `make atest` | Audio: every output sample against a Python model | 3–10 min | yes |
 | `make dtest` | DMA engine: 48 random jobs on 4 channels, every byte of 1 MB against `dtest/dmodel.py`; then 15 directed tests (palettes, ROM, registers, errors, STOP, PAUSE, ports, HIGH, a timer start). `SEED=n` picks other random jobs | 1 min | yes |
 | `make iotest` | SD card (start-up, a block read and written by DMA) and PS/2 keyboard (bytes, a bad frame, sending), against `sd_model.v` and `ps2_model.v` | 5 min | yes |
+| `make rtest` | The 68000 RESET instruction: the devices are reset; the CPU, overlay, memory, watchdog, RESETWHY and time counter are not | 1 min | yes |
 | `make vtest` | Video: four screens (`pal`, `direct`, `spr`, `share`) checked pixel by pixel against `vtest/vmodel.py`; `make vtest VTESTS=spr` runs one. Each palette gets different colours; `spr` has the 8 sprites at many scales; `share` is `spr` with VIDCON.SHAREPAL | 45 min each | **no** |
 | `bash fpga/ks3/yosys_check.sh` (repo root) | Synthesis for the XC7A35T and the LUT count | 3 min | yes |
 | `sh fpga/lint.sh` (repo root) | Verilator lint: a value cut short to fit (WIDTHTRUNC) is an error; slice it or waive the line | 10 s | yes |
@@ -73,6 +74,7 @@ Done and tested in simulation:
 | SD card: SPI byte master, SDCOUNT for DMA port 0 | `sdspi.v` | iotest |
 | PS/2 keyboard: receive with FIFO, send | `ps2kb.v` | iotest |
 | Serial, interrupts, timers | `serial.v`, `intc.v`, `timers.v` | boot |
+| The 68000 RESET instruction: resets the devices (not the CPU, overlay, watchdog, time counter or USB link) | `retro68k.v` (`dev_rst`), `timers.v` | rtest |
 
 Size (Vivado): 15,917 LUTs (76.5%), 12 block RAM tiles, 8 DSP slices. Timing met at 100 MHz, worst slack +0.09 ns, in the sprites' deadline calculation (`sprites.v`, `cs` to `dl`). Per unit: video 4,964 (sprites.v 1,809, the 8 sprite pixel units 779, bpldma.v 923), DMA engine 2,327, audio 1,225, copper 665, SD 66, keyboard 87.
 
@@ -93,7 +95,6 @@ In rough order:
 2. **Boot ROM**: SD card start-up and a small FAT32 reader to load programs (spec 15, section 4); a keyboard decoder and layout table (spec 16); ROMLOCK.
 3. **Timing margin**: +0.09 ns is thin. The sprite deadline calculator (`dcalc` in `sprites.v`, one sprite a clock) is the closest path; registering its inputs or splitting it would give room before more is added.
 4. **Small items**:
-   - wire the 68000 RESET instruction;
    - the serial link surviving a reset (spec);
    - the SD card and keyboard on the board (spec 15, SD1; spec 16, K3).
 5. **Guide chapter** for audio (chapter 7 in the Amiga order).
