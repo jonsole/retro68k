@@ -108,11 +108,11 @@ DMACON_DMAEN_B               equ $9
 DMACON_DMAEN_M               equ $200
 DMACON_SETCLR_B              equ $F
 DMACON_SETCLR_M              equ $8000
-DMXINT                       equ $340        ; W1C, spec 11/8
+DMXINT                       equ $3F0        ; W1C, spec 11/8
 DMXINT_CH_B                  equ $0
 DMXINT_CH_W                  equ $4
 DMXINT_CH_M                  equ $F
-DMXINTEN                     equ $344        ; RW, spec 11/8
+DMXINTEN                     equ $3F4        ; RW, spec 11/8
 DMXINTEN_CH_B                equ $0
 DMXINTEN_CH_W                equ $4
 DMXINTEN_CH_M                equ $F
@@ -411,28 +411,86 @@ L2_BPL4DAT                   equ $250
 L2_BPL5DAT                   equ $254
 L2_BPL6DAT                   equ $258
 L2_BPL7DAT                   equ $25C
-; DMX0..DMX3: 4 x 16 bytes, spec 11/8
+; DMX0..DMX3: 4 x 64 bytes, spec 11/8
 DMX_NUM                      equ $4
-DMX_SPAN                     equ $10
+DMX_SPAN                     equ $40
 DMX0                         equ $300
-DMX1                         equ $310
-DMX2                         equ $320
-DMX3                         equ $330
-DMX_CHDESC                   equ $0          ; RW, spec 11/8 (add to DMXn)
+DMX1                         equ $340
+DMX2                         equ $380
+DMX3                         equ $3C0
+DMX_CTRL                     equ $0          ; RW, spec 11/8 (add to DMXn)
+DMX_CTRL_OP_B                equ $0
+DMX_CTRL_OP_W                equ $3
+DMX_CTRL_OP_M                equ $7
+DMX_CTRL_FN_B                equ $4
+DMX_CTRL_FN_W                equ $4
+DMX_CTRL_FN_M                equ $F0
+DMX_CTRL_BPP_B               equ $8
+DMX_CTRL_BPP_W               equ $2
+DMX_CTRL_BPP_M               equ $300
+DMX_CTRL_DESC_B              equ $A
+DMX_CTRL_DESC_M              equ $400
+DMX_CTRL_HIGH_B              equ $B
+DMX_CTRL_HIGH_M              equ $800
+DMX_CTRL_IRQ_B               equ $C
+DMX_CTRL_IRQ_M               equ $1000
+DMX_CTRL_SRCKIND_B           equ $D
+DMX_CTRL_SRCKIND_W           equ $2
+DMX_CTRL_SRCKIND_M           equ $6000
+DMX_CTRL_DSTKIND_B           equ $F
+DMX_CTRL_DSTKIND_W           equ $2
+DMX_CTRL_DSTKIND_M           equ $18000
+DMX_SRC                      equ $4          ; RW, spec 11/8 (add to DMXn)
+DMX_SRC_ADDR_B               equ $0
+DMX_SRC_ADDR_W               equ $18
+DMX_SRC_ADDR_M               equ $FFFFFF
+DMX_DST                      equ $8          ; RW, spec 11/8 (add to DMXn)
+DMX_DST_ADDR_B               equ $0
+DMX_DST_ADDR_W               equ $18
+DMX_DST_ADDR_M               equ $FFFFFF
+DMX_WIDTH                    equ $C          ; RW, spec 11/8 (add to DMXn)
+DMX_WIDTH_COUNT_B            equ $0
+DMX_WIDTH_COUNT_W            equ $18
+DMX_WIDTH_COUNT_M            equ $FFFFFF
+DMX_HEIGHT                   equ $10         ; RW, spec 11/8 (add to DMXn)
+DMX_HEIGHT_ROWS_B            equ $0
+DMX_HEIGHT_ROWS_W            equ $10
+DMX_HEIGHT_ROWS_M            equ $FFFF
+DMX_HEIGHT_SRCBIT_B          equ $10
+DMX_HEIGHT_SRCBIT_W          equ $3
+DMX_HEIGHT_SRCBIT_M          equ $70000
+DMX_HEIGHT_DSTBIT_B          equ $14
+DMX_HEIGHT_DSTBIT_W          equ $3
+DMX_HEIGHT_DSTBIT_M          equ $700000
+DMX_STRIDE                   equ $14         ; RW, spec 11/8 (add to DMXn)
+DMX_STRIDE_SRCSTRIDE_B       equ $10
+DMX_STRIDE_SRCSTRIDE_W       equ $10
+DMX_STRIDE_SRCSTRIDE_M       equ $FFFF0000
+DMX_STRIDE_DSTSTRIDE_B       equ $0
+DMX_STRIDE_DSTSTRIDE_W       equ $10
+DMX_STRIDE_DSTSTRIDE_M       equ $FFFF
+DMX_VALUE                    equ $18         ; RW, spec 11/8 (add to DMXn)
+DMX_NEXT                     equ $1C         ; RW, spec 11/8 (add to DMXn)
+DMX_NEXT_ADDR_B              equ $0
+DMX_NEXT_ADDR_W              equ $18
+DMX_NEXT_ADDR_M              equ $FFFFFF
+DMX_CHDESC                   equ $20         ; RW, spec 11/8 (add to DMXn)
 DMX_CHDESC_ADDR_B            equ $0
 DMX_CHDESC_ADDR_W            equ $18
 DMX_CHDESC_ADDR_M            equ $FFFFFF
-DMX_CHCTRL                   equ $4          ; RW, spec 11/8 (add to DMXn)
+DMX_CHCTRL                   equ $24         ; RW, spec 11/8 (add to DMXn)
 DMX_CHCTRL_START_B           equ $0
 DMX_CHCTRL_START_M           equ $1
-DMX_CHCTRL_STOP_B            equ $1
-DMX_CHCTRL_STOP_M            equ $2
-DMX_CHCTRL_PAUSE_B           equ $2
-DMX_CHCTRL_PAUSE_M           equ $4
+DMX_CHCTRL_RUN_B             equ $1
+DMX_CHCTRL_RUN_M             equ $2
+DMX_CHCTRL_STOP_B            equ $2
+DMX_CHCTRL_STOP_M            equ $4
+DMX_CHCTRL_PAUSE_B           equ $3
+DMX_CHCTRL_PAUSE_M           equ $8
 DMX_CHCTRL_CPUSHARE_B        equ $4
 DMX_CHCTRL_CPUSHARE_W        equ $2
 DMX_CHCTRL_CPUSHARE_M        equ $30
-DMX_CHSTAT                   equ $8          ; RW1C, spec 11/8 (add to DMXn)
+DMX_CHSTAT                   equ $28         ; RW1C, spec 11/8 (add to DMXn)
 DMX_CHSTAT_BUSY_B            equ $0
 DMX_CHSTAT_BUSY_M            equ $1
 DMX_CHSTAT_DONE_B            equ $1
@@ -441,26 +499,58 @@ DMX_CHSTAT_ERR_B             equ $2
 DMX_CHSTAT_ERR_M             equ $4
 DMX_CHSTAT_PAUSED_B          equ $3
 DMX_CHSTAT_PAUSED_M          equ $8
-DMX_CHERR                    equ $C          ; R, spec 11/8 (add to DMXn)
+DMX_CHERR                    equ $2C         ; R, spec 11/8 (add to DMXn)
 DMX_CHERR_ADDR_B             equ $0
 DMX_CHERR_ADDR_W             equ $18
 DMX_CHERR_ADDR_M             equ $FFFFFF
-DMX0_CHDESC                  equ $300
-DMX0_CHCTRL                  equ $304
-DMX0_CHSTAT                  equ $308
-DMX0_CHERR                   equ $30C
-DMX1_CHDESC                  equ $310
-DMX1_CHCTRL                  equ $314
-DMX1_CHSTAT                  equ $318
-DMX1_CHERR                   equ $31C
-DMX2_CHDESC                  equ $320
-DMX2_CHCTRL                  equ $324
-DMX2_CHSTAT                  equ $328
-DMX2_CHERR                   equ $32C
-DMX3_CHDESC                  equ $330
-DMX3_CHCTRL                  equ $334
-DMX3_CHSTAT                  equ $338
-DMX3_CHERR                   equ $33C
+DMX0_CTRL                    equ $300
+DMX0_SRC                     equ $304
+DMX0_DST                     equ $308
+DMX0_WIDTH                   equ $30C
+DMX0_HEIGHT                  equ $310
+DMX0_STRIDE                  equ $314
+DMX0_VALUE                   equ $318
+DMX0_NEXT                    equ $31C
+DMX0_CHDESC                  equ $320
+DMX0_CHCTRL                  equ $324
+DMX0_CHSTAT                  equ $328
+DMX0_CHERR                   equ $32C
+DMX1_CTRL                    equ $340
+DMX1_SRC                     equ $344
+DMX1_DST                     equ $348
+DMX1_WIDTH                   equ $34C
+DMX1_HEIGHT                  equ $350
+DMX1_STRIDE                  equ $354
+DMX1_VALUE                   equ $358
+DMX1_NEXT                    equ $35C
+DMX1_CHDESC                  equ $360
+DMX1_CHCTRL                  equ $364
+DMX1_CHSTAT                  equ $368
+DMX1_CHERR                   equ $36C
+DMX2_CTRL                    equ $380
+DMX2_SRC                     equ $384
+DMX2_DST                     equ $388
+DMX2_WIDTH                   equ $38C
+DMX2_HEIGHT                  equ $390
+DMX2_STRIDE                  equ $394
+DMX2_VALUE                   equ $398
+DMX2_NEXT                    equ $39C
+DMX2_CHDESC                  equ $3A0
+DMX2_CHCTRL                  equ $3A4
+DMX2_CHSTAT                  equ $3A8
+DMX2_CHERR                   equ $3AC
+DMX3_CTRL                    equ $3C0
+DMX3_SRC                     equ $3C4
+DMX3_DST                     equ $3C8
+DMX3_WIDTH                   equ $3CC
+DMX3_HEIGHT                  equ $3D0
+DMX3_STRIDE                  equ $3D4
+DMX3_VALUE                   equ $3D8
+DMX3_NEXT                    equ $3DC
+DMX3_CHDESC                  equ $3E0
+DMX3_CHCTRL                  equ $3E4
+DMX3_CHSTAT                  equ $3E8
+DMX3_CHERR                   equ $3EC
 ; SPR0..SPR7: 8 x 32 bytes, spec 9/6
 SPR_NUM                      equ $8
 SPR_SPAN                     equ $20

@@ -116,19 +116,27 @@ Layer n (0–2) at `0x100 + n × 0x80`:
 
 ### 3.5 DMA engine (`0xE00300`)
 
-Channel n (0–3) at `0x300 + n × 0x10`:
+Channel n (0–3) at `0x300 + n × 0x40`; the job registers (`+0x00`–`+0x1C`) are laid out as a descriptor:
 
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
-| `+0x0` | CHDESC | RW | 11, 8 |
-| `+0x4` | CHCTRL | RW | 11, 8 |
-| `+0x8` | CHSTAT | R, W1C | 11, 8 |
-| `+0xC` | CHERR | R | 11, 8 |
+| `+0x00` | CTRL | RW | 11, 8 |
+| `+0x04` | SRC | RW | 11, 8 |
+| `+0x08` | DST | RW | 11, 8 |
+| `+0x0C` | WIDTH | RW | 11, 8 |
+| `+0x10` | HEIGHT | RW | 11, 8 |
+| `+0x14` | STRIDE | RW | 11, 8 |
+| `+0x18` | VALUE | RW | 11, 8 |
+| `+0x1C` | NEXT | RW | 11, 8 |
+| `+0x20` | CHDESC | RW | 11, 8 |
+| `+0x24` | CHCTRL | RW | 11, 8 |
+| `+0x28` | CHSTAT | R, W1C | 11, 8 |
+| `+0x2C` | CHERR | R | 11, 8 |
 
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
-| `0x340` | DMXINT | W1C | 11, 8 |
-| `0x344` | DMXINTEN | RW | 11, 8 |
+| `0x3F0` | DMXINT | W1C | 11, 8 |
+| `0x3F4` | DMXINTEN | RW | 11, 8 |
 
 ### 3.5b Sprites (`0xE00500`)
 

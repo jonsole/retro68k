@@ -9,7 +9,7 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 | Item | Value |
 |------|-------|
 | Channels | 4, running at the same time and taking turns, a group of memory cycles each |
-| Programming | Chains of 32-byte **descriptors** (job descriptions) in Chip RAM or in a 2 KB descriptor RAM inside the FPGA |
+| Programming | A job written straight into a channel's registers, or chains of 32-byte **descriptors** (job descriptions, laid out as those registers) in Chip RAM or in a 2 KB descriptor RAM inside the FPGA |
 | Jobs | COPY, FILL, KEYCOPY (transparent copy with a colour key), LOGIC (any function of source and destination), ADD (per pixel); in 1D (linear) or 2D (rectangles with a stride). MIX (audio voices) is on hold |
 | Pixel formats | 1, 2, 4 or 8 bits per pixel, positioned to the pixel: chunky layers directly, planar layers one plane at a time (section 6.1) |
 | Sources and destinations | Chip RAM, the custom registers and palettes, the descriptor RAM, the boot ROM (read only), or a peripheral port (USB serial; the SD card later) |
@@ -22,7 +22,7 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 | Feature | Amiga blitter | retro68k DMA engine |
 |---------|---------------|---------------------|
 | Jobs at once | 1 | 4 channels |
-| Starting jobs | CPU or copper writes registers, then waits for the blitter to finish before the next job | CPU or copper starts a chain of jobs; the engine works through it alone |
+| Starting jobs | CPU or copper writes registers, then waits for the blitter to finish before the next job | The same (a channel's job registers), or a chain of jobs the engine works through alone |
 | Pixel layout | Bitplanes: one blit per plane, with shifts and masks | Chunky pixels at any depth: one blit for all colour depths. Planar layers: one blit per plane, as on the Amiga (section 6.1) |
 | Masked (cookie-cut) drawing | Uses a separate mask plane and the minterm logic | Chunky: colour-key copy, no mask needed. Planar: a mask and two LOGIC jobs per plane |
 | Logic | Any function of 3 sources (minterms) | Any function of source and destination (4-bit truth table) |
@@ -35,7 +35,7 @@ One engine moves data for the CPU: copying and filling memory, feeding periphera
 
 ## 3. Descriptors
 
-A job is a 32-byte descriptor, long-word aligned. Each one can point to the next, so a chain of jobs runs without the CPU.
+A job is described by eight long words: a channel's job registers (section 8), or a 32-byte descriptor in memory, long-word aligned, which the channel loads into them. Each job can point to the next descriptor, so a chain of jobs runs without the CPU.
 
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
@@ -218,21 +218,24 @@ These figures are worked out from the slot rules; open point D2 is to measure th
 
 Offsets in the custom register block at `0xE00000` (spec 3, section 3.5).
 
-**Per channel** (channel n at `0x300 + n × 0x10`):
+**Per channel** (channel n at `0x300 + n × 0x40`). The first eight are the **job registers**, laid out exactly as a descriptor (section 3): a job can be set up by writing them directly, or loaded into them from a descriptor in memory.
 
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
-| `+0x0` | CHDESC | 23–0 | Write: the first descriptor of a chain (long-word aligned). Read: the descriptor now running, or the last one run |
-| `+0x4` | CHCTRL | START (0), STOP (1), PAUSE (2), CPUSHARE (5–4) | START (strobe) begins the chain at CHDESC; ignored while BUSY. STOP (strobe) ends it after the current group of cycles. PAUSE holds it while set. CPUSHARE: the cycle 0s the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
-| `+0x8` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | BUSY: a chain is running (or paused). DONE: a chain reached its end (NEXT = 0) or was stopped. ERR: a job stopped with an error. DONE and ERR are sticky, write 1 to clear |
-| `+0xC` | CHERR | 23–0 | The address that caused the error, or the descriptor's address for a bad descriptor |
+| `+0x00`–`+0x1C` | CTRL, SRC, DST, WIDTH, HEIGHT, STRIDE, VALUE, NEXT | As in section 3 | The job to run, or running. Writes are ignored while the channel is BUSY |
+| `+0x20` | CHDESC | 23–0 | The descriptor START loads (long-word aligned). Read: the descriptor now running, or the last one loaded |
+| `+0x24` | CHCTRL | START (0), RUN (1), STOP (2), PAUSE (3), CPUSHARE (5–4) | START (strobe): load the descriptor at CHDESC into the job registers and run it. RUN (strobe): run the job already in the job registers. Either way, at the end of the job the channel loads the descriptor at NEXT and runs it, until NEXT is 0. Both are ignored while BUSY. STOP (strobe) ends the chain after the current group of cycles. PAUSE holds it while set. CPUSHARE: the cycle 0s the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
+| `+0x28` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | BUSY: a chain is running (or paused). DONE: a chain reached its end (NEXT = 0) or was stopped. ERR: a job stopped with an error. DONE and ERR are sticky, write 1 to clear |
+| `+0x2C` | CHERR | 23–0 | The address that caused the error, or the descriptor's address for a bad descriptor |
 
-**Global:**
+The job registers keep the values of the last job loaded or written: the engine's progress through a job is kept inside it, not in them. So after a job, writing only the fields that change (for example SRC and DST) and RUN starts a similar one, which suits the copper: a few MOVEs set up and start a blit with nothing in memory.
+
+**Global** (in the space after channel 3's registers):
 
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
-| `0x340` | DMXINT | CH 3–0 | A channel's interrupt is pending (a descriptor with IRQ finished, or an error); write 1 to clear |
-| `0x344` | DMXINTEN | CH 3–0 | Interrupt enables per channel |
+| `0x3F0` | DMXINT | CH 3–0 | A channel's interrupt is pending (a job with IRQ finished, or an error); write 1 to clear |
+| `0x3F4` | DMXINTEN | CH 3–0 | Interrupt enables per channel |
 
 **Descriptor RAM:** 2 KB at `0xE06000`–`0xE067FF`, room for 64 descriptors (or small buffers). One block RAM. Its contents are undefined after reset.
 
@@ -244,8 +247,8 @@ Offsets in the custom register block at `0xE00000` (spec 3, section 3.5).
 
 **Typical use:**
 
-1. Write descriptors to the descriptor RAM (`0xE06000`) or Chip RAM.
-2. Write the first descriptor's address to CHDESC, then START to CHCTRL.
+1. One job: write the job registers (NEXT = 0), then RUN to CHCTRL.
+2. A chain: write descriptors to the descriptor RAM (`0xE06000`) or Chip RAM, the first one's address to CHDESC, then START to CHCTRL. (Or write the first job into the job registers, with NEXT pointing at the rest, and RUN.)
 3. Carry on. Take the interrupt, or poll CHSTAT.BUSY.
 
 The copper can also start channels, for example to change a screen area at a set beam position, and its WAIT with the B bit waits until every channel is idle (spec 10).
@@ -286,6 +289,7 @@ Software decides, but a sensible default:
 - **KEYCOPY and LOGIC:** every BPP, with key pixels at the edges; a planar cookie-cut draw (section 6.1).
 - **ADD:** every BPP, wrap and saturate, signed and unsigned, memory and constant sources; check carries never cross pixels.
 - **Chains:** a chain of mixed jobs in Chip RAM and in the descriptor RAM; IRQ only on the marked ones; jobs of zero width or height.
+- **Direct jobs:** a job written into the job registers and started with RUN, with and without a NEXT chain after it; job register writes ignored while BUSY; the job registers read back as loaded.
 - **Channels:** all 4 running at once; a stalled port channel does not hold up the others; STOP and PAUSE.
 - **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least its CPUSHARE of cycle 0s (all three settings), and every CPU delay is one slot.
 - **Errors:** a bad address (including the system area and past the end of a 2 MB board's RAM), a bad OP and a bad combination stop only that channel, set ERR and CHERR, and raise its interrupt.
