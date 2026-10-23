@@ -46,6 +46,12 @@ module retro68k #(
     // Audio: sigma-delta streams (the jack's left and right, the speaker)
     output wire        aud_l, aud_r, aud_m,
 
+    // SD card (spec 15) and PS/2 keyboard (spec 16)
+    output wire        sd_sclk, sd_mosi, sd_cs0_n, sd_cs1_n,
+    input  wire        sd_miso,
+    input  wire        ps2_clk_i, ps2_data_i,
+    output wire        ps2_clk_low, ps2_data_low,
+
     // Debug
     output wire [3:0]  dbg_sc,
     output wire        dbg_halted
@@ -135,6 +141,9 @@ module retro68k #(
     wire [1:0]  rom_we;
     wire [14:1] rom_addr;
     wire [15:0] rom_wdata, rom_rdata;
+    wire        rom_en_b;
+    wire [14:1] rom_addr_b;
+    wire [15:0] rom_rdata_b;
     // The register bus: the CPU's accesses (bus_if) and the copper's writes.
     // A CPU access on the bus goes first; the copper's write waits a clock.
     wire        c_rb_rd, c_rb_wr;
@@ -146,16 +155,23 @@ module retro68k #(
     wire [31:0] cw_wdata;
     wire [3:0]  cw_be;
     wire        cw_go    = cw_req && !c_rb_rd && !c_rb_wr;
-    wire        rb_rd    = c_rb_rd;
-    wire        rb_wr    = c_rb_wr || cw_go;
-    wire [23:2] rb_addr  = cw_go ? cw_addr  : c_rb_addr;
-    wire [31:0] rb_wdata = cw_go ? cw_wdata : c_rb_wdata;
-    wire [3:0]  rb_be    = cw_go ? cw_be    : c_rb_be;
+    // ... and the DMA engine's accesses, after the CPU's and the copper's
+    wire        dx_req, dx_we;
+    wire [23:2] dx_addr;
+    wire [31:0] dx_wdata;
+    wire [3:0]  dx_be;
+    wire        dx_go    = dx_req && !c_rb_rd && !c_rb_wr && !cw_req;
+    wire        rb_rd    = c_rb_rd || (dx_go && !dx_we);
+    wire        rb_wr    = c_rb_wr || cw_go || (dx_go && dx_we);
+    wire [23:2] rb_addr  = cw_go ? cw_addr  : dx_go ? dx_addr  : c_rb_addr;
+    wire [31:0] rb_wdata = cw_go ? cw_wdata : dx_go ? dx_wdata : c_rb_wdata;
+    wire [3:0]  rb_be    = cw_go ? cw_be    : dx_go ? dx_be    : c_rb_be;
     wire [31:0] rd_sys, rd_ser;
     wire        iack;
     wire [2:0]  iack_level;
     wire [7:0]  iack_vector;
-    wire [31:0] rd_int, rd_vid, rd_tmr, rd_cop, rd_aud;
+    wire [31:0] rd_int, rd_vid, rd_tmr, rd_cop, rd_aud, rd_dmx, rd_sd, rd_kb;
+    wire [31:0] rb_rdall = rd_sys | rd_ser | rd_int | rd_vid | rd_tmr | rd_cop | rd_aud | rd_dmx | rd_sd | rd_kb;
     wire        berr_ev;
     wire [23:0] berr_addr;
     wire [3:0]  berr_why;
@@ -171,7 +187,7 @@ module retro68k #(
         .rom_en(rom_en), .rom_we(rom_we), .rom_addr(rom_addr), .rom_wdata(rom_wdata),
         .rom_rdata(rom_rdata),
         .rb_rd(c_rb_rd), .rb_wr(c_rb_wr), .rb_addr(c_rb_addr), .rb_wdata(c_rb_wdata), .rb_be(c_rb_be),
-        .rb_rdata(rd_sys | rd_ser | rd_int | rd_vid | rd_tmr | rd_cop | rd_aud),
+        .rb_rdata(rb_rdall),
         .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector),
         .berr_ev(berr_ev), .berr_addr(berr_addr), .berr_why(berr_why)
     );
@@ -188,8 +204,12 @@ module retro68k #(
     wire        cop_req, cop_ack, cop_rvalid;
     wire [21:1] cop_addr;
     wire [1:0]  cop_pri;
-    // The DMA scheduler (spec 5): who gets each memory cycle. The DMA engine
-    // is still to come; its channel is tied off.
+    wire        blt_req, blt_we, blt_ack, blt_rvalid, blt_high;
+    wire [1:0]  blt_share;
+    wire [21:1] blt_addr;
+    wire [15:0] blt_wdata;
+    wire [1:0]  blt_be;
+    // The DMA scheduler (spec 5): who gets each memory cycle
     wire        m_start, m_go, m_go_we, m_rvalid_any;
     wire [2:0]  m_cycle, m_go_tag, m_rtag;
     wire [21:1] m_go_addr;
@@ -204,7 +224,8 @@ module retro68k #(
         .spr_req(spr_req), .spr_addr(spr_addr), .spr_deadline(spr_deadline), .spr_urgent(spr_urgent), .spr_ack(spr_ack), .spr_rvalid(spr_rvalid),
         .aud_req(aud_req), .aud_addr(aud_addr), .aud_ack(aud_ack), .aud_rvalid(aud_rvalid),
         .cop_req(cop_req), .cop_addr(cop_addr), .cop_pri(cop_pri), .cop_ack(cop_ack), .cop_rvalid(cop_rvalid),
-        .blt_req(1'b0), .blt_we(1'b0), .blt_addr(21'd0), .blt_wdata(16'd0), .blt_be(2'b00), .blt_ack(), .blt_rvalid(),
+        .blt_req(blt_req), .blt_we(blt_we), .blt_addr(blt_addr), .blt_wdata(blt_wdata), .blt_be(blt_be),
+        .blt_high(blt_high), .blt_share(blt_share), .blt_ack(blt_ack), .blt_rvalid(blt_rvalid),
         .port_req(dma_req), .port_we(dma_we), .port_addr(dma_addr), .port_wdata(dma_wdata), .port_be(dma_be),
         .port_ack(dma_ack), .port_rvalid(dma_rvalid),
         .go(m_go), .go_we(m_go_we), .go_addr(m_go_addr), .go_wdata(m_go_wdata), .go_be(m_go_be), .go_tag(m_go_tag),
@@ -225,7 +246,7 @@ module retro68k #(
 
     bootrom #(.INIT(ROM_INIT)) rom (
         .clk(clk100), .en(rom_en), .we(rom_we), .addr(rom_addr), .wdata(rom_wdata),
-        .rdata(rom_rdata)
+        .rdata(rom_rdata), .en_b(rom_en_b), .addr_b(rom_addr_b), .rdata_b(rom_rdata_b)
     );
 
     // ---------------------------------------------------------------- system block
@@ -241,11 +262,18 @@ module retro68k #(
 
     // The USB link survives resets it causes itself (spec 14), so only power-on resets it
     wire ser_irq;
+    // DMA engine ports: 0 the SD card, 1 the serial FIFOs; timers starting DMA channels
+    wire       p0_rxv, p0_rxpop, p0_txr, p0_txpush;
+    wire       p_rxv, p_rxpop, p_txr, p_txpush;
+    wire [7:0] p0_rxd, p_rxd, p_txd;
+    wire [3:0] tmr_irq, tmr_dma_start;
+    wire [7:0] tmr_dma_ch;
     serial ser (
         .clk(clk100), .rst(por100), .us_tick(us_tick),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_ser),
         .irq(ser_irq), .cmd_break(cmd_break), .cmd_reset(cmd_reset), .cmd_upload(cmd_upload),
+        .p_rxv(p_rxv), .p_rxd(p_rxd), .p_rxpop(p_rxpop), .p_txr(p_txr), .p_txpush(p_txpush), .p_txd(p_txd),
         .ft_rxf_n(ft_rxf_n), .ft_txe_n(ft_txe_n), .ft_d_i(ft_d_i), .ft_d_o(ft_d_o),
         .ft_d_oe(ft_d_oe), .ft_rd_n(ft_rd_n), .ft_wr_n(ft_wr_n), .ft_siwu_n(ft_siwu_n)
     );
@@ -267,6 +295,9 @@ module retro68k #(
         .clk_pix(clk_pix), .clk_pix5(clk_pix5), .rgb(vid_rgb), .hsync(vid_hsync), .vsync(vid_vsync), .de(vid_de)
     );
 
+    wire       dmx_idle;               // the DMA engine (below)
+    wire [3:0] dmx_irq;
+
     // ---------------------------------------------------------------- copper (spec 10)
     wire cop_irq;
     copper cop (
@@ -277,8 +308,25 @@ module retro68k #(
         .mem_req(cop_req), .mem_addr(cop_addr), .mem_pri(cop_pri), .mem_ack(cop_ack),
         .mem_rvalid(cop_rvalid), .mem_rdata(mem_rdata),
         .beam_v(beam_v), .beam_h(beam_h), .vblank(frame_tick), .dmacon(dmacon),
-        .blt_idle(1'b1),   // no DMA engine yet
+        .blt_idle(dmx_idle),
         .irq(cop_irq)
+    );
+
+    // ---------------------------------------------------------------- DMA engine and blitter (spec 11)
+    dmx #(.CHIP_TOP({CHIPMB[3:0], 20'd0})) dx (
+        .clk(clk100), .rst(sys_rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_dmx),
+        .dx_req(dx_req), .dx_we(dx_we), .dx_addr(dx_addr), .dx_wdata(dx_wdata), .dx_be(dx_be),
+        .dx_go(dx_go), .rb_rdall(rb_rdall),
+        .rom_en(rom_en_b), .rom_addr(rom_addr_b), .rom_rdata(rom_rdata_b),
+        .p0_rxv(p0_rxv), .p0_rxd(p0_rxd), .p0_rxpop(p0_rxpop), .p0_txr(p0_txr), .p0_txpush(p0_txpush),
+        .p1_rxv(p_rxv), .p1_rxd(p_rxd), .p1_rxpop(p_rxpop), .p1_txr(p_txr), .p1_txpush(p_txpush), .p_txd(p_txd),
+        .blt_high(blt_high), .blt_share(blt_share),
+        .tmr_start(tmr_dma_start), .tmr_ch(tmr_dma_ch),
+        .mem_req(blt_req), .mem_we(blt_we), .mem_addr(blt_addr), .mem_wdata(blt_wdata), .mem_be(blt_be),
+        .mem_ack(blt_ack), .mem_rvalid(blt_rvalid), .mem_rdata(mem_rdata),
+        .dmacon(dmacon), .idle(dmx_idle), .irq(dmx_irq)
     );
 
     // ---------------------------------------------------------------- audio (spec 6)
@@ -294,14 +342,31 @@ module retro68k #(
     );
 
     // ---------------------------------------------------------------- timers (spec 12)
-    wire [3:0] tmr_irq, tmr_dma_start;
-    wire [7:0] tmr_dma_ch;
     timers tmr (
         .clk(clk100), .por(por100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_tmr),
         .us_tick(us_tick), .line_tick(line_tick), .frame_tick(frame_tick),
         .irq(tmr_irq), .dma_start(tmr_dma_start), .dma_ch(tmr_dma_ch), .wd_reset(wd_reset)
+    );
+
+    // ---------------------------------------------------------------- SD card (spec 15)
+    sdspi sd (
+        .clk(clk100), .rst(sys_rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_sd),
+        .sd_sclk(sd_sclk), .sd_mosi(sd_mosi), .sd_miso(sd_miso), .sd_cs0_n(sd_cs0_n), .sd_cs1_n(sd_cs1_n),
+        .p_rxv(p0_rxv), .p_rxd(p0_rxd), .p_rxpop(p0_rxpop), .p_txr(p0_txr), .p_txpush(p0_txpush), .p_txd(p_txd)
+    );
+
+    // ---------------------------------------------------------------- PS/2 keyboard (spec 16)
+    wire kb_irq;
+    ps2kb kb (
+        .clk(clk100), .rst(sys_rst),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rdata(rd_kb),
+        .ps2_clk_i(ps2_clk_i), .ps2_data_i(ps2_data_i), .ps2_clk_low(ps2_clk_low), .ps2_data_low(ps2_data_low),
+        .irq(kb_irq)
     );
 
     // ---------------------------------------------------------------- interrupts (spec 13)
@@ -312,7 +377,7 @@ module retro68k #(
         .clk(clk100), .rst(sys_rst),
         .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
         .rb_rdata(rd_int),
-        .req({8'd0, ser_irq, tmr_irq, 1'b0, aud_irq, 5'd0, irq_viderr, cop_irq, irq_line, irq_vblank}),
+        .req({6'd0, kb_irq, 1'b0, ser_irq, tmr_irq, 1'b0, aud_irq, 1'b0, dmx_irq, irq_viderr, cop_irq, irq_line, irq_vblank}),
         .nmi_button(nmi_s[1]), .nmi_usb(cmd_break),
         .level(int_level), .iack(iack), .iack_level(iack_level), .iack_vector(iack_vector)
     );

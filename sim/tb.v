@@ -27,6 +27,8 @@ module tb;
     wire [7:0]  ft_d, ft_d_o;
 
     integer scan = 0, ls = 0, npass = 0, need = 1, serial_test = 0, echo_at = 0;
+    reg [8*128-1:0] dumpfile;
+    integer df, di;
     // Sprite debug counters (+sprdbg)
     integer spr_acks = 0, spr_rv = 0, spr_fw = 0, spr_px = 0;
     reg         dma_req = 0, dma_we = 0;
@@ -63,6 +65,12 @@ module tb;
     end
     assign clk_pix = clk_pix_r;
 
+    // SD card and PS/2 keyboard lines (the models are below)
+    wire sd_sclk, sd_mosi, sd_cs0_n, sd_cs1_n, sd_miso;
+    wire ps2_clk_low_h, ps2_data_low_h, ps2_clk_low_k, ps2_data_low_k;
+    wire ps2_clk  = !(ps2_clk_low_h  || ps2_clk_low_k);         // open collector, pulled up
+    wire ps2_data = !(ps2_data_low_h || ps2_data_low_k);
+
     retro68k #(.ROM_INIT("boot.hex")) dut (
         .clk100(clk100), .clk40(clk40), .por100(por), .por40(por),
         .clk_pix(clk_pix), .clk_pix5(clk_pix5),
@@ -75,8 +83,23 @@ module tb;
         .ft_d_oe(ft_d_oe), .ft_rd_n(ft_rd_n), .ft_wr_n(ft_wr_n), .ft_siwu_n(ft_siwu_n),
         .dma_req(dma_req), .dma_we(dma_we), .dma_addr(dma_addr), .dma_wdata(dma_wdata),
         .dma_be(dma_be), .dma_ack(dma_ack), .dma_rvalid(dma_rvalid), .dma_rdata(dma_rdata),
+        .sd_sclk(sd_sclk), .sd_mosi(sd_mosi), .sd_cs0_n(sd_cs0_n), .sd_cs1_n(sd_cs1_n), .sd_miso(sd_miso),
+        .ps2_clk_i(ps2_clk), .ps2_data_i(ps2_data), .ps2_clk_low(ps2_clk_low_h), .ps2_data_low(ps2_data_low_h),
         .dbg_sc(sc), .dbg_halted(halted)
     );
+
+    // ---------------------------------------------------------------- SD card and PS/2 keyboard
+    sd_model sdc (.sclk(sd_sclk), .mosi(sd_mosi), .cs_n(sd_cs0_n), .miso(sd_miso));
+    ps2_model kbd (.clk_line(ps2_clk), .data_line(ps2_data), .clk_low(ps2_clk_low_k), .data_low(ps2_data_low_k));
+    // +iotest: the keyboard sends 1C F0 1C, then a frame with bad parity, early on
+    initial if ($test$plusargs("iotest")) begin
+        #300000;
+        kbd.send(8'h1C, 1'b0);
+        kbd.send(8'hF0, 1'b0);
+        kbd.send(8'h1C, 1'b0);
+        kbd.send(8'h55, 1'b1);
+    end
+    integer io_errors = 0;
 
     // ---------------------------------------------------------------- SRAM pads
     // Output registers in the pads: 1 ns clock-to-out
@@ -458,13 +481,27 @@ module tb;
                 if (!$test$plusargs("rom=")) check_bitmap;
             end
             report;
+            // +dumpram=FILE: Chip RAM 0x0F0000-0x1FFFFF at the end (the DMA test)
+            if ($value$plusargs("dumpram=%s", dumpfile)) begin
+                df = $fopen(dumpfile, "w");
+                $fwrite(df, "@%h\n", 21'h78000);
+                for (di = 21'h78000; di < 21'h100000; di = di + 1) $fwrite(df, "%h\n", sram.mem[di]);
+                $fclose(df);
+            end
             if ($test$plusargs("sprdbg"))
                 $display("---- sprites: %0d acks, %0d words back, %0d FIFO writes, %0d opaque pixels",
                          spr_acks, spr_rv, spr_fw, spr_px);
             if (serial_test)
                 $display("---- serial: %0d errors; RESETWHY after the command: %h", serial_errors, dut.resetwhy);
             if (serial_test && dut.resetwhy !== 8'h10) serial_errors = serial_errors + 1;
-            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0 && bm_errors == 0) $display("TEST PASSED");
+            if ($test$plusargs("iotest")) begin
+                // what the models saw: the CPU sent ED to the keyboard, wrote one block
+                if (kbd.last_rx !== 8'hED || kbd.rx_bad != 0 || kbd.nrx != 1) io_errors = io_errors + 1;
+                if (sdc.errors != 0 || sdc.nblocks_w != 1) io_errors = io_errors + 1;
+                $display("---- io: keyboard got %h (%0d bytes, %0d bad); SD card: %0d blocks written, %0d errors",
+                         kbd.last_rx, kbd.nrx, kbd.rx_bad, sdc.nblocks_w, sdc.errors);
+            end
+            if (ok && sram.errors == 0 && ft.errors == 0 && dma_errors == 0 && serial_errors == 0 && sync_errors == 0 && bm_errors == 0 && io_errors == 0) $display("TEST PASSED");
             else $display("TEST FAILED");
             $finish;
         end
@@ -511,6 +548,14 @@ module tb;
         #1 $readmemh(romfile, dut.rom.mem);
         $display("boot ROM: %0s", romfile);
     end
+    // +dmxsend: the PC sends 64 bytes (7i + 3) early on, for the DMA test's
+    // port job to copy into memory
+    initial if ($test$plusargs("dmxsend")) begin : dmxsend
+        integer i;
+        #50000;
+        for (i = 0; i < 64; i = i + 1) ft.send(i * 7 + 3);
+    end
+
     // +ram=FILE: Chip RAM contents at the start ($readmemh of 16-bit words, with @addresses)
     reg [1023:0] ramfile;
     initial if ($value$plusargs("ram=%s", ramfile)) begin

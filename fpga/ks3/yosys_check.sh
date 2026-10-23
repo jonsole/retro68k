@@ -16,7 +16,7 @@ mkdir -p "$out"
 python3 "$root/tools/bin2hex.py" "$out/boot.bin" "$out/boot.hex"
 cp "$fx/microrom.mem" "$fx/nanorom.mem" "$out/"
 sv2v "$fx/fx68k.sv" "$fx/fx68kAlu.sv" "$fx/uaddrPla.sv" > "$out/fx68k.v"
-files="timebase cpu_fx68k sram_ctl dmac bus_if bootrom fifo8 sysregs serial intc timers layer_pix bpldma sprite_pix sprites video copper audio retro68k por_align tmds_encoder top_ks3"
+files="timebase cpu_fx68k sram_ctl dmac bus_if bootrom fifo8 sysregs serial intc timers layer_pix bpldma sprite_pix sprites video copper audio dmx sdspi ps2kb retro68k por_align tmds_encoder top_ks3"
 src=""; for f in $files; do src="$src $rtl/$f.v"; done
 for f in ks3_clocks oddr hdmi_out vga_out; do src="$src $rtl/platform/artix7/$f.v"; done
 cd "$out"

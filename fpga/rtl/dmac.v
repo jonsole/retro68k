@@ -74,6 +74,8 @@ module dmac (
     input  wire [21:1] blt_addr,
     input  wire [15:0] blt_wdata,
     input  wire [1:0]  blt_be,
+    input  wire        blt_high,       // HIGH: may take the CPU's cycle 0 ...
+    input  wire [1:0]  blt_share,      // ... leaving it 1 in 2, 4 or 8 of them (spec 11, section 5)
     output reg         blt_ack,
     output wire        blt_rvalid,
     input  wire        port_req,
@@ -113,6 +115,17 @@ module dmac (
                       blt_req  ? C_BLT :
                       port_req ? C_PORT : C_NONE;
 
+    // A HIGH DMA engine job and the CPU both want cycle 0: the CPU gets every
+    // 2nd, 4th or 8th of these, the engine the rest
+    reg  [2:0] shc;
+    wire [2:0] shmax   = (blt_share == 2'd0) ? 3'd1 : (blt_share == 2'd1) ? 3'd3 : 3'd7;
+    wire       cpu_turn = (shc == shmax);
+    always @(posedge clk)
+        if (rst) shc <= 3'd0;
+        else if (start_next && next_cycle == 3'd0 && cpu_req && blt_req && blt_high && !urg_any
+                 && !(cop_req && cop_pri == 2'd2))
+            shc <= cpu_turn ? 3'd0 : shc + 1'b1;
+
     // Who gets the cycle that starts at the next edge
     reg  [2:0] win;
     always @(*) begin
@@ -121,7 +134,7 @@ module dmac (
         else if (cop_req && cop_pri == 2'd2)
             win = C_COP;                                    //    the copper, nasty
         else case (next_cycle)                              // 2: the default owner, else 3: free
-            3'd0:          win = cpu_req ? C_CPU : free;
+            3'd0:          win = !cpu_req ? free : (blt_req && blt_high && !cpu_turn) ? C_BLT : C_CPU;
             3'd1, 3'd3:    win = hard_any ? hard : free;
             3'd4:          win = cop_hi ? C_COP : free;
             3'd2:          win = aud_req ? C_AUD : free;

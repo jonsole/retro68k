@@ -13,7 +13,7 @@ The SRAM is fast enough to give the CPU its own memory cycle in **every** slot, 
 | Memory | One IS61WV204816BLL-10 SRAM on the KS3: 2M × 16 bit (4 MB), 10 ns. Some boards may have 2 MB; SYSCFG.CHIPMB reports which |
 | Memory cycle | 20 ns = 2 clocks at 100 MHz: one 16-bit read or write at any address (byte writes with /UB and /LB) |
 | Slot | 100 ns = 5 memory cycles (numbered 0–4) = 2 CPU clocks at 20 MHz |
-| CPU | Cycle 0 of every slot. Waits only when an urgent bitplane fetch takes that cycle (one slot, 2 CPU clocks) |
+| CPU | Cycle 0 of every slot. Waits only when an urgent display fetch, a nasty copper or a HIGH DMA engine job takes that cycle (one slot, 2 CPU clocks) |
 | DMA | Cycles 1 and 3: display fetch (spread out, so a waiting fetch never waits long). Cycle 2: audio and peripherals. Cycle 4: the free pool for the copper and the DMA engine. The free pool also gets cycle 0 whenever the CPU isn't using it |
 | Beam lock | Every scan line is a whole number of slots; the slot counter restarts each line, so DMA happens at the same beam positions on every line |
 | Total bandwidth | 100 MB/s (5 × 2 bytes per 100 ns) |
@@ -112,7 +112,7 @@ A 20 MHz 68000 bus cycle takes 4 CPU clocks = 2 slots. For a cycle starting in s
 - Every slot has a cycle 0, so it doesn't matter where in the slot grid a bus cycle starts: **there is no alignment to keep and no realignment wait**.
 - Block RAM, registers and ROM don't use SRAM cycles at all.
 
-**The CPU waits for Chip RAM only when the display would otherwise be late.** Only an urgent bitplane fetch (one whose deadline is about to pass, section 6) can take cycle 0 from the CPU; the CPU's access then waits one slot. On screens within the budget this is rare; on heavy screens the CPU slows down on those lines, as on the Amiga.
+**The CPU waits for Chip RAM only when the display would otherwise be late, or when software asks for it.** Only an urgent display fetch (one whose deadline is about to pass, section 6), a copper at PRI 2 (nasty) or a DMA engine job with HIGH set (which leaves the CPU a share, spec 11, section 5) can take cycle 0 from the CPU; the CPU's access then waits one slot. On screens within the budget this is rare; on heavy screens the CPU slows down on those lines, as on the Amiga.
 
 **Interrupts** stay vectored (design plan D8): the 6800-style /VPA cycle is not used.
 
@@ -125,9 +125,9 @@ One block, the DMA controller (`fpga/rtl/dmac.v`, the equivalent of the Amiga's 
 | CPU | The 68000 | Only ever uses cycle 0 |
 | BPL | Bitplane DMA (spec 4, section 5) | Hard deadline |
 | SPR | Sprites (spec 9): the 8 sprite FIFOs | Hard deadline |
-| AUD | Audio (spec 6, later) | Soft: has microseconds to spare |
-| COP | Copper (spec 10, later) | Best effort; COPCON.PRI can raise it to high (ahead of audio and non-urgent display) or nasty (may also take cycle 0) |
-| BLT | DMA engine / blitter (spec 11): its 4 channels take turns inside the engine | Best effort |
+| AUD | Audio (spec 6) | Soft: has microseconds to spare |
+| COP | Copper (spec 10) | Best effort; COPCON.PRI can raise it to high (ahead of audio and non-urgent display) or nasty (may also take cycle 0) |
+| BLT | DMA engine / blitter (spec 11): its 4 channels take turns inside the engine | Best effort; a job with HIGH set may also take cycle 0 (below) |
 | PORT | The DMA port: peripherals later; the tests use it now | Best effort |
 
 For each cycle, the first rule that finds a request wins:
@@ -138,7 +138,7 @@ For each cycle, the first rule that finds a request wins:
 
    | Cycle | Default owner |
    |-------|---------------|
-   | 0 | CPU |
+   | 0 | CPU; but a DMA engine job with HIGH set takes it, except for every 2nd, 4th or 8th time both want it (the channel's CPUSHARE), which the CPU keeps |
    | 1, 3 | Hard-deadline channels, earliest deadline first |
    | 2 | Audio |
    | 4 | – (the copper at PRI 1 or 2) |

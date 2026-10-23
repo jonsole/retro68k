@@ -18,10 +18,10 @@ FX68K := $(ROOT)/fpga/third_party/fx68k
 BUILD := build
 
 RTL_SRC := $(RTL)/timebase.v $(RTL)/cpu_fx68k.v $(RTL)/sram_ctl.v $(RTL)/dmac.v $(RTL)/bus_if.v \
-           $(RTL)/bootrom.v $(RTL)/fifo8.v $(RTL)/sysregs.v $(RTL)/serial.v $(RTL)/intc.v $(RTL)/timers.v $(RTL)/layer_pix.v $(RTL)/bpldma.v $(RTL)/sprite_pix.v $(RTL)/sprites.v $(RTL)/video.v $(RTL)/copper.v $(RTL)/audio.v $(RTL)/retro68k.v
-SIM_SRC := $(RTL)/platform/sim/oddr.v sram_model.v ft232h_model.v tb.v
+           $(RTL)/bootrom.v $(RTL)/fifo8.v $(RTL)/sysregs.v $(RTL)/serial.v $(RTL)/intc.v $(RTL)/timers.v $(RTL)/layer_pix.v $(RTL)/bpldma.v $(RTL)/sprite_pix.v $(RTL)/sprites.v $(RTL)/video.v $(RTL)/copper.v $(RTL)/audio.v $(RTL)/dmx.v $(RTL)/sdspi.v $(RTL)/ps2kb.v $(RTL)/retro68k.v
+SIM_SRC := $(RTL)/platform/sim/oddr.v sram_model.v ft232h_model.v sd_model.v ps2_model.v tb.v
 
-.PHONY: vtest ctest atest all run frame clean
+.PHONY: vtest ctest atest dtest iotest all run frame clean
 all: run
 
 $(BUILD):
@@ -85,6 +85,33 @@ ctest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
 	grep -a "^FAIL\|^PASS" $$d/sim.log || true; \
 	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }; \
 	python3 ctest/ccheck.py $$d
+
+# DMA engine test (spec 11): random jobs on the 4 channels (dtest/dgen.py;
+# SEED picks them), then every byte of the test area checked against a
+# Python model (dtest/dmodel.py)
+SEED = 11
+dtest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
+	@set -e; d=$(BUILD)/dtest; mkdir -p $$d; \
+	$(VASM) -quiet -Fbin -I $(ROOT)/firmware/include -o $$d/dtest.bin dtest/dtest.s; \
+	python3 $(ROOT)/tools/bin2hex.py $$d/dtest.bin $$d/dtest.hex; \
+	python3 dtest/dgen.py $$d $(SEED); \
+	cp $(BUILD)/microrom.mem $(BUILD)/nanorom.mem $$d/; \
+	(cd $$d && $(VVP) -n ../tb.vvp +rom=dtest.hex +ram=ram.hex +dumpram=after.hex +dmxsend > sim.log); \
+	grep -a "^FAIL\|^PASS" $$d/sim.log || true; \
+	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }; \
+	python3 dtest/dmodel.py $$d/jobs.json $$d/ram.hex $$d/after.hex
+
+# I/O test (specs 15, 16): the SD card (start-up, blocks by DMA and by the CPU)
+# and the PS/2 keyboard (receiving, a bad frame, sending), against the
+# testbench's models
+iotest: $(BUILD)/tb.vvp $(BUILD)/microrom.mem
+	@set -e; d=$(BUILD)/iotest; mkdir -p $$d; \
+	$(VASM) -quiet -Fbin -I $(ROOT)/firmware/include -o $$d/iotest.bin iotest/iotest.s; \
+	python3 $(ROOT)/tools/bin2hex.py $$d/iotest.bin $$d/iotest.hex; \
+	cp $(BUILD)/microrom.mem $(BUILD)/nanorom.mem $$d/; \
+	(cd $$d && $(VVP) -n ../tb.vvp +rom=iotest.hex +iotest > sim.log); \
+	grep -a "^FAIL\|^PASS\|^---- io" $$d/sim.log || true; \
+	grep -q "^TEST PASSED" $$d/sim.log || { tail -n 20 $$d/sim.log; exit 1; }
 
 # Audio test (spec 6): four channels, every output sample checked against
 # a Python model (atest/amodel.py), and the DAC streams against the output

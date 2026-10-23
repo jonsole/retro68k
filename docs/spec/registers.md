@@ -267,18 +267,8 @@ SERDROP clearing on read is the one other exception to rule 4 (section 2). It is
 | Offset | Name | Access | Spec |
 |--------|------|--------|------|
 | `0x300` | SDCON | RW | 15, 6 |
-| `0x304` | SDARG | RW | 15, 3.2 |
-| `0x308` | SDCMD | W (starts a command) | 15, 3.2 |
-| `0x30C` | SDRESP0 | R | 15, 3.2 |
-| `0x310` | SDRESP1 | R | 15, 3.2 |
-| `0x314` | SDRESP2 | R (reserved, reads 0) | 15, 6 |
-| `0x318` | SDRESP3 | R (reserved, reads 0) | 15, 6 |
-| `0x31C` | SDBLKCNT | RW | 15, 3.3 |
-| `0x320` | SDSTAT | R | 15, 6 |
-| `0x324` | SDIRQ | W1C | 15, 6 |
-| `0x328` | SDIRQEN | RW | 15, 6 |
-| `0x32C` | SDTIMEOUT | RW | 15, 6 |
-| `0x330` | SDDATA | RW (reading takes 4 bytes) | 15, 3.4 |
+| `0x304` | SDDATA | RW (writing sends a byte) | 15, 3.1 |
+| `0x308` | SDCOUNT | RW | 15, 3.5 |
 
 ### 4.6 Keyboard (`0xF00400`)
 
@@ -286,12 +276,10 @@ SERDROP clearing on read is the one other exception to rule 4 (section 2). It is
 |--------|------|--------|------|
 | `0x400` | KBCON | RW | 16, 4 |
 | `0x404` | KBSTAT | R | 16, 4 |
-| `0x408` | KBDATA | R (reading takes an event) | 16, 3.2 |
-| `0x40C` | KBSEND | W | 16, 3.5 |
-| `0x410` | KBREPLY | R | 16, 3.2 |
-| `0x414` | KBIRQ | R, W1C | 16, 4 |
-| `0x418` | KBIRQEN | RW | 16, 4 |
-| `0x440`–`0x47C` | KBMAP0–15 | R | 16, 3.4 |
+| `0x408` | KBDATA | R (reading takes a byte) | 16, 3.2 |
+| `0x40C` | KBSEND | W | 16, 3.4 |
+| `0x410` | KBIRQ | R, W1C | 16, 4 |
+| `0x414` | KBIRQEN | RW | 16, 4 |
 
 ### 4.7 System control (`0xF00800`)
 

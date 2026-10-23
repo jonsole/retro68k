@@ -80,7 +80,7 @@ A WIDTH or HEIGHT of 0 makes the job do nothing; the chain carries on with NEXT.
 - Each pixel is added separately, at the job's colour depth (1, 2, 4 or 8 bits). Carries never spill into the next pixel.
 - **Wrap** (FN bit 4 = 0): the result wraps round, e.g. 250 + 10 = 4 at 8 bpp.
 - **Saturate** (FN bit 4 = 1): the result sticks at the limit instead. Unsigned (FN bit 5 = 0): 0 to the top value, e.g. 250 + 10 = 255. Signed (FN bit 5 = 1): pixels are two's complement, e.g. −128 to +127 at 8 bpp.
-- The source can be memory, a port, or a constant (SRCKIND = 3).
+- The source can be memory or a constant (SRCKIND = 3).
 - Uses:
   - Shading and lighting with palettes laid out as ramps: add a constant to darken or brighten an area, or add a light map image.
   - Moving an area to another palette block by adding 16, 32 and so on.
@@ -109,9 +109,9 @@ Because the stride is separate from the width, the trimmed rows still line up wi
 | COPY | memory or port | memory or port (not both ports) |
 | FILL | none | memory |
 | KEYCOPY | memory | memory |
-| LOGIC, ADD | memory, port or VALUE | memory |
+| LOGIC, ADD | memory or VALUE | memory |
 
-A port job is linear: BPP = 8, HEIGHT = 1, no DESC. Any other combination stops the channel with an error.
+A port job is a COPY moving one byte at a time: linear, BPP = 8, HEIGHT = 1, no DESC, and its memory side not registers. Any other combination stops the channel with an error.
 
 ### 3.1 MIX: one audio voice
 
@@ -135,7 +135,7 @@ Anything else, including Chip RAM past the end on a 2 MB board and the system ar
 - Only COPY and FILL may write registers. A COPY from memory into a block of registers sets up a whole layer, or several, in one job; a COPY of one long word into another channel's CHCTRL starts that channel, just as a CPU write does, so one chain can start others. COPY can also read registers into memory, for example to save a screen setup or keep a log of beam positions.
 - Reading a register never changes anything, by design, so a DMA read is always safe. Sticky flags are cleared only by writing 1.
 - A DMA register write has exactly the same effect as a CPU write to the same register, including its timing rules (for example, layer settings for line n must be written before line n starts, spec 4, section 5.4).
-- Register, palette, descriptor RAM and ROM accesses take one 100 MHz clock each on the FPGA's internal register bus. The CPU goes first, then the copper, then the engine: a job waits a clock when either is using the bus.
+- Register, palette and descriptor RAM accesses take one 100 MHz clock each on the FPGA's internal register bus. The CPU goes first, then the copper, then the engine: a job waits a clock when either is using the bus. A register is read once per long word (the second half is kept for the next word), so a live register such as BEAMPOS is never torn. The boot ROM is read through a port of its own.
 
 The palettes and the descriptor RAM are memory: any operation can use them, at any alignment, a byte at a time.
 
@@ -143,7 +143,7 @@ The palettes and the descriptor RAM are memory: any operation can use them, at a
 
 | Port | Device |
 |------|--------|
-| 0 | SD card data FIFO (spec 15), paced by the card; reserved until the SD controller has its FIFO |
+| 0 | The SD card (spec 15): a source reads the run of bytes SDCOUNT asked for, a destination sends bytes to the card; paced by the SPI clock |
 | 1 | USB serial FIFOs (spec 14), paced by the link: a source reads the receive FIFO, a destination writes the transmit FIFO |
 | 2–7 | Reserved |
 
@@ -156,7 +156,7 @@ The engine is the DMA engine channel (BLT) of the memory scheduler (spec 5, sect
 - **One memory cycle** (20 ns) reads or writes 2 bytes at any even address, with byte selects for single bytes (spec 5, section 4.2). A copy costs 2 cycles per 2 bytes (one read, one write); a fill costs 1; a job that reads the destination costs 3.
 - **Normal jobs** use cycles nobody else wants: cycle 4, cycle 2 when audio isn't using it, display cycles (1 and 3) no layer needs (all of them in the vertical blank), and cycle 0 whenever the CPU isn't using it. **The CPU is never slowed.**
 - **HIGH jobs** may also take the CPU's cycle 0, but always leave the CPU a share of them, so it can still run interrupts and code from Chip RAM. The share is set per channel by CHCTRL.CPUSHARE: **1 in 2, 1 in 4 (default) or 1 in 8** of the cycle 0s the CPU asks for. Each cycle taken makes the CPU wait one slot (100 ns), as an urgent display fetch does. Use HIGH when the CPU would only be waiting for the job anyway.
-- **Between channels:** channels with work to do take turns, a group of up to 8 memory cycles each, so a long blit can't hold up a peripheral transfer for more than a fraction of a microsecond. A channel waiting for a port, or for the register bus, gives up its turn.
+- **Between channels:** channels with work to do take turns, a group of up to 8 destination words (or 8 bytes of a port job) each, so a long blit can't hold up a peripheral transfer for more than a fraction of a microsecond. A channel waiting for its port gives up its turn.
 - **Descriptors** in Chip RAM take 16 read cycles (32 bytes) to load. Descriptors in the descriptor RAM take none, which suits short, frequent jobs.
 
 ## 6. How a blit works
@@ -223,7 +223,7 @@ Offsets in the custom register block at `0xE00000` (spec 3, section 3.5).
 | Offset | Name | Bits | Meaning |
 |--------|------|------|---------|
 | `+0x00`–`+0x1C` | CTRL, SRC, DST, WIDTH, HEIGHT, STRIDE, VALUE, NEXT | As in section 3 | The job to run, or running. Writes are ignored while the channel is BUSY |
-| `+0x20` | CHDESC | 23–0 | The descriptor START loads (long-word aligned). Read: the descriptor now running, or the last one loaded |
+| `+0x20` | CHDESC | 23–0 | The descriptor START loads (long-word aligned). Read: the descriptor now running, or the last one loaded. Writes are ignored while the channel is BUSY |
 | `+0x24` | CHCTRL | START (0), RUN (1), STOP (2), PAUSE (3), CPUSHARE (5–4) | START (strobe): load the descriptor at CHDESC into the job registers and run it. RUN (strobe): run the job already in the job registers. Either way, at the end of the job the channel loads the descriptor at NEXT and runs it, until NEXT is 0. Both are ignored while BUSY. STOP (strobe) ends the chain after the current group of cycles. PAUSE holds it while set. CPUSHARE: the cycle 0s the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
 | `+0x28` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | BUSY: a chain is running (or paused). DONE: a chain reached its end (NEXT = 0) or was stopped. ERR: a job stopped with an error. DONE and ERR are sticky, write 1 to clear |
 | `+0x2C` | CHERR | 23–0 | The address that caused the error, or the descriptor's address for a bad descriptor |
@@ -271,7 +271,7 @@ Software decides, but a sensible default:
 | Descriptor RAM, 2 KB | 1 block RAM |
 | Per-channel state (the running descriptor's fields and positions) | Distributed RAM, one channel worked on at a time (as in `bpldma.v` and `sprites.v`) |
 | Data buffer between reads and writes (16 bytes and the shifter's carry) | Logic |
-| The shared datapath: 2D address units, pixel shifter, edge masks, colour key compare, logic function, per-pixel adder | Estimate 1,500–2,500 LUTs, to confirm by synthesis. The design is at about 61% of the LUTs (Vivado), with little timing margin at 100 MHz, so the datapath is pipelined from the start |
+| The shared datapath: 2D address units, pixel shifter, edge masks, colour key compare, logic function, per-pixel adder, the access unit, ports | About 2,300 LUTs in all, and 2 DSP slices (a backwards job's start: rows × stride) (Vivado). Timing met at 100 MHz |
 
 ## 11. Open points
 
@@ -281,7 +281,6 @@ Software decides, but a sensible default:
 | D2 | Measure the speed figures of section 7 in simulation |
 | D3 | Line drawing and area fill (Amiga blitter features), and scaling or rotating blits: version 2 |
 | D4 | MIX (section 3.1): on hold until it has proper resampling |
-| D5 | Port 0 waits for the SD controller's FIFO (spec 15; version 1 of the SD controller is a plain SPI byte master) |
 
 ## 12. Tests
 

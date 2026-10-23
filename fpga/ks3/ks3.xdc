@@ -22,6 +22,9 @@ set_property -dict {PACKAGE_PIN N1 IOSTANDARD LVCMOS33} [get_ports sd_cs0_n_o]
 set_property -dict {PACKAGE_PIN K2 IOSTANDARD LVCMOS33} [get_ports sd_cs1_n_o]
 set_property -dict {PACKAGE_PIN M2 IOSTANDARD LVCMOS33} [get_ports sd_mosi_o]
 set_property -dict {PACKAGE_PIN M1 IOSTANDARD LVCMOS33} [get_ports sd_sclk_o]
+set_property -dict {PACKAGE_PIN L1 IOSTANDARD LVCMOS33 PULLUP true} [get_ports sd_miso_i]
+set_property -dict {PACKAGE_PIN N5 IOSTANDARD LVCMOS33 DRIVE 16 PULLUP true} [get_ports ps2_clk_io]
+set_property -dict {PACKAGE_PIN N6 IOSTANDARD LVCMOS33 DRIVE 16 PULLUP true} [get_ports ps2_data_io]
 set_property -dict {PACKAGE_PIN A13 IOSTANDARD LVCMOS33} [get_ports hsync_o]
 set_property -dict {PACKAGE_PIN B13 IOSTANDARD LVCMOS33} [get_ports vsync_o]
 set_property -dict {PACKAGE_PIN A3 IOSTANDARD LVCMOS33} [get_ports vgaclk_o]
@@ -151,6 +154,10 @@ set_multicycle_path -hold 1 -from [get_pins -hier -filter {NAME =~ sys/cpu/core/
 set_false_path -from [get_ports {btn_reset_n_i btn_multiface_n_i btn_divmmc_n_i}]
 set_false_path -from [get_ports {accel_io[*]}]
 set_false_path -to   [get_ports {accel_io[*]}]
+# PS/2 is asynchronous (filtered inside); the SD card's SPI timing is set by the
+# design (MISO is taken half an SPI clock after the card changes it)
+set_false_path -from [get_ports {ps2_clk_io ps2_data_io sd_miso_i}]
+set_false_path -to   [get_ports {ps2_clk_io ps2_data_io sd_sclk_o sd_mosi_o sd_cs0_n_o sd_cs1_n_o}]
 
 # SRAM read data: captured in the input pad flip-flops (spec 5, section 4.2)
 set_property IOB TRUE [get_cells -hier -filter {NAME =~ sys/mem/rdata_reg*}]

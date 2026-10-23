@@ -18,6 +18,14 @@ module serial (
     output reg         cmd_reset,
     output reg         cmd_upload,
 
+    // DMA engine port 1 (spec 11, section 4): the CPU's own accesses go first
+    output wire        p_rxv,
+    output wire [7:0]  p_rxd,
+    input  wire        p_rxpop,
+    output wire        p_txr,
+    input  wire        p_txpush,
+    input  wire [7:0]  p_txd,
+
     // FT232H pins
     input  wire        ft_rxf_n,
     input  wire        ft_txe_n,
@@ -43,7 +51,8 @@ module serial (
 
     // ---------------------------------------------------------------- FIFOs
     reg         rx_push;  reg [7:0] rx_wdata;
-    wire        rx_pop = rb_rd && sel && off == `RM_SERDATA;
+    wire        rx_cpu = rb_rd && sel && off == `RM_SERDATA;
+    wire        rx_pop = rx_cpu || p_rxpop;
     wire [7:0]  rx_rdata;
     wire [12:0] rx_count;
     wire        rx_full, rx_valid;
@@ -51,16 +60,20 @@ module serial (
                           .pop(rx_pop), .rdata(rx_rdata), .count(rx_count), .full(rx_full),
                           .valid(rx_valid));
 
-    wire        tx_wr   = rb_wr && sel && off == `RM_SERDATA && rb_be[0];
+    wire        tx_cpu  = rb_wr && sel && off == `RM_SERDATA && rb_be[0];
+    wire        tx_wr   = tx_cpu || p_txpush;
     reg         tx_pop_ft;
     wire [7:0]  tx_rdata;
     wire [12:0] tx_count;
     wire        tx_full, tx_valid;
     wire        tx_drop = tx_wr && tx_full && sercon[3];
-    fifo8 #(.AW(11)) tx_fifo (.clk(clk), .rst(rst), .push(tx_wr && en), .wdata(rb_wdata[7:0]),
+    fifo8 #(.AW(11)) tx_fifo (.clk(clk), .rst(rst), .push(tx_wr && en), .wdata(tx_cpu ? rb_wdata[7:0] : p_txd),
                           .pop(tx_pop_ft || tx_drop), .rdata(tx_rdata), .count(tx_count), .full(tx_full),
                           .valid(tx_valid));
 
+    assign p_rxv = rx_valid && !rx_cpu;
+    assign p_rxd = rx_rdata;
+    assign p_txr = en && !tx_full && !tx_cpu;
     wire [11:0] rxcount = (rx_count > 13'd2048) ? 12'd2048 : rx_count[11:0];
     wire [11:0] txspace = (tx_count >= 13'd2048) ? 12'd0 : 12'd2048 - tx_count[11:0];
 

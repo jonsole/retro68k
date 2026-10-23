@@ -33,12 +33,13 @@ Later versions may add more (section 6).
 - A good byte goes into the FIFO.
 - A bad byte is dropped. Bad parity sets KBIRQ.PARITY. A bad start or stop bit sets KBIRQ.FRAME. Software can send `FE` (resend) if it wants the byte again.
 - If the FIFO is full, the new byte is dropped and KBIRQ.OVERFLOW is set.
+- A frame not finished within 2 ms is dropped, so a glitch cannot leave the receiver out of step: the next frame starts afresh. The clock line must hold a new level for 0.64 µs to count.
 - When KBCON.EN is 0, nothing is received and the FIFO is empty.
 
 ### 3.2 Reading the FIFO
 
 - KBSTAT.COUNT says how many bytes are waiting (0–16).
-- Reading the low half of KBDATA takes one byte from the FIFO. A MOVE.B, MOVE.W or MOVE.L of KBDATA all work.
+- Reading the low half of KBDATA takes one byte from the FIFO. A MOVE.B or MOVE.W of its low half (`KBDATA+3`, `KBDATA+2`) or a MOVE.L of KBDATA all work. (A read of the high half alone also takes a byte, and loses it: don't.)
 - If the FIFO is empty, the read returns KBDATA.EMPTY set and no byte.
 - KBIRQ.DATA is 1 while the FIFO is not empty. It is not sticky. With KBIRQEN.DATA set, this gives the interrupt.
 
@@ -95,7 +96,7 @@ The interrupt (source KEYB, 17) is on while any bit is set in both KBIRQ and KBI
 
 | Item | Resource |
 |------|----------|
-| PS/2 receiver and sender, 16-byte FIFO, registers | Estimate 100–150 LUTs |
+| PS/2 receiver and sender, 16-byte FIFO, registers | About 90 LUTs (Vivado) |
 | Block RAM, DSP | None |
 | Pins | 2, already wired on the KS3 |
 

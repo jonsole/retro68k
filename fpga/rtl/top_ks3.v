@@ -25,8 +25,12 @@ module top_ks3 (
     // Accelerator port (FT232H)
     inout  wire [27:0] accel_io,
 
-    // Held at safe levels for now
+    // SD card (SPI mode) and PS/2 keyboard (open collector, pulled up)
     output wire        sd_cs0_n_o, sd_cs1_n_o, sd_sclk_o, sd_mosi_o,
+    input  wire        sd_miso_i,
+    inout  wire        ps2_clk_io, ps2_data_io,
+
+    // Held at safe levels for now
     output wire        flash_cs_n_o,
     output wire        audioext_l_o, audioext_r_o, audioint_o,
     output wire        joysel_o
@@ -73,6 +77,8 @@ module top_ks3 (
         .dma_ack(), .dma_rvalid(), .dma_rdata(),
         .vid_rgb(rgb), .vid_hsync(hs), .vid_vsync(vs), .vid_de(de),
         .aud_l(audioext_l_o), .aud_r(audioext_r_o), .aud_m(audioint_o),
+        .sd_sclk(sd_sclk_o), .sd_mosi(sd_mosi_o), .sd_cs0_n(sd_cs0_n_o), .sd_cs1_n(sd_cs1_n_o), .sd_miso(sd_miso_i),
+        .ps2_clk_i(ps2_clk_io), .ps2_data_i(ps2_data_io), .ps2_clk_low(ps2_clk_low), .ps2_data_low(ps2_data_low),
         .dbg_sc(), .dbg_halted()
     );
 
@@ -130,11 +136,12 @@ module top_ks3 (
         .vgaclk(vgaclk_o), .vgaclkn(vgaclkn_o)
     );
 
+    // ---------------------------------------------------------------- PS/2: pull low, or let go
+    wire ps2_clk_low, ps2_data_low;
+    assign ps2_clk_io  = ps2_clk_low  ? 1'b0 : 1'bz;
+    assign ps2_data_io = ps2_data_low ? 1'b0 : 1'bz;
+
     // ---------------------------------------------------------------- not used yet
-    assign sd_cs0_n_o   = 1'b1;
-    assign sd_cs1_n_o   = 1'b1;
-    assign sd_sclk_o    = 1'b0;
-    assign sd_mosi_o    = 1'b1;
     assign flash_cs_n_o = 1'b1;          // keep the configuration flash deselected
     assign joysel_o     = 1'b0;
 endmodule

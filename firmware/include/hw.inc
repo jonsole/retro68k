@@ -857,99 +857,26 @@ SERDROP_COUNT_M              equ $FFFF
 SDCON                        equ $300        ; RW, spec 15/6
 SDCON_EN_B                   equ $0
 SDCON_EN_M                   equ $1
-SDCON_CS_B                   equ $1
-SDCON_CS_M                   equ $2
-SDCON_INITCLK_B              equ $2
-SDCON_INITCLK_M              equ $4
-SDCON_CRCCHK_B               equ $3
-SDCON_CRCCHK_M               equ $8
-SDCON_AUTOSTOP_B             equ $4
-SDCON_AUTOSTOP_M             equ $10
+SDCON_CS0_B                  equ $1
+SDCON_CS0_M                  equ $2
+SDCON_CS1_B                  equ $2
+SDCON_CS1_M                  equ $4
 SDCON_CLKDIV_B               equ $8
 SDCON_CLKDIV_W               equ $8
 SDCON_CLKDIV_M               equ $FF00
-SDARG                        equ $304        ; RW, spec 15/3.2
-SDCMD                        equ $308        ; W, spec 15/3.2
-SDCMD_INDEX_B                equ $0
-SDCMD_INDEX_W                equ $6
-SDCMD_INDEX_M                equ $3F
-SDCMD_RESP_B                 equ $8
-SDCMD_RESP_W                 equ $2
-SDCMD_RESP_M                 equ $300
-SDCMD_DATA_B                 equ $A
-SDCMD_DATA_M                 equ $400
-SDCMD_WRITE_B                equ $B
-SDCMD_WRITE_M                equ $800
-SDCMD_MULTI_B                equ $C
-SDCMD_MULTI_M                equ $1000
-SDCMD_APP_B                  equ $D
-SDCMD_APP_M                  equ $2000
-SDCMD_BLK16_B                equ $E
-SDCMD_BLK16_M                equ $4000
-SDBLKCNT                     equ $31C        ; RW, spec 15/3.3
-SDBLKCNT_COUNT_B             equ $0
-SDBLKCNT_COUNT_W             equ $10
-SDBLKCNT_COUNT_M             equ $FFFF
-SDSTAT                       equ $320        ; R, spec 15/6
-SDSTAT_CMDBUSY_B             equ $0
-SDSTAT_CMDBUSY_M             equ $1
-SDSTAT_DATABUSY_B            equ $1
-SDSTAT_DATABUSY_M            equ $2
-SDSTAT_CARDBUSY_B            equ $2
-SDSTAT_CARDBUSY_M            equ $4
-SDSTAT_INITBUSY_B            equ $3
-SDSTAT_INITBUSY_M            equ $8
-SDSTAT_FIFOCOUNT_B           equ $4
-SDSTAT_FIFOCOUNT_W           equ $C
-SDSTAT_FIFOCOUNT_M           equ $FFF0
-SDIRQ                        equ $324        ; W1C, spec 15/6
-SDIRQ_CMDDONE_B              equ $0
-SDIRQ_CMDDONE_M              equ $1
-SDIRQ_DATADONE_B             equ $1
-SDIRQ_DATADONE_M             equ $2
-SDIRQ_CMDTIMEOUT_B           equ $2
-SDIRQ_CMDTIMEOUT_M           equ $4
-SDIRQ_CMDERR_B               equ $3
-SDIRQ_CMDERR_M               equ $8
-SDIRQ_DATATIMEOUT_B          equ $4
-SDIRQ_DATATIMEOUT_M          equ $10
-SDIRQ_DATACRC_B              equ $5
-SDIRQ_DATACRC_M              equ $20
-SDIRQ_WRITEERR_B             equ $6
-SDIRQ_WRITEERR_M             equ $40
-SDIRQ_TOKENERR_B             equ $7
-SDIRQ_TOKENERR_M             equ $80
-SDIRQEN                      equ $328        ; RW, spec 15/6
-SDIRQEN_CMDDONE_B            equ $0
-SDIRQEN_CMDDONE_M            equ $1
-SDIRQEN_DATADONE_B           equ $1
-SDIRQEN_DATADONE_M           equ $2
-SDIRQEN_CMDTIMEOUT_B         equ $2
-SDIRQEN_CMDTIMEOUT_M         equ $4
-SDIRQEN_CMDERR_B             equ $3
-SDIRQEN_CMDERR_M             equ $8
-SDIRQEN_DATATIMEOUT_B        equ $4
-SDIRQEN_DATATIMEOUT_M        equ $10
-SDIRQEN_DATACRC_B            equ $5
-SDIRQEN_DATACRC_M            equ $20
-SDIRQEN_WRITEERR_B           equ $6
-SDIRQEN_WRITEERR_M           equ $40
-SDIRQEN_TOKENERR_B           equ $7
-SDIRQEN_TOKENERR_M           equ $80
-SDTIMEOUT                    equ $32C        ; RW, spec 15/6
-SDTIMEOUT_MS_B               equ $0
-SDTIMEOUT_MS_W               equ $10
-SDTIMEOUT_MS_M               equ $FFFF
-SDDATA                       equ $330        ; RW, spec 15/3.4
+SDDATA                       equ $304        ; RW, spec 15/3.1
+SDDATA_BYTE_B                equ $0
+SDDATA_BYTE_W                equ $8
+SDDATA_BYTE_M                equ $FF
+SDDATA_BUSY_B                equ $8
+SDDATA_BUSY_M                equ $100
+SDCOUNT                      equ $308        ; RW, spec 15/3.5
+SDCOUNT_COUNT_B              equ $0
+SDCOUNT_COUNT_W              equ $10
+SDCOUNT_COUNT_M              equ $FFFF
 KBCON                        equ $400        ; RW, spec 16/4
 KBCON_EN_B                   equ $0
 KBCON_EN_M                   equ $1
-KBCON_RAW_B                  equ $1
-KBCON_RAW_M                  equ $2
-KBCON_RESETKEYS_B            equ $2
-KBCON_RESETKEYS_M            equ $4
-KBCON_MATRIX_B               equ $3
-KBCON_MATRIX_M               equ $8
 KBSTAT                       equ $404        ; R, spec 16/4
 KBSTAT_COUNT_B               equ $0
 KBSTAT_COUNT_W               equ $5
@@ -957,47 +884,37 @@ KBSTAT_COUNT_M               equ $1F
 KBSTAT_TXBUSY_B              equ $8
 KBSTAT_TXBUSY_M              equ $100
 KBDATA                       equ $408        ; R, spec 16/3.2
-KBDATA_EMPTY_B               equ $10
-KBDATA_EMPTY_M               equ $10000
-KBDATA_RELEASED_B            equ $F
-KBDATA_RELEASED_M            equ $8000
-KBDATA_KEY_B                 equ $0
-KBDATA_KEY_W                 equ $9
-KBDATA_KEY_M                 equ $1FF
-KBSEND                       equ $40C        ; W, spec 16/3.5
+KBDATA_BYTE_B                equ $0
+KBDATA_BYTE_W                equ $8
+KBDATA_BYTE_M                equ $FF
+KBDATA_EMPTY_B               equ $8
+KBDATA_EMPTY_M               equ $100
+KBSEND                       equ $40C        ; W, spec 16/3.4
 KBSEND_BYTE_B                equ $0
 KBSEND_BYTE_W                equ $8
 KBSEND_BYTE_M                equ $FF
-KBREPLY                      equ $410        ; R, spec 16/3.2
-KBREPLY_BYTE_B               equ $0
-KBREPLY_BYTE_W               equ $8
-KBREPLY_BYTE_M               equ $FF
-KBIRQ                        equ $414        ; RW1C, spec 16/4
-KBIRQ_EVENT_B                equ $0
-KBIRQ_EVENT_M                equ $1
-KBIRQ_REPLY_B                equ $1
-KBIRQ_REPLY_M                equ $2
-KBIRQ_PARITY_B               equ $2
-KBIRQ_PARITY_M               equ $4
-KBIRQ_FRAME_B                equ $3
-KBIRQ_FRAME_M                equ $8
+KBIRQ                        equ $410        ; RW1C, spec 16/4
+KBIRQ_DATA_B                 equ $0
+KBIRQ_DATA_M                 equ $1
+KBIRQ_PARITY_B               equ $1
+KBIRQ_PARITY_M               equ $2
+KBIRQ_FRAME_B                equ $2
+KBIRQ_FRAME_M                equ $4
+KBIRQ_OVERFLOW_B             equ $3
+KBIRQ_OVERFLOW_M             equ $8
 KBIRQ_TIMEOUT_B              equ $4
 KBIRQ_TIMEOUT_M              equ $10
-KBIRQ_OVERFLOW_B             equ $5
-KBIRQ_OVERFLOW_M             equ $20
-KBIRQEN                      equ $418        ; RW, spec 16/4
-KBIRQEN_EVENT_B              equ $0
-KBIRQEN_EVENT_M              equ $1
-KBIRQEN_REPLY_B              equ $1
-KBIRQEN_REPLY_M              equ $2
-KBIRQEN_PARITY_B             equ $2
-KBIRQEN_PARITY_M             equ $4
-KBIRQEN_FRAME_B              equ $3
-KBIRQEN_FRAME_M              equ $8
+KBIRQEN                      equ $414        ; RW, spec 16/4
+KBIRQEN_DATA_B               equ $0
+KBIRQEN_DATA_M               equ $1
+KBIRQEN_PARITY_B             equ $1
+KBIRQEN_PARITY_M             equ $2
+KBIRQEN_FRAME_B              equ $2
+KBIRQEN_FRAME_M              equ $4
+KBIRQEN_OVERFLOW_B           equ $3
+KBIRQEN_OVERFLOW_M           equ $8
 KBIRQEN_TIMEOUT_B            equ $4
 KBIRQEN_TIMEOUT_M            equ $10
-KBIRQEN_OVERFLOW_B           equ $5
-KBIRQEN_OVERFLOW_M           equ $20
 SYSID                        equ $800        ; R, spec 7/5
 SYSID_VALUE_B                equ $0
 SYSID_VALUE_W                equ $20
@@ -1100,28 +1017,6 @@ I2CSTAT_NACK_B               equ $1
 I2CSTAT_NACK_M               equ $2
 I2CSTAT_ARBLOST_B            equ $2
 I2CSTAT_ARBLOST_M            equ $4
-SDRESP_NUM                   equ $4
-SDRESP0                      equ $30C        ; R, spec 15/3.2
-SDRESP1                      equ $310        ; R, spec 15/3.2
-SDRESP2                      equ $314        ; R, spec 15/3.2
-SDRESP3                      equ $318        ; R, spec 15/3.2
-KBMAP_NUM                    equ $10
-KBMAP0                       equ $440        ; R, spec 16/3.4
-KBMAP1                       equ $444        ; R, spec 16/3.4
-KBMAP2                       equ $448        ; R, spec 16/3.4
-KBMAP3                       equ $44C        ; R, spec 16/3.4
-KBMAP4                       equ $450        ; R, spec 16/3.4
-KBMAP5                       equ $454        ; R, spec 16/3.4
-KBMAP6                       equ $458        ; R, spec 16/3.4
-KBMAP7                       equ $45C        ; R, spec 16/3.4
-KBMAP8                       equ $460        ; R, spec 16/3.4
-KBMAP9                       equ $464        ; R, spec 16/3.4
-KBMAP10                      equ $468        ; R, spec 16/3.4
-KBMAP11                      equ $46C        ; R, spec 16/3.4
-KBMAP12                      equ $470        ; R, spec 16/3.4
-KBMAP13                      equ $474        ; R, spec 16/3.4
-KBMAP14                      equ $478        ; R, spec 16/3.4
-KBMAP15                      equ $47C        ; R, spec 16/3.4
 ; TMR0..TMR3: 4 x 32 bytes, spec 12/6
 TMR_NUM                      equ $4
 TMR_SPAN                     equ $20

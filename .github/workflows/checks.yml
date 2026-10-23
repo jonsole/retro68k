@@ -69,6 +69,32 @@ jobs:
       - name: Audio test, every output sample against the model
         run: make -C sim atest
 
+  dma-io:
+    name: DMA engine, SD card and keyboard tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y iverilog
+      - name: Install sv2v
+        run: |
+          curl -sSL -o sv2v.zip https://github.com/zachjs/sv2v/releases/download/v0.0.13/sv2v-Linux.zip
+          unzip -q sv2v.zip
+          echo "$PWD/sv2v-Linux" >> "$GITHUB_PATH"
+      - name: Build vasm (from the copy in tools/vasm)
+        run: |
+          tar xzf tools/vasm/vasm.tar.gz
+          make -C vasm CPU=m68k SYNTAX=mot -j4 > /dev/null
+          echo "$PWD/vasm" >> "$GITHUB_PATH"
+      - name: DMA engine, random jobs against the model, and directed tests
+        run: make -C sim dtest
+      - name: SD card and PS/2 keyboard against their models
+        run: make -C sim iotest
+
   ks3-synth:
     name: KS3 synthesis check (Yosys)
     runs-on: ubuntu-latest

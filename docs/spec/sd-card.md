@@ -1,138 +1,120 @@
 # Spec 15: SD card
 
-Status: **draft for review**
+Status: **version 1, for review**
 
-The SD card is the computer's storage: programs, data, music, pictures. On the ZX Spectrum Next KS3 the SD slot is wired for **SPI mode** only, so the FPGA has an **SPI-mode SD host controller**. Hardware does the bit-level work (clocking, command checksums, data tokens, moving 512-byte blocks, busy waiting, timeouts); software does the card start-up sequence and the file system (e.g. FAT32).
+The SD card is the computer's storage: programs, data, music, pictures. On the ZX Spectrum Next KS3 the SD slot is wired for **SPI mode** only. Version 1's controller is a plain **SPI byte master**: the hardware clocks bytes to and from the card at up to 25 MHz, and software builds the commands, waits for the card's answers and handles the data blocks. Bulk data does not need the CPU: the DMA engine streams a block's bytes between the card and Chip RAM through its port 0 (spec 11).
+
+(An earlier draft, with a host controller doing commands, CRCs and blocks in hardware and a 2 KB FIFO, is in the history of this file. It was dropped for size; it is open point SD4.)
 
 ## 1. Summary
 
 | Item | Value |
 |------|-------|
-| Slot | The KS3's SD slot: `sd_sclk`, `sd_mosi`, `sd_miso` and `sd_cs0`. `sd_cs1` (a second card select) is wired but unused for now |
+| Slot | The KS3's SD slot: `sd_sclk`, `sd_mosi`, `sd_miso`, `sd_cs0`. `sd_cs1` (a second card select) is wired and driven, but nothing uses it yet |
 | Cards | SD, SDHC and SDXC (any size), at 3.3 V |
-| Bus | SPI mode, 1 bit each way |
-| Speed | SPI clock up to 25 MHz: about 2.5–3 MB/s |
-| Clock | 100 MHz ÷ (2 × CLKDIV): 400 kHz for start-up, 25 MHz after |
-| Hardware does | 48-bit commands with CRC7, the R1/R1b/R3/R7/R2 responses, 512-byte data blocks with start tokens and CRC16, data-response tokens on writes, busy waiting, multi-block transfers with the automatic stop, timeouts |
-| Software does | Card start-up (CMD0, CMD8, ACMD41, CMD58, optional CMD59), file system |
-| Data | A 2 KB FIFO (4 blocks), read and written by the CPU or by the DMA engine (port 0) |
+| Bus | SPI mode 0, 1 bit each way, most significant bit first |
+| Speed | SPI clock 100 MHz ÷ (2 × CLKDIV): 400 kHz for start-up (CLKDIV 125), 25 MHz after (CLKDIV 2): about 3 MB/s |
+| Hardware does | Clocks a byte out and a byte in at the same time; drives the two select lines as software says; reads a counted run of bytes for the DMA engine |
+| Software does | Card start-up, commands and their checksums, waiting for answers, tokens and busy, data block framing, timeouts, the file system |
+| DMA | Port 0 of the DMA engine: reading N bytes from the card into memory, or writing bytes to it, with no CPU work per byte |
 | Card detect | None on the KS3; software notices cards by sending commands (section 5) |
-| Interrupt | Source SD (16) in the interrupt controller: command done, data done, errors |
+| Interrupt | None: software polls (source 16 of the interrupt controller is unused) |
 
-## 2. Why SPI mode
+## 2. Why SPI mode, and why a byte master
 
-SD cards have two ways to talk: the native bus (1 or 4 data lines, up to 25 MB/s) and the simpler SPI mode (1 line each way). The KS3 board only wires the SPI signals, so this controller uses SPI mode. It is slower, about 2.5–3 MB/s, but that is still plenty for loading programs and files: a 1 MB file loads in under half a second.
+SD cards have two ways to talk: the native bus (1 or 4 data lines, up to 25 MB/s) and the simpler SPI mode (1 line each way). The KS3 board only wires the SPI signals. SPI mode is slower, about 3 MB/s, but still plenty for loading programs and files: a 1 MB file loads in about a third of a second.
 
-## 3. How a transfer works
+In SPI mode everything is bytes: a command is 6 bytes, an answer a few bytes, a data block a start token, 512 bytes and 2 checksum bytes. A byte master is enough to do all of it from software, at little cost in logic; the DMA engine takes the one part where speed matters, the 512 data bytes of each block.
 
-### 3.1 Chip select and clocks
+## 3. How it works
 
-- `sd_cs0` selects the card. SDCON.CS chooses which select line a command uses (0 = `sd_cs0`, the slot; 1 = `sd_cs1`, unused for now).
-- The controller pulls the select line low for each command and its data, and releases it afterwards with 8 extra clocks, as SPI-mode cards expect.
-- **Start-up clocks:** writing 1 to SDCON.INITCLK sends 80 clocks with the select line high (cards need at least 74 before the first command). The bit clears itself when done.
+### 3.1 A byte
 
-### 3.2 Commands
+Writing a byte to **SDDATA** sends it on MOSI, most significant bit first, while the byte the card sends on MISO is clocked in. **BUSY** (SDDATA bit 8) is set until all 8 bits have gone; then SDDATA's bits 7–0 hold the byte received. To read a byte from the card, send `0xFF`. A write while BUSY is ignored.
 
-1. Software writes the 32-bit argument to SDARG.
-2. Software writes SDCMD with the command number, the kind of response expected, and whether data follows.
-3. The controller sends the 48-bit command with its CRC7. It then clocks in 0xFF bytes until the card answers (up to 8 bytes), and stores the response:
+At 25 MHz a byte takes 320 ns. The 68000 polling BUSY moves about 0.3–0.5 MB/s; the DMA engine moves a block at the card's full speed.
 
-| Response (SDCMD.RESP) | What the card sends | Where it goes |
-|-----------------------|---------------------|---------------|
-| 0: R1 | 1 status byte | SDRESP0 bits 7–0 |
-| 1: R1b | 1 status byte, then busy (MISO held low) | SDRESP0 bits 7–0; the controller waits while busy |
-| 2: R3 / R7 | 1 status byte + 32 bits (OCR, or voltage check) | SDRESP0 bits 7–0; SDRESP1 the 32 bits |
-| 3: R2 | 2 status bytes | SDRESP0 bits 15–0 |
+### 3.2 Select lines
 
-4. CMDDONE is set. If the card doesn't answer, CMDTIMEOUT is set. If any error bit is set in the R1 status byte (bits 6–1), CMDERR is set as well, so software needn't check every response by hand.
+**SDCON.CS0** and **SDCON.CS1** drive the two select lines: 1 = selected (the line low). Software selects the card for each command and its answer and data, and deselects it afterwards, followed by one more byte (`0xFF`) so the card releases MISO, as SPI-mode cards expect. Change the select lines only while not BUSY.
 
-APP sends CMD55 first (for ACMD commands), checking its R1 before sending the real command.
+**Start-up clocks:** cards need at least 74 clocks with the select line high before the first command: send 10 bytes of `0xFF` with both CS bits clear.
 
-### 3.3 Data blocks
+### 3.3 Commands, by software
 
-- Blocks are 512 bytes. SDBLKCNT says how many follow a read or write command (CMD17/18, CMD24/25).
-- **Reading:** for each block, the controller waits for the card's start token (`0xFE`), receives 512 bytes into the FIFO, then the 2-byte CRC16. With SDCON.CRCCHK set it checks the CRC and sets DATACRC on a mismatch. If the card sends an error token instead of `0xFE`, TOKENERR is set. If the FIFO is full, the controller stops the SPI clock between blocks until there is room, so data is never lost.
-- **Writing:** for each block, the controller sends a start token (`0xFE` for one block, `0xFC` for multi-block), 512 bytes from the FIFO and the CRC16. It reads the card's data-response token: "accepted" carries on; "CRC error" or "write error" sets WRITEERR. It then waits while the card holds MISO low (busy).
-- **Multi-block:** with SDCON.AUTOSTOP set, the controller ends a multi-block read with CMD12 (stop transmission) and a multi-block write with the stop token (`0xFD`), then waits out the busy time.
-- **Short blocks:** SDCMD.BLK16 makes the data block 16 bytes instead of 512. This is for reading the card's CID and CSD registers (CMD10, CMD9), which SPI mode sends as small data blocks.
-- DATADONE is set at the end, or an error flag (DATATIMEOUT, DATACRC, TOKENERR, WRITEERR).
+A command is 6 bytes: `0x40 | index`, the 32-bit argument (most significant byte first), and `CRC7 << 1 | 1`. In SPI mode the card checks the CRC only for CMD0 and CMD8 unless told to with CMD59, so those two use fixed values (`0x95` for CMD0 with argument 0, `0x87` for CMD8 with argument `0x1AA`) and the rest can send `0xFF`.
 
-### 3.4 Moving the data
+After the command, the card answers within 8 bytes: software sends `0xFF` until a byte with its top bit clear arrives, the R1 status. Some commands send more bytes after it (R3 and R7: 4 more; R1b: the card then holds MISO low, so reads give `0x00`, until it is ready).
 
-- **DMA engine (normal use):** a channel moves data between the FIFO (port 0) and Chip RAM, paced automatically. The CPU only starts the command and the DMA chain, then takes the DATADONE interrupt.
-- **CPU:** for small jobs, the CPU reads or writes SDDATA, 4 bytes at a time.
+### 3.4 Data blocks
 
-At 25 MHz the card moves about 3 MB/s. The DMA engine's guaranteed peripheral cycles (spec 5) plus a little of the free pool cover this easily, even with a busy screen.
+- **Reading** (CMD17 one block, CMD18 several): after the command's R1, software sends `0xFF` until the card's start token `0xFE` arrives (or an error token, `0b000xxxxx`), then reads 512 data bytes and 2 CRC bytes. With the DMA engine (section 3.5) the 512 bytes go straight into memory.
+- **Writing** (CMD24, CMD25): software sends a start token (`0xFE` for one block, `0xFC` for each block of CMD25), 512 bytes (by DMA or the CPU), 2 CRC bytes (`0xFF 0xFF` unless CRCs are on), then reads the data-response token (`xxx00101` = accepted) and waits while the card is busy (reads `0x00`). CMD25 ends with the stop token `0xFD` and another busy wait; CMD18 ends with CMD12.
+
+### 3.5 With the DMA engine
+
+**SDCOUNT** gives the controller a run of bytes to read for the DMA engine: writing N (1–65535) starts it. The controller clocks in byte after byte, sending `0xFF`, and hands each to DMA port 0; it starts the next as soon as the engine has taken the last, until N bytes have been read. Reading SDCOUNT gives the bytes still to read. So the controller never reads past the end of the block: it stops before the CRC bytes, which software then reads itself.
+
+As a destination, port 0 sends each byte the engine gives it, as soon as the last has gone (the bytes received are dropped).
+
+Reading a block into memory:
+
+1. Send CMD17 and wait for R1 and the start token `0xFE`, as in 3.4.
+2. Write 512 to SDCOUNT.
+3. Run a DMA job: COPY, from port 0 (SRCKIND port, SRC = 0) to the buffer, 512 bytes (spec 11, section 4).
+4. When the job is done, read the 2 CRC bytes, deselect, send one more `0xFF`.
+
+Writing a block is the same the other way: the start token from the CPU, the 512 bytes by a DMA job to port 0, then the CRC bytes, the response token and the busy wait from the CPU. While SDCOUNT is not 0, or a DMA job sends to port 0, the CPU should not write SDDATA.
 
 ## 4. Starting a card
 
-Software runs the standard SPI-mode start-up sequence through the command registers. A sketch:
+Software runs the standard SPI-mode start-up sequence (the boot ROM will have it, with a small FAT32 reader, so programs can be loaded from the card):
 
-1. CLKDIV = 125 (400 kHz); write SDCON.INITCLK and wait for it to clear (80 clocks with the select line high).
-2. CMD0 (go idle) with the select line low: this puts the card into SPI mode. Expect R1 = `0x01` (idle).
-3. CMD8 with argument `0x1AA` (voltage check, R7): new cards echo `0x1AA`; old SDv1 cards reply "illegal command".
-4. ACMD41 (APP set; argument with bit 30 set for SDHC/SDXC) repeatedly until R1 = `0x00` (ready).
-5. CMD58 (read OCR, R3): bit 30 (CCS) set means SDHC/SDXC, which use block addresses; clear means SDSC, which uses byte addresses.
-6. Optionally CMD59 with argument 1 to make the card check command and data CRCs; set SDCON.CRCCHK to check them on reads too.
-7. For SDSC cards, CMD16 with 512 sets the block length.
-8. Set CLKDIV = 2 (25 MHz).
-
-The boot ROM will include this and a small FAT32 reader, so programs can be loaded from the card.
+1. CLKDIV = 125 (400 kHz). 10 bytes of `0xFF` with the select lines high.
+2. Select; CMD0 (go idle, CRC `0x95`): the card enters SPI mode and answers R1 = `0x01` (idle).
+3. CMD8 with argument `0x1AA` (CRC `0x87`), R7: new cards echo `0x1AA`; old SDv1 cards answer "illegal command".
+4. CMD55 then ACMD41 (argument bit 30 set for SDHC/SDXC), repeated until R1 = `0x00` (ready). Allow about a second.
+5. CMD58 (read OCR, R3): bit 30 (CCS) set means SDHC/SDXC, which use block numbers; clear means SDSC, which uses byte addresses.
+6. For SDSC cards, CMD16 with 512 sets the block length.
+7. CLKDIV = 2 (25 MHz).
 
 ## 5. No card detect
 
-The KS3 has no card-detect switch, and in SPI mode the card's DAT3 pin is its select line, so it can't be used for detection either. Software finds out about the card by talking to it:
+The KS3 has no card-detect switch, and in SPI mode the card's DAT3 pin is its select line, so it cannot be used for detection either. Software finds out about the card by talking to it:
 
-- **Is there a card?** Run the start-up sequence. If CMD0 gets no answer (CMDTIMEOUT), there is no card, or it isn't working.
-- **Was it removed?** Commands and data transfers start timing out (CMDTIMEOUT, DATATIMEOUT).
-- **Was it swapped?** A new card answers CMD0 and needs starting again. A file system can read the card's ID (CMD10, CID) after start-up and compare it with the one it had before.
-
-A disk menu or file requester can simply try CMD0 again when the user asks for a fresh directory listing.
+- **Is there a card?** Run the start-up sequence. If CMD0 gets no answer (MISO stays high: every byte reads `0xFF`), there is no card, or it is not working.
+- **Was it removed?** Answers stop coming: bytes read `0xFF` where an R1 or token was due.
+- **Was it swapped?** A new card answers CMD0 and needs starting again. A file system can read the card's ID (CMD10, CID) after start-up and compare it with the one it had.
 
 ## 6. Registers
 
-In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers are 32-bit and follow the 16-bit-halves rules (spec 10, section 4.1; section 3 of spec 3).
+In the system block at `0xF00000` (spec 3, section 4.5).
 
 | Offset | Name | Bits | Description |
 |--------|------|------|-------------|
-| `0x300` | SDCON | EN (0), CS (1), INITCLK (2), CRCCHK (3), AUTOSTOP (4), CLKDIV (15–8) | On; which select line (0 = `sd_cs0`); write 1 to send 80 start-up clocks with the select line high (clears when done); check CRC16 on received blocks; stop multi-block transfers automatically; SPI clock = 100 MHz ÷ (2 × CLKDIV) |
-| `0x304` | SDARG | 31–0 | Command argument |
-| `0x308` | SDCMD | INDEX (5–0), RESP (9–8: R1, R1b, R3/R7, R2), DATA (10), WRITE (11), MULTI (12), APP (13), BLK16 (14) | Writing starts the command. APP sends CMD55 first (for ACMD commands). BLK16 makes the data block 16 bytes (CID, CSD) |
-| `0x30C` | SDRESP0 | 15–0 | R1 status in bits 7–0 (R2: both status bytes in bits 15–0) |
-| `0x310` | SDRESP1 | 31–0 | The 32 bits after R1 in R3 and R7 responses |
-| `0x314`–`0x318` | SDRESP2–3 | 31–0 each | Reserved, read as 0 (kept so the register layout stays the same) |
-| `0x31C` | SDBLKCNT | 15–0 | Number of blocks |
-| `0x320` | SDSTAT | CMDBUSY (0), DATABUSY (1), CARDBUSY (2), INITBUSY (3), FIFOCOUNT (15–4, in bytes ÷ 4) | Read-only. CARDBUSY: the card is holding MISO low |
-| `0x324` | SDIRQ | CMDDONE (0), DATADONE (1), CMDTIMEOUT (2), CMDERR (3), DATATIMEOUT (4), DATACRC (5), WRITEERR (6), TOKENERR (7) | Sticky, write 1 to clear |
-| `0x328` | SDIRQEN | Same layout as SDIRQ | Interrupt enables |
-| `0x32C` | SDTIMEOUT | 15–0 | Data and busy timeout in milliseconds (default 250) |
-| `0x330` | SDDATA | 31–0 | FIFO: read takes 4 bytes, write adds 4 bytes |
-
-**Reading SDDATA with the 68000:** reading its high half takes 4 bytes from the FIFO and returns the first two; reading its low half then returns the other two. A MOVE.L reads it correctly. (This is the general read rule for 32-bit registers: reading the high half captures the whole register, as for the time counter in spec 12.)
+| `0x300` | SDCON | EN (0), CS0 (1), CS1 (2), CLKDIV (15–8) | On (off: no clock, select lines high); select lines (1 = selected, the line low); SPI clock = 100 MHz ÷ (2 × CLKDIV), CLKDIV 0 and 1 count as 2. After reset: off, CLKDIV 125 |
+| `0x304` | SDDATA | Write: BYTE (7–0). Read: BYTE (7–0), BUSY (8) | Write: send a byte (ignored while BUSY). Read: the last byte received, and BUSY while a byte is being clocked |
+| `0x308` | SDCOUNT | COUNT (15–0) | Write N (a 16-bit or 32-bit write, while on): read N bytes for DMA port 0 (section 3.5). Read: bytes still to read. Turning SDCON.EN off clears it |
 
 ## 7. FPGA resources
 
 | Item | Resource |
 |------|----------|
-| 2 KB data FIFO | 1 block RAM |
-| SPI engine, command and data state machines, CRC7 and CRC16, clock divider | Estimate 200–300 LUTs |
-| Pins | 5 on the KS3: `sd_sclk`, `sd_mosi`, `sd_miso`, `sd_cs0`, `sd_cs1` |
+| Clock divider, shift register, counters | About 70 LUTs (Vivado); no block RAM |
+| Pins | 5 on the KS3: `sd_sclk` (M1), `sd_mosi` (M2), `sd_miso` (L1, pulled up), `sd_cs0` (N1), `sd_cs1` (K2) |
 
 ## 8. Open points
 
 | # | Item |
 |---|------|
 | SD1 | Is 25 MHz SPI reliable on the KS3's wiring with all cards? Test with several brands; fall back to 12.5 MHz (CLKDIV = 4) if not |
-| SD2 | Some cards accept faster SPI clocks after CMD6 "high speed"; worth trying later for about 5 MB/s |
-| SD3 | What `sd_cs1` is meant for on the board (a second card on an expansion?), and whether to support it |
-| SD4 | A small hardware "read N blocks into memory" helper (command + DMA in one), if the software sequence turns out slow |
+| SD2 | Some cards accept faster SPI clocks after CMD6 "high speed": worth trying later for about 5 MB/s |
+| SD3 | What `sd_cs1` is meant for on the board (a second card on an expansion?), and whether to use it |
+| SD4 | A hardware host controller (commands, CRCs, blocks, a FIFO), if software turns out too slow: see the earlier draft |
 | SD5 | Card power is always on (no switch), so a crashed card can only be reset with CMD0, not by cycling power |
 
 ## 9. Tests
 
-- **Simulation:** against an SPI-mode SD card model: start-up clocks, the full start-up sequence for SDSC and SDHC cards, single and multi-block reads and writes, 16-byte CID/CSD blocks, error tokens, data-response errors, CRC errors with CRCCHK on, busy after writes, AUTOSTOP for reads (CMD12) and writes (stop token), timeouts.
-- **FIFO pacing:** with the FIFO full, the SPI clock pauses between blocks and no data is lost.
-- **R1 errors:** a response with an error bit sets CMDERR.
-- **No card:** CMD0 with no card gives CMDTIMEOUT, not a hang.
-- **Real cards:** several brands and sizes (SDSC, SDHC, SDXC) at 400 kHz and 25 MHz; read speed into Chip RAM with the DMA engine at idle and busy screens.
-- **Data integrity:** write and read back a full card pattern; compare.
+- **Simulation:** an SPI-mode SD card model in the testbench, answering bytes: start-up clocks with the select high, CMD0, CMD8, ACMD41, CMD58, a block read through the DMA engine with SDCOUNT (the CRC bytes not read by it), a block written by DMA; SPI mode 0 timing at several CLKDIV values; writes while BUSY ignored.
+- **No card:** every byte reads `0xFF`.
+- **Real cards:** several brands and sizes (SDSC, SDHC, SDXC) at 400 kHz and 25 MHz; read speed into Chip RAM with the DMA engine; write and read back a pattern.

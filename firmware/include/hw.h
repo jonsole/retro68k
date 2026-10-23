@@ -703,111 +703,29 @@
 #define SDCON                              HW_REG32(SYSTEM_BASE + SDCON_OFS)
 #define SDCON_EN_SHIFT                     0
 #define SDCON_EN_MASK                      0x1u
-#define SDCON_CS_SHIFT                     1
-#define SDCON_CS_MASK                      0x2u
-#define SDCON_INITCLK_SHIFT                2
-#define SDCON_INITCLK_MASK                 0x4u
-#define SDCON_CRCCHK_SHIFT                 3
-#define SDCON_CRCCHK_MASK                  0x8u
-#define SDCON_AUTOSTOP_SHIFT               4
-#define SDCON_AUTOSTOP_MASK                0x10u
+#define SDCON_CS0_SHIFT                    1
+#define SDCON_CS0_MASK                     0x2u
+#define SDCON_CS1_SHIFT                    2
+#define SDCON_CS1_MASK                     0x4u
 #define SDCON_CLKDIV_SHIFT                 8
 #define SDCON_CLKDIV_MASK                  0xFF00u
-/* SDARG: RW, spec 15/3.2 */
-#define SDARG_OFS                          0x304u
-#define SDARG                              HW_REG32(SYSTEM_BASE + SDARG_OFS)
-/* SDCMD: W, spec 15/3.2 */
-#define SDCMD_OFS                          0x308u
-#define SDCMD                              HW_REG32(SYSTEM_BASE + SDCMD_OFS)
-#define SDCMD_INDEX_SHIFT                  0
-#define SDCMD_INDEX_MASK                   0x3Fu
-#define SDCMD_RESP_SHIFT                   8
-#define SDCMD_RESP_MASK                    0x300u
-#define SDCMD_DATA_SHIFT                   10
-#define SDCMD_DATA_MASK                    0x400u
-#define SDCMD_WRITE_SHIFT                  11
-#define SDCMD_WRITE_MASK                   0x800u
-#define SDCMD_MULTI_SHIFT                  12
-#define SDCMD_MULTI_MASK                   0x1000u
-#define SDCMD_APP_SHIFT                    13
-#define SDCMD_APP_MASK                     0x2000u
-#define SDCMD_BLK16_SHIFT                  14
-#define SDCMD_BLK16_MASK                   0x4000u
-/* SDBLKCNT: RW, spec 15/3.3 */
-#define SDBLKCNT_OFS                       0x31Cu
-#define SDBLKCNT                           HW_REG32(SYSTEM_BASE + SDBLKCNT_OFS)
-#define SDBLKCNT_COUNT_SHIFT               0
-#define SDBLKCNT_COUNT_MASK                0xFFFFu
-/* SDSTAT: R, spec 15/6 */
-#define SDSTAT_OFS                         0x320u
-#define SDSTAT                             HW_REG32(SYSTEM_BASE + SDSTAT_OFS)
-#define SDSTAT_CMDBUSY_SHIFT               0
-#define SDSTAT_CMDBUSY_MASK                0x1u
-#define SDSTAT_DATABUSY_SHIFT              1
-#define SDSTAT_DATABUSY_MASK               0x2u
-#define SDSTAT_CARDBUSY_SHIFT              2
-#define SDSTAT_CARDBUSY_MASK               0x4u
-#define SDSTAT_INITBUSY_SHIFT              3
-#define SDSTAT_INITBUSY_MASK               0x8u
-#define SDSTAT_FIFOCOUNT_SHIFT             4
-#define SDSTAT_FIFOCOUNT_MASK              0xFFF0u
-/* SDIRQ: W1C, spec 15/6 */
-#define SDIRQ_OFS                          0x324u
-#define SDIRQ                              HW_REG32(SYSTEM_BASE + SDIRQ_OFS)
-#define SDIRQ_CMDDONE_SHIFT                0
-#define SDIRQ_CMDDONE_MASK                 0x1u
-#define SDIRQ_DATADONE_SHIFT               1
-#define SDIRQ_DATADONE_MASK                0x2u
-#define SDIRQ_CMDTIMEOUT_SHIFT             2
-#define SDIRQ_CMDTIMEOUT_MASK              0x4u
-#define SDIRQ_CMDERR_SHIFT                 3
-#define SDIRQ_CMDERR_MASK                  0x8u
-#define SDIRQ_DATATIMEOUT_SHIFT            4
-#define SDIRQ_DATATIMEOUT_MASK             0x10u
-#define SDIRQ_DATACRC_SHIFT                5
-#define SDIRQ_DATACRC_MASK                 0x20u
-#define SDIRQ_WRITEERR_SHIFT               6
-#define SDIRQ_WRITEERR_MASK                0x40u
-#define SDIRQ_TOKENERR_SHIFT               7
-#define SDIRQ_TOKENERR_MASK                0x80u
-/* SDIRQEN: RW, spec 15/6 */
-#define SDIRQEN_OFS                        0x328u
-#define SDIRQEN                            HW_REG32(SYSTEM_BASE + SDIRQEN_OFS)
-#define SDIRQEN_CMDDONE_SHIFT              0
-#define SDIRQEN_CMDDONE_MASK               0x1u
-#define SDIRQEN_DATADONE_SHIFT             1
-#define SDIRQEN_DATADONE_MASK              0x2u
-#define SDIRQEN_CMDTIMEOUT_SHIFT           2
-#define SDIRQEN_CMDTIMEOUT_MASK            0x4u
-#define SDIRQEN_CMDERR_SHIFT               3
-#define SDIRQEN_CMDERR_MASK                0x8u
-#define SDIRQEN_DATATIMEOUT_SHIFT          4
-#define SDIRQEN_DATATIMEOUT_MASK           0x10u
-#define SDIRQEN_DATACRC_SHIFT              5
-#define SDIRQEN_DATACRC_MASK               0x20u
-#define SDIRQEN_WRITEERR_SHIFT             6
-#define SDIRQEN_WRITEERR_MASK              0x40u
-#define SDIRQEN_TOKENERR_SHIFT             7
-#define SDIRQEN_TOKENERR_MASK              0x80u
-/* SDTIMEOUT: RW, spec 15/6 */
-#define SDTIMEOUT_OFS                      0x32Cu
-#define SDTIMEOUT                          HW_REG32(SYSTEM_BASE + SDTIMEOUT_OFS)
-#define SDTIMEOUT_MS_SHIFT                 0
-#define SDTIMEOUT_MS_MASK                  0xFFFFu
-/* SDDATA: RW, spec 15/3.4 */
-#define SDDATA_OFS                         0x330u
+/* SDDATA: RW, spec 15/3.1 */
+#define SDDATA_OFS                         0x304u
 #define SDDATA                             HW_REG32(SYSTEM_BASE + SDDATA_OFS)
+#define SDDATA_BYTE_SHIFT                  0
+#define SDDATA_BYTE_MASK                   0xFFu
+#define SDDATA_BUSY_SHIFT                  8
+#define SDDATA_BUSY_MASK                   0x100u
+/* SDCOUNT: RW, spec 15/3.5 */
+#define SDCOUNT_OFS                        0x308u
+#define SDCOUNT                            HW_REG32(SYSTEM_BASE + SDCOUNT_OFS)
+#define SDCOUNT_COUNT_SHIFT                0
+#define SDCOUNT_COUNT_MASK                 0xFFFFu
 /* KBCON: RW, spec 16/4 */
 #define KBCON_OFS                          0x400u
 #define KBCON                              HW_REG32(SYSTEM_BASE + KBCON_OFS)
 #define KBCON_EN_SHIFT                     0
 #define KBCON_EN_MASK                      0x1u
-#define KBCON_RAW_SHIFT                    1
-#define KBCON_RAW_MASK                     0x2u
-#define KBCON_RESETKEYS_SHIFT              2
-#define KBCON_RESETKEYS_MASK               0x4u
-#define KBCON_MATRIX_SHIFT                 3
-#define KBCON_MATRIX_MASK                  0x8u
 /* KBSTAT: R, spec 16/4 */
 #define KBSTAT_OFS                         0x404u
 #define KBSTAT                             HW_REG32(SYSTEM_BASE + KBSTAT_OFS)
@@ -818,52 +736,41 @@
 /* KBDATA: R, spec 16/3.2 */
 #define KBDATA_OFS                         0x408u
 #define KBDATA                             HW_REG32(SYSTEM_BASE + KBDATA_OFS)
-#define KBDATA_EMPTY_SHIFT                 16
-#define KBDATA_EMPTY_MASK                  0x10000u
-#define KBDATA_RELEASED_SHIFT              15
-#define KBDATA_RELEASED_MASK               0x8000u
-#define KBDATA_KEY_SHIFT                   0
-#define KBDATA_KEY_MASK                    0x1FFu
-/* KBSEND: W, spec 16/3.5 */
+#define KBDATA_BYTE_SHIFT                  0
+#define KBDATA_BYTE_MASK                   0xFFu
+#define KBDATA_EMPTY_SHIFT                 8
+#define KBDATA_EMPTY_MASK                  0x100u
+/* KBSEND: W, spec 16/3.4 */
 #define KBSEND_OFS                         0x40Cu
 #define KBSEND                             HW_REG32(SYSTEM_BASE + KBSEND_OFS)
 #define KBSEND_BYTE_SHIFT                  0
 #define KBSEND_BYTE_MASK                   0xFFu
-/* KBREPLY: R, spec 16/3.2 */
-#define KBREPLY_OFS                        0x410u
-#define KBREPLY                            HW_REG32(SYSTEM_BASE + KBREPLY_OFS)
-#define KBREPLY_BYTE_SHIFT                 0
-#define KBREPLY_BYTE_MASK                  0xFFu
 /* KBIRQ: RW1C, spec 16/4 */
-#define KBIRQ_OFS                          0x414u
+#define KBIRQ_OFS                          0x410u
 #define KBIRQ                              HW_REG32(SYSTEM_BASE + KBIRQ_OFS)
-#define KBIRQ_EVENT_SHIFT                  0
-#define KBIRQ_EVENT_MASK                   0x1u
-#define KBIRQ_REPLY_SHIFT                  1
-#define KBIRQ_REPLY_MASK                   0x2u
-#define KBIRQ_PARITY_SHIFT                 2
-#define KBIRQ_PARITY_MASK                  0x4u
-#define KBIRQ_FRAME_SHIFT                  3
-#define KBIRQ_FRAME_MASK                   0x8u
+#define KBIRQ_DATA_SHIFT                   0
+#define KBIRQ_DATA_MASK                    0x1u
+#define KBIRQ_PARITY_SHIFT                 1
+#define KBIRQ_PARITY_MASK                  0x2u
+#define KBIRQ_FRAME_SHIFT                  2
+#define KBIRQ_FRAME_MASK                   0x4u
+#define KBIRQ_OVERFLOW_SHIFT               3
+#define KBIRQ_OVERFLOW_MASK                0x8u
 #define KBIRQ_TIMEOUT_SHIFT                4
 #define KBIRQ_TIMEOUT_MASK                 0x10u
-#define KBIRQ_OVERFLOW_SHIFT               5
-#define KBIRQ_OVERFLOW_MASK                0x20u
 /* KBIRQEN: RW, spec 16/4 */
-#define KBIRQEN_OFS                        0x418u
+#define KBIRQEN_OFS                        0x414u
 #define KBIRQEN                            HW_REG32(SYSTEM_BASE + KBIRQEN_OFS)
-#define KBIRQEN_EVENT_SHIFT                0
-#define KBIRQEN_EVENT_MASK                 0x1u
-#define KBIRQEN_REPLY_SHIFT                1
-#define KBIRQEN_REPLY_MASK                 0x2u
-#define KBIRQEN_PARITY_SHIFT               2
-#define KBIRQEN_PARITY_MASK                0x4u
-#define KBIRQEN_FRAME_SHIFT                3
-#define KBIRQEN_FRAME_MASK                 0x8u
+#define KBIRQEN_DATA_SHIFT                 0
+#define KBIRQEN_DATA_MASK                  0x1u
+#define KBIRQEN_PARITY_SHIFT               1
+#define KBIRQEN_PARITY_MASK                0x2u
+#define KBIRQEN_FRAME_SHIFT                2
+#define KBIRQEN_FRAME_MASK                 0x4u
+#define KBIRQEN_OVERFLOW_SHIFT             3
+#define KBIRQEN_OVERFLOW_MASK              0x8u
 #define KBIRQEN_TIMEOUT_SHIFT              4
 #define KBIRQEN_TIMEOUT_MASK               0x10u
-#define KBIRQEN_OVERFLOW_SHIFT             5
-#define KBIRQEN_OVERFLOW_MASK              0x20u
 /* SYSID: R, spec 7/5 */
 #define SYSID_OFS                          0x800u
 #define SYSID                              HW_REG32(SYSTEM_BASE + SYSID_OFS)
@@ -984,12 +891,6 @@
 #define I2CSTAT_NACK_MASK                  0x2u
 #define I2CSTAT_ARBLOST_SHIFT              2
 #define I2CSTAT_ARBLOST_MASK               0x4u
-#define SDRESP_NUM                         4
-#define SDRESP_OFS(n)                      (0x30Cu + 4u * (n))
-#define SDRESP(n)                          HW_REG32(SYSTEM_BASE + SDRESP_OFS(n))
-#define KBMAP_NUM                          16
-#define KBMAP_OFS(n)                       (0x440u + 4u * (n))
-#define KBMAP(n)                           HW_REG32(SYSTEM_BASE + KBMAP_OFS(n))
 /* TMR(n): 4 x 32 bytes, spec 12/6 */
 #define TMR_NUM                            4
 #define TMR_SPAN                           0x20u
