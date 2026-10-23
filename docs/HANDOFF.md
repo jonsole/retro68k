@@ -74,7 +74,7 @@ Done and tested in simulation:
 | PS/2 keyboard: receive with FIFO, send | `ps2kb.v` | iotest |
 | Serial, interrupts, timers | `serial.v`, `intc.v`, `timers.v` | boot |
 
-Size (Vivado): 15,917 LUTs (76.5%), 12 block RAM tiles, 8 DSP slices. Timing met at 100 MHz, worst slack +0.09 ns, in the sprites' deadline calculation (`sprites.v`, `cs` to `dl`). Per unit: video 4,964 (sprites.v 1,809, the 8 sprite pixel units 779, bpldma.v 923), DMA engine 2,327, audio 1,225, copper 665, SD 66, keyboard 87.
+Size (Vivado): 15,730 LUTs (75.6%), 12 block RAM tiles, 8 DSP slices. Timing met at 100 MHz, worst setup slack +0.247 ns (in the audio engine, channel select to sample position), hold +0.027 ns. Per-unit figures from before the sprite rework: video 4,964 (sprites.v 1,809, the 8 sprite pixel units 779, bpldma.v 923), DMA engine 2,327, audio 1,225, copper 665, SD 66, keyboard 87.
 
 ### Recent decisions to know about
 
@@ -91,7 +91,7 @@ In rough order:
 
 1. **Try the bitstream on the board** (early November): HDMI and VGA at 576p, the boot ROM's console, the serial link, then the SD card and keyboard (`fpga/ks3/README.md` says what to expect).
 2. **Boot ROM**: SD card start-up and a small FAT32 reader to load programs (spec 15, section 4); a keyboard decoder and layout table (spec 16); ROMLOCK.
-3. **Timing margin**: +0.09 ns is thin. The sprite deadline calculator (`dcalc` in `sprites.v`, one sprite a clock) is the closest path; registering its inputs or splitting it would give room before more is added.
+3. **Timing margin**: +0.25 ns. The closest path is now in the audio engine (channel select to the sample position's enable); the sprite deadline calculator is pipelined.
 4. **Small items**:
    - wire the 68000 RESET instruction;
    - the serial link surviving a reset (spec);
