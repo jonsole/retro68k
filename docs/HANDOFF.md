@@ -1,6 +1,6 @@
 # Handoff
 
-State of the project at commit `ce1088a` (23 October 2026), for picking the work up in a new session (VS Code, or a fresh Claude session). Read this first, then `docs/design-plan.md` for the whole plan.
+State of the project on 23 October 2026, after the per-layer palettes and the first Vivado build, for picking the work up in a new session (VS Code, or a fresh Claude session). Read this first, then `docs/design-plan.md` for the whole plan.
 
 ## What retro68k is
 
@@ -20,12 +20,16 @@ An Amiga-style 68000 computer on the ZX Spectrum Next KS3 board (Xilinx XC7A35T,
 
 | Tool | Notes |
 |------|-------|
-| Icarus Verilog 12 | `iverilog`, `vvp` |
+| Icarus Verilog 12 or 13 | `iverilog`, `vvp`. CI uses 12; 13 is stricter (no use before declaration) |
 | sv2v | Converts fx68k from SystemVerilog. Release v0.0.13 from github.com/zachjs/sv2v |
 | vasm | Build from the vendored copy: `tar xzf tools/vasm/vasm.tar.gz && make -C vasm CPU=m68k SYNTAX=mot`, then put `vasm/` on `PATH` (`vasmm68k_mot`) |
 | Python 3 | Pillow for the PNG output (optional) |
-| Yosys | For the size check (`fpga/ks3/yosys_check.sh`) |
-| Vivado | Not used yet: the real KS3 build (`fpga/ks3/build.tcl`) has not been run |
+| Yosys | For the size check (`fpga/ks3/yosys_check.sh`). Its LUT count runs high: Vivado's is about 25% lower |
+| Vivado | 2026.1. `VIVADO=/c/AMDDesignTools/2026.1/Vivado/bin/vivado.bat bash fpga/ks3/build.sh`. Builds a bitstream (`fpga/ks3/build/retro68k_ks3.bit`); timing not met yet (see Next jobs) |
+
+### Windows
+
+The tools are installed on Jon's Windows machine: MSYS2 (`C:/msys64`, UCRT64 packages: gcc, make, iverilog, yosys, python, python-pillow), sv2v in `C:/tools/sv2v/sv2v-Windows`, vasm built into `C:/tools/vasmsrc/vasm`. All are on the user PATH. Run the Makefiles from an MSYS2 shell (`C:/msys64/usr/bin/bash.exe -l`, with `/ucrt64/bin` first on the PATH), not with Chocolatey's `make`. The repo is checked out with `core.autocrlf=false`: the Python tools need LF files.
 
 ## Building and testing
 
@@ -38,10 +42,10 @@ All from `sim/` unless noted. See `sim/README.md` for more options.
 | `make run ARGS=+dma` | Boot ROM with the DMA port busy | 5–20 min | yes |
 | `make ctest` | Copper: self-checking ROM, then 14 colour changes checked in the frame (`ctest/ccheck.py`) | 10–40 min | yes |
 | `make atest` | Audio: every output sample against a Python model | 10 min | yes |
-| `make vtest` | Video: three screens (`pal`, `direct`, `spr`) checked pixel by pixel against `vtest/vmodel.py`; `make vtest VTESTS=spr` runs one | 10–20 min each | **no** |
+| `make vtest` | Video: four screens (`pal`, `direct`, `spr`, `share`) checked pixel by pixel against `vtest/vmodel.py`; `make vtest VTESTS=spr` runs one. Each palette gets different colours; `share` is `spr` with VIDCON.SHAREPAL | 10–45 min each | **no** |
 | `bash fpga/ks3/yosys_check.sh` (repo root) | Synthesis for the XC7A35T and the LUT count | 3 min | yes |
 
-Run long simulations in the background, one per directory: two runs in the same `build/vtest_x` directory overwrite each other's results. Edit `regmap.def`, then run `python3 tools/regmap.py` to regenerate the headers; never edit `hw.inc`, `hw.h` or `regmap.vh` by hand.
+`make BUILD=other_dir ...` builds into another directory, so a second set of runs can go alongside the first. Run long simulations in the background, one per directory: two runs in the same `build/vtest_x` directory overwrite each other's results. Edit `regmap.def`, then run `python3 tools/regmap.py` to regenerate the headers; never edit `hw.inc`, `hw.h` or `regmap.vh` by hand.
 
 Debug switches in `sim/tb.v`, added while bringing up sprites:
 - `+sprdbg`: sprite fetcher state at each frame start, and counts of acks, words and opaque pixels at the end.
@@ -50,19 +54,19 @@ Debug switches in `sim/tb.v`, added while bringing up sprites:
 
 ## Where things stand
 
-Done and tested (all green in CI at `ce1088a`):
+Done and tested:
 
 | Part | Files | Tests |
 |------|-------|-------|
 | CPU, bus, SRAM, scheduler (`dmac.v`), boot ROM | `fpga/rtl/`, `firmware/boot/boot.s` | boot |
-| Video: 3 layers, planar/chunky, scaling, scroll, BPLSTRIDE, priority, direct colour | `video.v`, `bpldma.v`, `layer_pix.v` | vtest pal, direct |
+| Video: 3 layers, planar/chunky, scaling, scroll, BPLSTRIDE, priority, direct colour, a palette per layer and one for the sprites (SHAREPAL for one) | `video.v`, `bpldma.v`, `layer_pix.v` | vtest pal, direct, share |
 | Copper v1: MOVE/WAIT/SKIP/JUMP, MOVR, ALU, SKIPC, CALL/RET, RESUME | `copper.v`, `firmware/include/copper.inc` | ctest |
 | Audio v1: 4 channels, 8/16-bit, pan, interpolation, start/stop strobes | `audio.v` | atest |
 | Sprites v1: 8 sprites, any size, 2/4/8 bpp, ×1/2/4 magnify, depth, collisions, FIFO per sprite | `sprites.v`, `sprite_pix.v`, `video.v` | vtest spr |
 | Beam coordinates for every position | all of the above | all of the above |
 | Serial, interrupts, timers | `serial.v`, `intc.v`, `timers.v` | boot |
 
-Size: about 17,100 LUTs (82%) by Yosys.
+Size: about 17,100 LUTs (82%) by Yosys; 12,883 (62%) by Vivado, 11.5 of 50 block RAMs.
 
 ### Recent decisions to know about
 
@@ -74,29 +78,27 @@ Size: about 17,100 LUTs (82%) by Yosys.
 
 In rough order:
 
-1. **Per-layer palettes**: specced (spec 4, sections 4.6, 6.3 and 7; spec 9, section 3.1), not built.
-   - PALETTE0–2 at `0xE04000`, `0xE04400`, `0xE04800` for L0–L2, and SPRPALETTE at `0xE04C00`. One 1024 × 24 RAM, indexed by {palette, index}.
-   - `VIDCON.SHAREPAL` (bit 5) puts everything on PALETTE0.
-   - To do:
-     - add the areas and the VIDCON bit to `regmap.def`;
-     - change the palette RAM and the priority stage in `video.v` (pass the winning pixel's palette number);
-     - update `vmodel.py`, `tb.v`'s palette dump and `vtest.s` (give each layer its own colours);
-     - the boot ROM's L1 picture uses colours 16–31 at `PALETTE+16*4`, which must move to PALETTE1;
-     - update the guide's playfield and sprite chapters.
+1. **Timing at 100 MHz** (the first Vivado build, 23 October 2026). It builds a bitstream, and the pixel clocks and the 40/100 MHz crossings meet timing, but the 100 MHz domain misses by 9–10 ns (it varies from run to run) on about 2,150 paths. By module (`fpga/ks3/build/timing.txt` after a build):
+   - sprite fetcher `sprites.v`: −8.9 ns, up to 31 logic levels (`rp_s2` to `pk`);
+   - bitplane DMA `bpldma.v`: −7.1 ns, up to 29 levels (`left` to the pointer RAMs `pt`);
+   - audio mixer `audio.v`: −2.4 ns into `acc_l0`/`acc_r0`;
+   - register writes from the bus into sprites, copper, DMA, timers: −0.2 to −1.5 ns (perhaps one shared pipeline stage on the register bus);
+   - a few smaller ones (video to `intc`, serial FIFO to the bus).
+   Then try the bitstream on the board.
 2. **DMA engine**: spec 11 needs its v1 rewrite, then the RTL. The scheduler already has its channel (`blt_*` in `dmac.v`).
 3. **SD card and keyboard** (spec 16 for the keyboard).
-4. **Trims**, if room is needed: timers, the audio engine, the copper's storage registers.
+4. **Trims**, if room is needed (less pressing now that Vivado counts 62%): timers, the audio engine, the copper's storage registers.
 5. **Small items**:
    - wire the 68000 RESET instruction;
    - ROMLOCK in the boot ROM;
    - the serial link surviving a reset (spec).
 6. **Guide chapters** for audio, the DMA engine, SD and the keyboard.
-7. **Vivado build** for the KS3 on a real machine: timing at 100 MHz, then try it on the board.
-8. **Optional**: the TG68K 68020 option (`docs/tg68k-feasibility.md`).
+7. **Optional**: the TG68K 68020 option (`docs/tg68k-feasibility.md`).
 
 ### Known gaps
 
 - The video tests are not in CI: they are slow. Consider adding `make vtest VTESTS=spr` as its own CI job.
+- `fpga/ks3/README.md` still describes version 1 without sprites, copper and sound; bring it up to date with the first working bitstream.
 - Sprite open points (spec 9, section 9):
   - S1: measure the memory budget table in simulation;
   - S2: whether sprites' share of free cycles should be capped.

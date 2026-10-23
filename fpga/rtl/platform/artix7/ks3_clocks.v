@@ -4,9 +4,9 @@
 // MMCM 1: VCO 1000 MHz
 //   clk100   100 MHz   (/10)  system, SRAM controller
 //   clk40     40 MHz   (/25)  fx68k (a 20 MHz 68000)
-// MMCM 2: 50 MHz / 5 x 108 = VCO 1080 MHz, for 576p (CEA-861, 27 MHz)
-//   clk_pix   27 MHz   (/40)  pixel clock
-//   clk_pix5 135 MHz   (/8)   HDMI serialiser (10 bits per pixel, both edges)
+// MMCM 2: 50 MHz x 27 = VCO 1350 MHz, for 576p (CEA-861, 27 MHz)
+//   clk_pix   27 MHz   (/50)  pixel clock
+//   clk_pix5 135 MHz   (/10)  HDMI serialiser (10 bits per pixel, both edges)
 //   clk_pixd  27 MHz, 3 ns late: VGA DAC data (as on the Next)
 //
 // Both come from the same oscillator, so the frequencies are exact: a 576p
@@ -48,12 +48,12 @@ module ks3_clocks (
     wire fb2, fb2_buf, p0, p1, p2, l2;
     MMCME2_BASE #(
         .CLKIN1_PERIOD     (20.0),
-        .DIVCLK_DIVIDE     (5),             // 10 MHz at the phase detector
-        .CLKFBOUT_MULT_F   (108.0),         // VCO 1080 MHz
-        .CLKOUT0_DIVIDE_F  (40.0),          // 27 MHz
-        .CLKOUT1_DIVIDE    (8),             // 135 MHz
-        .CLKOUT2_DIVIDE    (40),            // 27 MHz, delayed
-        .CLKOUT2_PHASE     (29.25)          // about 3 ns of 37 ns
+        .DIVCLK_DIVIDE     (1),
+        .CLKFBOUT_MULT_F   (27.0),          // VCO 1350 MHz (600-1440; the multiplier is 2-64)
+        .CLKOUT0_DIVIDE_F  (50.0),          // 27 MHz
+        .CLKOUT1_DIVIDE    (10),            // 135 MHz
+        .CLKOUT2_DIVIDE    (50),            // 27 MHz, delayed
+        .CLKOUT2_PHASE     (28.8)           // about 3 ns of 37 ns (steps of 45/50 degrees)
     ) mmcm_pix (
         .CLKIN1(clk50_b), .CLKFBIN(fb2_buf), .CLKFBOUT(fb2),
         .CLKOUT0(p0), .CLKOUT1(p1), .CLKOUT2(p2), .CLKOUT3(), .CLKOUT4(),

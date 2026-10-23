@@ -133,8 +133,8 @@ create_clock -name clk50 -period 20.000 [get_ports clock_50_i]
 set_clock_groups -asynchronous \
     -group [get_clocks -of_objects [get_pins clocks/mmcm_sys/CLKOUT*]] \
     -group [get_clocks -of_objects [get_pins clocks/mmcm_pix/CLKOUT*]]
-set clk100 [get_clocks -of_objects [get_pins clocks/mmcm/CLKOUT0]]
-set clk40  [get_clocks -of_objects [get_pins clocks/mmcm/CLKOUT1]]
+set clk100 [get_clocks -of_objects [get_pins clocks/mmcm_sys/CLKOUT0]]
+set clk40  [get_clocks -of_objects [get_pins clocks/mmcm_sys/CLKOUT1]]
 
 # 40 MHz <-> 100 MHz: signals change only at fixed points of the 50 ns grid and
 # are captured at least 15 ns later (spec 1, section 3), not the default 5 ns.
