@@ -114,7 +114,7 @@ Each sprite has a **FIFO of 32 words**, its data registers. The DMA pushes the i
 
 - **Fetching early.** The DMA pushes a sprite's words whenever its FIFO has room. So while a line is being drawn, the words it has finished with are already being replaced by the next line's, using any memory cycle nobody else wants. Fetching becomes urgent only when the FIFO is about to run out: then the sprite takes part in the deadline-first order with the layers, and may take the CPU's cycle (spec 5, section 6).
 - **The lead** is up to 30 words per sprite (the DMA keeps two of the 32 places for words still on their way): 60 source pixels at 8 bpp, 120 at 4 bpp, 240 at 2 bpp. A sprite at the right edge fills its FIFO for its next line in the horizontal blank (5.3 µs).
-- **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper pushes the image's words into its FIFO by writing SPRxDAT. The sprite shows as its window and CTL say, taking a line's words from the FIFO on each line it shows. If the FIFO is empty when a word is needed, the sprite waits for it: it is transparent until a word is written, and the rest of the line follows from there. SPRUNDER is not set in manual mode.
+- **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper pushes the image's words into its FIFO by writing SPRxDAT. The sprite shows as its window and CTL say, taking a line's words from the FIFO on each line it shows. If the FIFO is empty when a word is needed, the sprite waits for it: it is transparent until a word is written, and the rest of the line follows from there. SPRUNDER is not set in manual mode. A sprite in manual mode should not be shrunk across (XSTEP above `0x0800`): words would be skipped before they are written.
 - **Underrun.** If the DMA cannot keep a sprite's FIFO filled (section 5), VIDSTAT.SPRUNDER (bit 7) is set, and the sprite shows nothing more until it next starts (the next vertical blank, or a write to its registers): its words would no longer line up with its lines. SPRUNDER can raise the VIDERR interrupt like OVERRUN.
 
 ## 5. Memory budget
@@ -200,12 +200,12 @@ Reusing sprite 0 for a second ship lower down, from line 300: after the first sh
 
 ## 8. FPGA resources
 
-Measured with Yosys (synth_xilinx, XC7A35T):
+Measured with Vivado (XC7A35T, with fractional scaling):
 
 | Item | LUTs |
 |------|------|
-| sprites.v: registers, sizes, fetcher, deadlines, 8 FIFOs of 32 × 16 bits (distributed RAM) | About 2,000 |
-| 8 pixel units (sprite_pix.v) | About 90 each, 730 in all |
+| sprites.v: registers, sizes, fetcher, line advance, deadlines, 8 FIFOs of 32 × 16 bits (distributed RAM) | About 1,800, and 3 DSP slices (the size calculator's two multiplies, the line advance) |
+| 8 pixel units (sprite_pix.v) | About 100 each, 780 in all |
 | Mixing with the layers (depth), collisions (video.v) | A few hundred |
 | Total | About 3,000; no block RAM |
 

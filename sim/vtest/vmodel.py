@@ -186,16 +186,19 @@ def render_sprites(regs, ram, W, H):
         hs_c, xe = hs, max(min(he, 720), hs)
         vs, ve = S["vs"] - Y0, min(S["ve"], 625) - Y0
         lb = S["bpp"] + 1
-        bpp, ppw, mag = 1 << lb, 16 >> lb, 1 << S["hmag"]
-        srcf = (he - hs + mag - 1) // mag if he > hs else 0
-        srcs = (xe - hs_c + mag - 1) // mag if xe > hs_c else 0
+        bpp, ppw = 1 << lb, 16 >> lb
+        # the scale (spec 9, section 3.2): 5.11 source pixels per screen pixel
+        lim = lambda s: 0x800 if s == 0 else max(0x80, min(0x8000, s))
+        xs, ys = lim(S["xstep"]), lim(S["ystep"])
+        srcf = -(-(he - hs) * xs // 2048) if he > hs else 0
+        srcs = -(-(xe - hs_c) * xs // 2048) if xe > hs_c else 0
         wf = (srcf * bpp + 15) // 16
         wv = min((srcs * bpp + 15) // 16, wf) if srcs else 0
         if wv == 0 or vs >= ve:
             continue
         stride = 2 * wf
         for y in range(max(vs, 0), ve):
-            sl = (y - vs) >> S["vmag"]
+            sl = (y - vs) * ys >> 11
             start = S["pt"] + sl * stride
             seq = []
             for k in range(wv):
@@ -204,7 +207,7 @@ def render_sprites(regs, ram, W, H):
                 px = [(w >> (16 - bpp * (i + 1))) & (bpp_mask(bpp)) for i in range(ppw)]
                 seq += px
             for x in range(max(hs_c, 0), min(xe, W)):
-                i = (x - hs_c) >> S["hmag"]
+                i = (x - hs_c) * xs >> 11
                 v = seq[i] if i < len(seq) else 0
                 if v:
                     idx = v if bpp == 8 else (S["pal"] << 4) | (v & 15)

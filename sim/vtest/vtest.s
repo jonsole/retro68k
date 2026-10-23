@@ -13,7 +13,7 @@
 ;              L2 blue (4 planes, narrower window: blue is 0 outside it;
 ;              plane 0's DMA off, constant data from BPL0DAT)
 ;   -DSPRITES  the 8 sprites (spec 9) over two layers: every size, depth and
-;              format, magnify, clipping at every edge, collisions
+;              format, scales bigger and smaller, clipping at every edge, collisions
 ;   -DSPRITES -DSHARE   the same with VIDCON.SHAREPAL: everything uses PALETTE0
 ;
 ; Keep the layouts in step with vgen.py.
@@ -107,9 +107,10 @@ SPRH        macro
             dc.l    SPR\1+SPR_H, (VID_X0+(\2))|((VID_X0+(\3))<<16)
             dc.l    SPR\1+SPR_V, (VID_Y0+(\4))|((VID_Y0+(\5))<<16)
             endm
-; n, bpp code (0 2, 1 4, 2 8), hmag, vmag, depth, pal
+; n, bpp code (0 2, 1 4, 2 8), XSTEP, YSTEP (5.11: $0800 normal size), depth, pal
 SPRC        macro
-            dc.l    SPR\1+SPR_CTL, ((\2)<<SPR_CTL_BPP_B)|((\3)<<SPR_CTL_HMAG_B)|((\4)<<SPR_CTL_VMAG_B)|((\5)<<SPR_CTL_DEPTH_B)|((\6)<<SPR_CTL_PAL_B)
+            dc.l    SPR\1+SPR_CTL, ((\2)<<SPR_CTL_BPP_B)|((\5)<<SPR_CTL_DEPTH_B)|((\6)<<SPR_CTL_PAL_B)
+            dc.l    SPR\1+SPR_STEP, (\3)|((\4)<<16)
             endm
 
 setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|(2<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE_B)|(1<<L_CTRL_VSCALE_B)|L_CTRL_TRANSP_M
@@ -122,22 +123,22 @@ setup:      dc.l    L0+L_CTRL,   L_CTRL_EN_M|(2<<L_CTRL_BPP_B)|(1<<L_CTRL_HSCALE
             dc.l    L1+L_BPLSTRIDE, 40
             dc.l    PRIO,        (2<<4)|(0<<2)|1 ; L1 in front, then L0 (L2 off)
             ; sprites: window, then format
-            SPRH    0,-20,12,-10,20             ; off the left edge and the top
-            SPRC    0,1,0,0,0,3
-            SPRH    1,100,148,50,90             ; 2x by 2x, behind sprite 4
-            SPRC    1,2,1,1,1,0
-            SPRH    2,690,730,100,140           ; off the right edge
-            SPRC    2,0,0,0,2,5
+            SPRH    0,-20,12,-10,20             ; off the left edge and the top, normal size
+            SPRC    0,1,$0800,$0800,0,3
+            SPRH    1,100,148,50,90             ; 1.5x across, 2x down, behind sprite 4
+            SPRC    1,2,$0555,$0400,1,0
+            SPRH    2,690,730,100,140           ; off the right edge; half across, 2/3 down
+            SPRC    2,0,$1000,$0C00,2,5
             SPRH    3,300,364,300,340           ; 4x by 4x, at the back
-            SPRC    3,1,2,2,3,7
-            SPRH    4,90,154,40,100             ; 64 px of 8 bpp
-            SPRC    4,2,0,0,0,0
-            SPRH    5,400,418,200,230           ; 18 px: the last word part used
-            SPRC    5,1,0,0,1,9
-            SPRH    6,200,500,400,410           ; 300 px wide
-            SPRC    6,0,0,0,0,2
-            SPRH    7,500,516,560,590           ; off the bottom
-            SPRC    7,1,0,0,0,4
+            SPRC    3,1,$0200,$0200,3,7
+            SPRH    4,90,154,40,100             ; 64 px of 8 bpp; lines skipped (2/3 down)
+            SPRC    4,2,$0800,$1800,0,0
+            SPRH    5,400,418,200,230           ; an odd step across (about 7x), 1/16 down
+            SPRC    5,1,$0123,$8000,1,9
+            SPRH    6,200,500,400,410           ; 300 px wide: 16x across (the limit); YSTEP 0: normal
+            SPRC    6,0,$0080,$0000,0,2
+            SPRH    7,500,504,560,590           ; off the bottom; 1/16 across
+            SPRC    7,0,$8000,$0800,0,4
             dc.l    -1
 
 pointers:   dc.l    L0+L_BPL0PT, L0_DATA

@@ -383,10 +383,10 @@ module tb;
             for (n = 0; n < 24; n = n + 1) $fwrite(f, "dat %0d %0d\n", n, dut.vid.dma.dr[n]);
             // Sprites (spec 9)
             for (n = 0; n < 8; n = n + 1)
-                $fwrite(f, "sprite %0d hs %0d he %0d vs %0d ve %0d bpp %0d hmag %0d vmag %0d depth %0d pal %0d pt %0d dma %0d\n", n,
+                $fwrite(f, "sprite %0d hs %0d he %0d vs %0d ve %0d bpp %0d xstep %0d ystep %0d depth %0d pal %0d pt %0d dma %0d\n", n,
                         dut.vid.spr.m_h[n] & 11'h7FF, dut.vid.spr.m_h[n] >> 11, dut.vid.spr.m_v[n] & 11'h7FF, dut.vid.spr.m_v[n] >> 11,
-                        dut.vid.spr.m_c[n] & 3, (dut.vid.spr.m_c[n] >> 2) & 3, (dut.vid.spr.m_c[n] >> 4) & 3,
-                        (dut.vid.spr.m_c[n] >> 6) & 3, dut.vid.spr.m_c[n] >> 8,
+                        dut.vid.spr.m_c[n] & 3, dut.vid.spr.m_s[n] & 16'hFFFF, dut.vid.spr.m_s[n] >> 16,
+                        (dut.vid.spr.m_c[n] >> 2) & 3, dut.vid.spr.m_c[n] >> 4,
                         frame_spt[n], dut.vid.spr.active[n]);
             $fwrite(f, "sprcoll %0d\n", dut.vid.spr.coll);
             $fclose(f);

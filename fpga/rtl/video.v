@@ -415,7 +415,8 @@ module video (
     // ---- sprites (spec 9): the fetcher and FIFOs (100 MHz), and a unit per sprite
     wire [79:0] sp_hs, sp_xe;
     wire [87:0] sp_vs, sp_ve;
-    wire [15:0] sp_lb, sp_hmag, sp_depth;
+    wire [15:0] sp_lb, sp_depth;
+    wire [127:0] sp_xstep;
     wire [7:0]  sp_dma;
     wire [31:0] sp_pal;
     wire [39:0] sp_ra;
@@ -431,7 +432,7 @@ module video (
         .mem_req(spr_req), .mem_addr(spr_addr), .mem_deadline(spr_deadline), .mem_urgent(spr_urgent),
         .mem_ack(spr_ack), .mem_rvalid(spr_rvalid), .mem_rdata(disp_rdata),
         .p_hs(sp_hs), .p_xe(sp_xe), .p_vs(sp_vs), .p_ve(sp_ve), .p_lb(sp_lb),
-        .p_hmag(sp_hmag), .p_depth(sp_depth), .p_pal(sp_pal), .p_dma(sp_dma),
+        .p_xstep(sp_xstep), .p_depth(sp_depth), .p_pal(sp_pal), .p_dma(sp_dma),
         .fifo_ra(sp_ra), .fifo_rd(sp_rd), .wp_g(sp_wpg), .rp_g(sp_rpg), .flush_t(sp_fl), .flush_ack_t(sp_fla),
         .coll_line(coll_line), .coll_t(coll_t)
     );
@@ -441,7 +442,8 @@ module video (
     wire [10:0] ny = (bv == VTOT - 1'b1) ? 11'd0 : bv + 1'b1;
     reg  [7:0]  c_sact, c_sdma;
     reg  [9:0]  c_shs [0:7], c_sxe [0:7];
-    reg  [1:0]  c_slb [0:7], c_smag [0:7], c_sdep [0:7];
+    reg  [1:0]  c_slb [0:7], c_sdep [0:7];
+    reg  [15:0] c_sxs [0:7];
     reg  [3:0]  c_spal [0:7];
     always @(posedge clk_pix) if (hc == HVIS - 1'b1 || !en_p) begin : sset
         integer n;
@@ -450,7 +452,7 @@ module video (
             c_shs[n]   <= sp_hs[10*n +: 10];
             c_sxe[n]   <= sp_xe[10*n +: 10];
             c_slb[n]   <= sp_lb[2*n +: 2];
-            c_smag[n]  <= sp_hmag[2*n +: 2];
+            c_sxs[n]   <= sp_xstep[16*n +: 16];
             c_sdep[n]  <= sp_depth[2*n +: 2];
             c_spal[n]  <= sp_pal[4*n +: 4];
             c_sdma[n]  <= sp_dma[n];
@@ -467,7 +469,7 @@ module video (
         sprite_pix u (
             .clk_pix(clk_pix), .en(en_p), .t(st_now),
             .act(c_sact[sg]), .hs(c_shs[sg]), .xe(c_sxe[sg]), .lb(c_slb[sg]),
-            .hmag(c_smag[sg]), .pal(c_spal[sg]), .dma(c_sdma[sg]),
+            .xstep(c_sxs[sg]), .pal(c_spal[sg]), .dma(c_sdma[sg]),
             .head(sp_rd[16*sg +: 16]), .rp(rpb), .rp_g(sp_rpg[6*sg +: 6]), .wp_g(sp_wpg[6*sg +: 6]),
             .flush_t(sp_fl[sg]), .flush_ack_t(sp_fla[sg]),
             .opaque(s_op[sg]), .idx(s_idx[sg]), .underrun_t(p_un[sg])

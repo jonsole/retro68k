@@ -4,7 +4,7 @@
 
 **Sprites** are small images that the hardware draws over, or between, the layers, at any position on the screen, without your program touching the layers' memory. Moving a sprite is a matter of writing two registers: nothing has to be drawn, saved or restored. They are the natural choice for anything that moves on its own: a mouse pointer, a player's ship, bullets, a cursor.
 
-retro68k has eight sprites, SPR0 to SPR7. Each one is a little playfield of its own: an image in Chip RAM, which the hardware fetches by DMA while the beam sweeps the screen, and a **window** that says where on the screen the image goes. A sprite can be any size; it can have 3, 15 or 255 colours; it can be magnified two or four times; and each sprite can be put in front of all the layers, between any two of them, or behind them all. The hardware also reports when sprites touch each other or the layers.
+retro68k has eight sprites, SPR0 to SPR7. Each one is a little playfield of its own: an image in Chip RAM, which the hardware fetches by DMA while the beam sweeps the screen, and a **window** that says where on the screen the image goes. A sprite can be any size; it can have 3, 15 or 255 colours; it can be scaled, bigger or smaller, by any amount from 16 times bigger to 16 times smaller; and each sprite can be put in front of all the layers, between any two of them, or behind them all. The hardware also reports when sprites touch each other or the layers.
 
 The chapter covers:
 
@@ -13,7 +13,7 @@ The chapter covers:
 - the window, and how it sets the image's size;
 - positioning, and clipping at the edges of the screen;
 - moving a sprite, and when writes to its registers take effect;
-- magnifying;
+- scaling;
 - depth: where each sprite goes among the layers;
 - reusing a sprite further down the screen with the copper;
 - collision detection;
@@ -35,7 +35,7 @@ If you have programmed the Amiga's sprites, the main ideas carry over: eight spr
 | Colours | 3 + transparent; 15 with two attached sprites | 3, 15 or 255 + transparent, every sprite |
 | Pixel format | Two bitplanes per sprite | Chunky: 2, 4 or 8 bits per pixel |
 | Reuse down the screen | More control words after the image | The copper writes the registers again |
-| Magnify | None | ×1, ×2, ×4 across and down |
+| Scaling | None | Fractional, 16× bigger to 1/16×, across and down separately |
 | Priority | Fixed in pairs against the playfields | Per sprite: any depth among the layers |
 | Collisions | CLXDAT, CLXCON | SPRCOLL: each sprite against the others and each layer |
 | Data registers | SPRxDATA/B, one line | A 32-word FIFO per sprite, SPRxDAT |
@@ -50,7 +50,7 @@ If you have programmed the Amiga's sprites, the main ideas carry over: eight spr
 
 ### About this chapter
 
-"Forming a Sprite" goes through the registers in the order you set them and ends with a complete program: a ball bouncing round the screen. The sections after it explain each part in more depth: the image, the window and size, positioning and clipping, moving, magnifying, and depth. Then come the techniques: reusing a sprite down the screen, and collisions. "Sprite DMA" explains how the hardware fetches sprite images, how much it can fetch, and what happens when it cannot keep up; "Feeding a Sprite by Hand" shows how to do without the DMA. The chapter ends with a summary of the registers.
+"Forming a Sprite" goes through the registers in the order you set them and ends with a complete program: a ball bouncing round the screen. The sections after it explain each part in more depth: the image, the window and size, positioning and clipping, moving, scaling, and depth. Then come the techniques: reusing a sprite down the screen, and collisions. "Sprite DMA" explains how the hardware fetches sprite images, how much it can fetch, and what happens when it cannot keep up; "Feeding a Sprite by Hand" shows how to do without the DMA. The chapter ends with a summary of the registers.
 
 ---
 
@@ -89,8 +89,6 @@ The window also sets the image's size: there is no separate width or height regi
 | Bits | Field | Meaning |
 |------|-------|---------|
 | 13–12 | BPP | Bits per pixel: 0 = 2, 1 = 4, 2 = 8 |
-| 17–16 | HMAG | Magnify across: 0 = ×1, 1 = ×2, 2 = ×4 |
-| 19–18 | VMAG | Magnify down: 0 = ×1, 1 = ×2, 2 = ×4 |
 | 21–20 | DEPTH | 0 = in front of all layers … 3 = behind all layers |
 | 27–24 | PAL | 2 and 4 bpp: the 16-colour block of the sprite palette |
 
@@ -251,11 +249,11 @@ If the width does not fill the last word, the pixels left over at the end of eac
 
 ## The Window and the Image's Size
 
-The window says where the sprite is on the screen and, with the magnify settings, how big its image is:
+The window says where the sprite is on the screen and, with the scale (SPRxSTEP, see "Scaling"), how big its image is:
 
-> source width = (HSTOP − HSTART) ÷ HMAG, source height = (VSTOP − VSTART) ÷ VMAG
+> source width = (HSTOP − HSTART) × XSTEP ÷ 2048, source height = (VSTOP − VSTART) × YSTEP ÷ 2048
 
-each rounded up, where HMAG and VMAG are the magnifications (1, 2 or 4). A sprite 32 pixels wide shown at ×2 has a window 64 pixels wide.
+each rounded up. At normal size (XSTEP and YSTEP `$0800`, or never written) the image is the window's size. A sprite 32 pixels wide shown twice as big has a window 64 pixels wide.
 
 There is no limit on the size except the memory's speed (see "Sprite DMA"): a sprite can be 8 pixels or the whole screen wide, and as tall as the screen. Making a sprite bigger is just a matter of widening its window and storing a bigger image.
 
@@ -346,17 +344,36 @@ Call `move1` when the copper is not reading those words: for example, once the p
 
 ---
 
-## Magnifying
+## Scaling
 
-**HMAG** shows each source pixel 1, 2 or 4 times across, and **VMAG** shows each source line on 1, 2 or 4 screen lines. Remember to make the window bigger to match: a 32 × 24 image at ×2 by ×2 needs a 64 × 48 window. Magnify costs no more memory across (the same words are spread over more pixels), but a magnified line is fetched again for each screen line it covers, so VMAG does not save memory cycles.
+Each sprite can be shown bigger or smaller than its image, across and down separately, by any amount from 16 times bigger to 16 times smaller. **SPRxSTEP** holds two steps: **XSTEP** in its low half and **YSTEP** in its high half. A step is how far through the image the hardware moves for each screen pixel (or line), in 1/2048ths of a source pixel: 5.11 fixed point.
+
+| Step | Size | Step | Size |
+|------|------|------|------|
+| `$0080` | 16× bigger (the most) | `$0800` | Normal |
+| `$0200` | 4× bigger | `$0C00` | 2/3 |
+| `$0400` | 2× bigger | `$1000` | Half |
+| `$0555` | 1.5× bigger | `$8000` | 1/16 (the least) |
+
+For any other size, the step is 2048 ÷ the scale: 1.25× bigger is 2048 ÷ 1.25 = 1638 = `$0666`. A step of 0 counts as `$0800`, so a sprite whose SPRxSTEP was never written is normal size.
+
+The hardware works out which source pixel each screen pixel shows: screen pixel i of the window (counting from 0 at HSTART) shows source pixel i × XSTEP ÷ 2048, rounded down, and lines likewise. So the first pixel and line of the window always show the image's first. Make the window the size you want on the screen; the image is the window's size × the step ÷ 2048, rounded up.
 
 ```asm
-        ; the 32 x 24 ball at x2 by x2: a 64 x 48 window
+        ; the 32 x 24 ball at 2x: a 64 x 48 window, both steps $0400
         move.l  #((VID_X0+200+64)<<16)|(VID_X0+200),SPR0+SPR_H(a4)
         move.l  #((VID_Y0+100+48)<<16)|(VID_Y0+100),SPR0+SPR_V(a4)
-        move.l  #(1<<SPR_CTL_BPP_B)|(1<<SPR_CTL_HMAG_B)|(1<<SPR_CTL_VMAG_B)|(2<<SPR_CTL_PAL_B),SPR0+SPR_CTL(a4)
+        move.l  #($0400<<16)|$0400,SPR0+SPR_STEP(a4)
         move.l  #BALL,SPR0+SPR_PT(a4)
 ```
+
+Writing SPRxSTEP starts the sprite again, as the other sprite registers do, so write SPRxPT last.
+
+**Zooming** an object in or out is a matter of changing the window and the steps together, once a frame: for a scale s, the window is 32 × s by 24 × s and the steps 2048 ÷ s. Because the steps are fractions, the size changes smoothly, a pixel at a time.
+
+**What it costs.** Bigger across is free: the same words are spread over more pixels. Smaller across costs memory cycles in proportion, because every pixel of the image's lines is still fetched, including those skipped: at half size across a sprite needs twice the words for the same screen width (see "Sprite DMA"). Down, it is the other way round: a line shown on several screen lines is fetched again for each, but lines skipped when the sprite is smaller are not fetched at all. Keep wide sprites that are shrunk across narrow on the screen, or use fewer bits per pixel.
+
+A sprite fed by hand ("Feeding a Sprite by Hand") should not be shrunk across: the hardware would skip words faster than the program can supply them.
 
 The hardware does not mirror sprites. For an object that faces either way, store both images and point SPRxPT at the one you want.
 
@@ -481,7 +498,7 @@ The FIFO is emptied, and the fetch starts again from SPRxPT, at the start of eac
 Sprites and layers share one budget. The display's own memory cycles give about **12 words for every 16 screen pixels**, guaranteed; cycles the CPU, audio and copper leave free give more.
 
 - A **layer** needs, per 16 source pixels, 1 word for each plane (planar) or b words at b bits per pixel (chunky); scaled ×2 across, half that per 16 screen pixels.
-- A **sprite** needs, per 16 source pixels, 2, 4 or 8 words at 2, 4 or 8 bits per pixel, while the beam is over it; magnified ×2 across, half that per 16 screen pixels.
+- A **sprite** needs, per 16 source pixels, 2, 4 or 8 words at 2, 4 or 8 bits per pixel, while the beam is over it; per 16 screen pixels, that × XSTEP ÷ 2048: half at twice the size across, twice at half the size.
 
 Sprites side by side do not add up: only sprites over the **same** pixels at the same time do. And each FIFO's lead of 32 words lets a sprite fetch ahead into quieter parts of the line, so short overlaps (up to about 64 pixels at 8 bpp, or 256 at 2 bpp) are smoothed out.
 
@@ -501,7 +518,7 @@ These are worst cases: wide sprites stacked exactly on top of each other for lon
 
 If the DMA cannot keep a sprite's FIFO filled, the sprite **underruns**: **VIDSTAT.SPRUNDER** (bit 7) is set, and the sprite shows nothing more until it next starts (the next vertical blank, or a write to its registers), because its words would no longer line up with its lines. SPRUNDER is sticky (clear it by writing a 1), and with its enable set in VIDINTEN it raises the VIDERR interrupt, as the layers' OVERRUN bits do.
 
-An underrun means the screen asks too much of the memory at that point. Use fewer bits per pixel, magnify across instead of using a wider image, spread the sprites out, or move one of them in front of fewer layers' fetches.
+An underrun means the screen asks too much of the memory at that point. Use fewer bits per pixel, scale a smaller image up across instead of using a wider image, spread the sprites out, or move one of them in front of fewer layers' fetches.
 
 ### Turning sprite DMA on and off
 
@@ -579,8 +596,9 @@ Offsets in the custom block at `$E00000`.
 | SPRxPT | SPRn + `$00` | RW | The next word of the image (22–1). Write it each frame, last |
 | SPRxH | SPRn + `$04` | RW | HSTART (10–0), HSTOP (26–16): unsigned beam pixels (0–863; the picture is 144–863) |
 | SPRxV | SPRn + `$08` | RW | VSTART (10–0), VSTOP (26–16): unsigned beam lines (0–624; the picture is 49–624). Start on beam line 2 or later |
-| SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), HMAG (17–16), VMAG (19–18), DEPTH (21–20), PAL (27–24) |
+| SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), DEPTH (21–20), PAL (27–24) |
 | SPRxDAT | SPRn + `$10` | W, R | Write: push a word (15–0) into the FIFO (DMA off). Read: words in the FIFO (5–0) |
+| SPRxSTEP | SPRn + `$14` | RW | XSTEP (15–0), YSTEP (31–16): source pixels per screen pixel, 5.11 (`$0800` normal, `$0080`–`$8000`; 0 counts as `$0800`) |
 
 SPRn = `$520` + n × `$20`: SPR0 `$520`, SPR1 `$540` … SPR7 `$600`.
 
@@ -604,5 +622,6 @@ SPREN is clear (DMACON is cleared by every reset), SPRDMA has all eight sprites 
 | `SPR0` … `SPR7` | `$520` … `$600` |
 | `SPR_PT`, `SPR_H`, `SPR_V`, `SPR_CTL`, `SPR_DAT` | `$00`, `$04`, `$08`, `$0C`, `$10` |
 | `SPR0_PT` … `SPR7_DAT` | Each register's full offset |
-| `SPR_CTL_BPP_B`, `SPR_CTL_HMAG_B`, `SPR_CTL_VMAG_B`, `SPR_CTL_DEPTH_B`, `SPR_CTL_PAL_B` | CTL fields (`_B` bit numbers, `_M` masks) |
+| `SPR_CTL_BPP_B`, `SPR_CTL_DEPTH_B`, `SPR_CTL_PAL_B` | CTL fields (`_B` bit numbers, `_M` masks) |
+| `SPR_STEP`, `SPR_STEP_XSTEP_B`, `SPR_STEP_YSTEP_B` | The scale register and its fields |
 | `SPRDMA_SETCLR_M`, `DMACON_SPREN_M`, `VIDSTAT_SPRUNDER_M` | The enables and status |
