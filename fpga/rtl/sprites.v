@@ -225,7 +225,9 @@ module sprites (
             for (k = 4; k >= 0; k = k - 1) g2b[k] = g2b[k + 1] ^ gv[k];
         end
     endfunction
+    reg  [5:0]  rpb [0:7];                     // the read pointers, binary (registered: a clock old, for timing)
     wire [5:0]  cnt [0:7];                     // words in the FIFO
+    wire [6:0]  fill [0:7];                    // ... and on their way
     wire [7:0]  dma_wr, man_wr;                // a word into the FIFO: from memory; from SPRxDAT
 
     // ================================================================ fetch state
@@ -267,6 +269,8 @@ module sprites (
     // tree of pairs. want is a clock old and the pick a clock ahead, so
     // words for the last two picks may be on their way unseen: a FIFO
     // counts as full two words early. issue checks the state of the moment.
+    // (The read pointer is a clock old too, which only makes a FIFO look
+    // fuller: safe.)
     reg  [7:0]  want;
     reg  [2:0]  pick;
     reg         pick_v;
@@ -274,7 +278,7 @@ module sprites (
     always @(posedge clk) begin : wants
         integer s;
         for (s = 0; s < 8; s = s + 1)
-            want[s] <= !rst && active[s] && !flushing[s] && alive[s] && !lad[s] && ({1'b0, cnt[s]} + infl[s] < 7'd30);
+            want[s] <= !rst && active[s] && !flushing[s] && alive[s] && !lad[s] && (fill[s] < 7'd30);
     end
     // one pair: b wins only if it wants a word and a has none or a later deadline
     reg         t1v [0:3], t2v [0:1];
@@ -345,7 +349,9 @@ module sprites (
                            && !active[g] && !flushing[g] && cnt[g] < 6'd32;
         assign fifo_rd[16*g +: 16] = mem[fifo_ra[5*g +: 5]];
         assign wp_g[6*g +: 6] = wp[g] ^ (wp[g] >> 1);
-        assign cnt[g] = wp[g] - g2b(rp_s2[g]);
+        always @(posedge clk) rpb[g] <= g2b(rp_s2[g]);
+        assign cnt[g]  = wp[g] - rpb[g];
+        assign fill[g] = {1'b0, cnt[g]} + infl[g];
     end endgenerate
 
     // ================================================================ deadlines
@@ -354,28 +360,43 @@ module sprites (
     // on the sprite's line timeline (t = 0-863) is registered once. Lines
     // are not looked at: a sprite not shown on this line or the next only
     // fills its FIFO a little sooner than it needs to.
+    // Three stages, for timing: 1 the pixels until the sprite's span and
+    // the words in hand; 2 the pixels those words last, and the sum; 3 the
+    // units. With the read pointers registered too, a deadline is written
+    // from inputs about 4 clocks old and then holds for 8 clocks until the
+    // sprite's next visit: 2 units (16 clocks) are taken off to be safe.
     reg  [9:0]  bt, btr;                       // t; 864 - t
     always @(posedge clk) begin
         bt  <= beam_h[9:0];
         btr <= 11'd864 - beam_h;
     end
     wire [2:0]  rr = cs;
-    reg  [6:0]  dl_new;
-    always @(*) begin : dcalc
-        reg [13:0] dpx, tot, wpx;
+    reg  [2:0]  d1_rr, d2_rr, d3_rr;
+    reg  [13:0] d1_dpx, d2_tot;
+    reg  [6:0]  d1_w;
+    reg  signed [3:0] d1_wsh;
+    reg  [6:0]  d3_dl;
+    always @(posedge clk) begin : dcalc
+        reg [13:0] wpx;
         reg [11:0] c7;
+        // 1: the pixels until the sprite's span (0 if the beam is in it)
         if (bt < xe_t[rr])
-            dpx = (bt < hs_t[rr]) ? {4'b0, hs_t[rr] - bt} : 14'd0;
+            d1_dpx <= (bt < hs_t[rr]) ? {4'b0, hs_t[rr] - bt} : 14'd0;
         else
-            dpx = {4'b0, btr} + hs_t[rr];
-        // the pixels the words in hand last: words x screen pixels per word
-        // (a power of two, rounded down: a shrunk sprite's words may last less than a pixel)
-        wpx = (wsh[rr] >= 0) ? ({8'd0, cnt[rr]} + infl[rr]) << wsh[rr]
-                             : ({8'd0, cnt[rr]} + infl[rr]) >> (-wsh[rr]);
-        tot = dpx + wpx;
-        // x 3.5 / 8, less 1 for the 8 clocks until this sprite's next visit
-        c7  = {tot[8:0], 3'b000} - {1'b0, tot};
-        dl_new = (tot >= 14'd292) ? 7'h7F : (c7[11:4] == 8'd0) ? 7'd0 : c7[10:4] - 1'b1;
+            d1_dpx <= {4'b0, btr} + hs_t[rr];
+        d1_w   <= fill[rr];
+        d1_wsh <= wsh[rr];
+        d1_rr  <= rr;
+        // 2: the pixels the words last: words x screen pixels per word (a
+        // power of two, rounded down: a shrunk sprite's words may last less
+        // than a pixel), and the total
+        wpx = (d1_wsh >= 0) ? ({7'd0, d1_w} << d1_wsh) : ({7'd0, d1_w} >> (-d1_wsh));
+        d2_tot <= d1_dpx + wpx;
+        d2_rr  <= d1_rr;
+        // 3: x 3.5 / 8, less 2 units
+        c7 = {d2_tot[8:0], 3'b000} - {1'b0, d2_tot};
+        d3_dl <= (d2_tot >= 14'd292) ? 7'h7F : (c7[11:4] < 8'd2) ? 7'd0 : c7[10:4] - 2'd2;
+        d3_rr <= d2_rr;
     end
 
     // ================================================================ the RAMs
@@ -426,7 +447,7 @@ module sprites (
             rp_s1[i] <= rp_g[6*i +: 6];
             rp_s2[i] <= rp_s1[i];
         end
-        dl[rr] <= dl_new;
+        dl[d3_rr] <= d3_dl;
         pk     <= pick;
         pk_v   <= pick_v;
 

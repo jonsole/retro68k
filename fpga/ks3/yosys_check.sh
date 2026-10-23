@@ -32,6 +32,11 @@ ffs = n("FDRE") + n("FDSE") + n("FDCE") + n("FDPE") + n("FDRE_1")
 bram = n("RAMB36E1") + n("RAMB18E1") / 2
 print(f"KS3 (XC7A35T): about {luts} LUTs ({100*luts/20800:.0f}%), {ffs} flip-flops ({100*ffs/41600:.0f}%), "
       f"{bram:g} of 50 block RAMs, {n('DSP48E1')} of 90 DSP slices")
-if luts > 20800 or bram > 50:
+# Yosys counts about a third more LUTs than Vivado does for this design
+# (21,382 against 15,917 in October 2026), so its count is only a rough
+# guide: Vivado's is the real one (fpga/ks3/build.sh). Fail past 130% of
+# the device by Yosys's count, about 97% by Vivado's.
+print("  (Yosys counts high: about %d by Vivado's count, %.0f%%)" % (luts / 1.34, 100 * luts / 1.34 / 20800))
+if luts > 1.30 * 20800 or bram > 50:
     raise SystemExit("does not fit")
 PY

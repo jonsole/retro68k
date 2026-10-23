@@ -531,8 +531,8 @@ module tb;
         $display("  q_h %b q_t %b q_s %b %b %b %b rvalid %b ack %b req %b issue %b pk %b",
                  dut.vid.spr.q_h, dut.vid.spr.q_t, dut.vid.spr.q_s[0], dut.vid.spr.q_s[1], dut.vid.spr.q_s[2], dut.vid.spr.q_s[3],
                  dut.vid.spr.mem_rvalid, dut.vid.spr.mem_ack, dut.vid.spr.mem_req, dut.vid.spr.issue, dut.vid.spr.pk);
-        $display("  req_s %b deadline %b urgent %b dl_new %b rr %b bt %b btr %b beam_h %b dl %b %b %b %b %b %b %b %b",
-                 dut.vid.spr.req_s, dut.spr_deadline, dut.spr_urgent, dut.vid.spr.dl_new, dut.vid.spr.rr, dut.vid.spr.bt, dut.vid.spr.btr,
+        $display("  req_s %b deadline %b urgent %b d3_dl %b d3_rr %b bt %b btr %b beam_h %b dl %b %b %b %b %b %b %b %b",
+                 dut.vid.spr.req_s, dut.spr_deadline, dut.spr_urgent, dut.vid.spr.d3_dl, dut.vid.spr.d3_rr, dut.vid.spr.bt, dut.vid.spr.btr,
                  dut.vid.spr.beam_h, dut.vid.spr.dl[0], dut.vid.spr.dl[1], dut.vid.spr.dl[2], dut.vid.spr.dl[3],
                  dut.vid.spr.dl[4], dut.vid.spr.dl[5], dut.vid.spr.dl[6], dut.vid.spr.dl[7]);
         $display("  sched: win %b next_cycle %b start %b cpu %b bpl %b/%b dl %b spr %b aud %b cop %b pri %b blt %b port %b",

@@ -14,8 +14,8 @@ An Amiga-style 68000 computer on the ZX Spectrum Next KS3 board (Xilinx XC7A35T,
 - Check CI (GitHub Actions, `.github/workflows/checks.yml`) after each push. A full run takes about 35–50 minutes.
 - Every hardware change: spec first (`docs/spec/`), then RTL, then the test, then the guide. Keep the specs matching the RTL: when the build differs, change the spec in the same commit.
 - Run the tests before pushing RTL; CI does not run the video tests (see below).
-- Keep the design under about 85% of the LUTs by Vivado's count (17,680), so it routes at 100 MHz. Yosys (the CI check) counts more than Vivado (about 35% more when last compared); it only fails CI past 100%.
-- Run the Vivado build after RTL changes: timing at 100 MHz is met with very little margin (+0.09 ns).
+- Keep the design under about 85% of the LUTs by Vivado's count (17,680), so it routes at 100 MHz. Yosys (the CI check) counts about a third more than Vivado; it fails CI past 130% by its own count (about 97% by Vivado's).
+- Run the Vivado build after RTL changes: timing at 100 MHz is met with little margin (+0.2 ns).
 
 ## Tools
 
