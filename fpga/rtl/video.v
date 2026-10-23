@@ -397,7 +397,7 @@ module video (
                 // a group is 16 source pixels in either format
                 fine = l_sx[n];
                 n_pos0[n]   <= fine;
-                n_groups[n] <= ({10'd0, fine} + {3'd0, srcpix} + 14'd15) >> 4;
+                /* verilator lint_off WIDTHTRUNC */ n_groups[n] <= ({10'd0, fine} + {3'd0, srcpix} + 14'd15) >> 4; /* verilator lint_on WIDTHTRUNC */
             end
         end else if (hc == HVIS + 2'd2) begin
             // 3: hand over

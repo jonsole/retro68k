@@ -245,7 +245,7 @@ module copper (
                             if (sp == 4'd0) begin st_err <= 1'b1; stop; end
                             else begin
                                 sp <= sp - 1'b1;
-                                flush = 1'b1; f_to = stk[sp - 1'b1];
+                                flush = 1'b1; f_to = stk[sp[2:0] - 1'b1];
                             end
                         end else begin                                    // CALL
                             if (sp == 4'd8) begin st_err <= 1'b1; stop; end

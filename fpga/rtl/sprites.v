@@ -147,7 +147,7 @@ module sprites (
             top = 7;
             for (b = 7; b <= 15; b = b + 1) if (s[b]) top = b;
             m   = (((s & (s - 1'b1)) == 16'd0) ? 11 : 10) - top;    // a power of two exactly, or between
-            mag = m;
+            mag = m[3:0];
         end
     endfunction
     always @(posedge clk) begin : sizes
@@ -191,8 +191,8 @@ module sprites (
         bpp3 <= bpp2;
         c3   <= c2;
         // stage 3: source pixels = ceil(width x XSTEP / 2048), then words
-        srcf  = (pf3 + 29'd2047) >> 11;
-        srcs  = (ps3 + 29'd2047) >> 11;
+        /* verilator lint_off WIDTHTRUNC */ srcf  = (pf3 + 29'd2047) >> 11; /* verilator lint_on WIDTHTRUNC */
+        /* verilator lint_off WIDTHTRUNC */ srcs  = (ps3 + 29'd2047) >> 11; /* verilator lint_on WIDTHTRUNC */
         bf    = ({3'd0, srcf} << (bpp3 + 1'b1)) + 21'd15;
         bs    = ({3'd0, srcs} << (bpp3 + 1'b1)) + 21'd15;
         if (upd_d[1]) begin
@@ -275,7 +275,8 @@ module sprites (
     wire [2:0]  a       = ba[2:0];
     wire        a_show  = run[a] && beam_v >= r_vs[a] && beam_v < ve_c[a] && wv[a] != 12'd0;
     wire [11:0] a_sum   = {1'b0, m_yf[a]} + {1'b0, r_ys[a][10:0]};
-    wire [4:0]  a_k     = pend[a] ? ({1'b0, r_ys[a][15:11]} + a_sum[11]) : 5'd0;   // source lines to move on: 0-16
+    wire [5:0]  a_kw    = {1'b0, r_ys[a][15:11]} + a_sum[11];
+    wire [4:0]  a_k     = pend[a] ? a_kw[4:0] : 5'd0;   // source lines to move on: 0-16
     wire [10:0] a_yf    = pend[a] ? a_sum[10:0] : 11'd0;
     wire        c_w     = cv && bu_go && c_e == epoch[c_s];
     wire [22:0] c_next  = c_lst + {5'd0, c_p, 1'b0};
@@ -305,9 +306,9 @@ module sprites (
         integer k;
         for (k = 0; k < 4; k = k + 1)
             if (want[2*k+1] && (!want[2*k] || dl[2*k+1] < dl[2*k])) begin
-                t1v[k] = 1'b1; t1i[k] = 2*k+1; t1d[k] = dl[2*k+1];
+                t1v[k] = 1'b1; t1i[k] = {k[1:0], 1'b1}; t1d[k] = dl[2*k+1];
             end else begin
-                t1v[k] = want[2*k]; t1i[k] = 2*k; t1d[k] = dl[2*k];
+                t1v[k] = want[2*k]; t1i[k] = {k[1:0], 1'b0}; t1d[k] = dl[2*k];
             end
         for (k = 0; k < 2; k = k + 1)
             if (t1v[2*k+1] && (!t1v[2*k] || t1d[2*k+1] < t1d[2*k])) begin
@@ -365,7 +366,7 @@ module sprites (
     reg  [9:0]  bt, btr;                       // t; 864 - t
     always @(posedge clk) begin
         bt  <= beam_h[9:0];
-        btr <= 11'd864 - beam_h;
+        /* verilator lint_off WIDTHTRUNC */ btr <= 11'd864 - beam_h; /* verilator lint_on WIDTHTRUNC */
     end
     wire [2:0]  rr = cs;
     reg  [2:0]  d1_rr, d2_rr, d3_rr;
@@ -391,7 +392,7 @@ module sprites (
         d2_tot <= d1_dpx + wpx;
         d2_rr  <= d1_rr;
         // 3: x 3.5 / 8, less 2 units
-        c7 = {d2_tot[8:0], 3'b000} - {1'b0, d2_tot};
+        /* verilator lint_off WIDTHTRUNC */ c7 = {d2_tot[8:0], 3'b000} - {1'b0, d2_tot}; /* verilator lint_on WIDTHTRUNC */
         d3_dl <= (d2_tot >= 14'd292) ? 7'h7F : (c7[11:4] < 8'd2) ? 7'd0 : c7[10:4] - 2'd2;
         d3_rr <= d2_rr;
     end

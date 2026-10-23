@@ -142,7 +142,7 @@ module bpldma (
         integer b;
         begin
             top = 3'd0;
-            for (b = 0; b < 8; b = b + 1) if (v[b]) top = b;
+            for (b = 0; b < 8; b = b + 1) if (v[b]) top = b[2:0];
         end
     endfunction
 

@@ -328,7 +328,7 @@ module dmx #(
     always @(*) begin : drpick
         integer i;
         dr_j = 3'd0;
-        for (i = 7; i >= 0; i = i - 1) if (g_dneed[i]) dr_j = i;
+        for (i = 7; i >= 0; i = i - 1) if (g_dneed[i]) dr_j = i[2:0];
     end
     wire [22:0] dr_a = w_desc ? w_dw - dr_j : w_dw + dr_j;
 
@@ -618,9 +618,9 @@ module dmx #(
                     w_sw <= rs_sba[26:4];
                 end else begin
                     w_od <= 4'd0 - de[3:0];
-                    w_dw <= (de - 1'b1) >> 4;
+                    /* verilator lint_off WIDTHTRUNC */ w_dw <= (de - 1'b1) >> 4; /* verilator lint_on WIDTHTRUNC */
                     w_t  <= 4'd0 - se[3:0];
-                    w_sw <= (se - 1'b1) >> 4;
+                    /* verilator lint_off WIDTHTRUNC */ w_sw <= (se - 1'b1) >> 4; /* verilator lint_on WIDTHTRUNC */
                 end
                 es <= S_ROW3;
             end
@@ -852,7 +852,7 @@ module dmx #(
                     mode[tmr_ch[2*i +: 2]]    <= M_LOAD;
                 end
             if (rb_wr && sel_dmx && rri == 4'd8 && !sel_int && !sel_inten && !busy[rch])
-                chdesc[rch] <= merge({8'd0, chdesc[rch]}, rb_wdata, rb_be);
+                /* verilator lint_off WIDTHTRUNC */ chdesc[rch] <= merge({8'd0, chdesc[rch]}, rb_wdata, rb_be); /* verilator lint_on WIDTHTRUNC */
         end
     end
 endmodule
