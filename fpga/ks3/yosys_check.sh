@@ -5,7 +5,8 @@
 #   fpga/ks3/yosys_check.sh        needs yosys, sv2v, python3 and vasmm68k_mot (or $VASM)
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root="$(cd "$here/../.." && pwd)"
+# pwd -W gives C:/... paths under MSYS2, which a native Windows yosys can read
+root="$(cd "$here/../.." && (pwd -W 2>/dev/null || pwd))"
 out="$here/build-yosys"
 rtl="$root/fpga/rtl"
 fx="$root/fpga/third_party/fx68k"
@@ -24,7 +25,8 @@ yosys -q -l yosys.log -p "read_verilog -sv fx68k.v; read_verilog -I$rtl $src; sy
 python3 - <<'PY'
 import re
 log = open("yosys.log").read().split("=== design hierarchy ===")[-1]
-n = lambda c: sum(int(x) for x in re.findall(r"^\s+%s\s+(\d+)$" % c, log, re.M))
+# "LUT6  123" (older Yosys) or "123  LUT6" (newer)
+n = lambda c: sum(int(a or b) for a, b in re.findall(r"^\s+(?:%s\s+(\d+)|(\d+)\s+%s)$" % (c, c), log, re.M))
 luts = sum(n("LUT%d" % i) for i in range(1, 7)) + 4 * n("RAM128X1D") + 4 * n("RAM64X1D") + 4 * n("RAM32M")
 ffs = n("FDRE") + n("FDSE") + n("FDCE") + n("FDPE") + n("FDRE_1")
 bram = n("RAMB36E1") + n("RAMB18E1") / 2

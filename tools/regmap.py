@@ -600,12 +600,12 @@ def main():
     args = ap.parse_args()
 
     try:
-        rm = parse(DEF_FILE.read_text())
+        rm = parse(DEF_FILE.read_text(encoding="utf-8"))
     except DefError as e:
         print(f"regmap.def: {e}", file=sys.stderr)
         return 1
     errors = check(rm)
-    errors += check_spec(rm, SPEC_FILE.read_text())
+    errors += check_spec(rm, SPEC_FILE.read_text(encoding="utf-8"))
     if errors:
         for e in errors:
             print(f"error: {e}", file=sys.stderr)
@@ -618,14 +618,14 @@ def main():
         return 1
     stale = []
     for path, text in outputs.items():
-        current = path.read_text() if path.exists() else None
+        current = path.read_text(encoding="utf-8") if path.exists() else None
         if current == text:
             continue
         if args.verify:
             stale.append(path)
         else:
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
+            path.write_text(text, encoding="utf-8", newline="\n")
             print(f"wrote {path.relative_to(ROOT)}")
     if stale:
         for p in stale:

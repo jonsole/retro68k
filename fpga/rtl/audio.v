@@ -47,6 +47,9 @@ module audio (
     reg  [19:0] step [0:3];
     reg  [6:0]  vl   [0:3], vr [0:3];
 
+    wire [15:0] off = {rb_addr[15:2], 2'b00};
+    wire in_custom = (rb_addr[23:16] == 8'hE0);
+    wire sel_g  = in_custom && off[15:6] == 10'h010;                     // 0x400-0x43F
     // Channel state
     reg  [3:0]  on;                    // playing (AUDSTAT.ACTIVE)
     reg  [3:0]  startp;                // to start at the next output sample
@@ -65,9 +68,6 @@ module audio (
 
     assign irq = |(stat & inten);
 
-    wire [15:0] off = {rb_addr[15:2], 2'b00};
-    wire in_custom = (rb_addr[23:16] == 8'hE0);
-    wire sel_g  = in_custom && off[15:6] == 10'h010;                     // 0x400-0x43F
     wire [2:0] chn = off[7:5] - 3'd2;                                    // channel n at 0x440 + n x 0x20
     wire sel_c  = in_custom && off[15:8] == 8'h04 && off[7:5] >= 3'd2 && off[7:5] <= 3'd5;
 
