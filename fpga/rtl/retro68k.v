@@ -91,7 +91,7 @@ module retro68k #(
         end else if (rst_req && !sys_rst) begin
             rst_cnt  <= 9'd0;
             sys_rst  <= 1'b1;
-            resetwhy <= {halted && haltreset, 1'b0, cmd_upload, cmd_reset || cmd_upload,
+            resetwhy <= {halted && haltreset, 1'b0, cmd_upload, cmd_reset,   // one bit per source (spec 7, section 2.1)
                          soft_reset, !btn_s[1], wd_reset, 1'b0};
         end else if (sys_rst) begin
             // Hold reset for 5.12 us, and end it on a slot boundary
