@@ -534,7 +534,6 @@
 `define RM_DMX_OP_LOGIC                     32'h00000003
 `define RM_DMX_OP_ADD                       32'h00000004
 `define RM_DMX_OP_MIX                       32'h00000005
-`define RM_DMX_OP_REGLIST                   32'h00000006
 `define RM_DMX_KIND_MEM                     32'h00000000
 `define RM_DMX_KIND_PORT                    32'h00000001
 `define RM_DMX_KIND_NONE                    32'h00000002

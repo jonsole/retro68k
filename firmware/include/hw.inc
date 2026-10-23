@@ -1178,7 +1178,6 @@ DMX_OP_KEYCOPY               equ $2
 DMX_OP_LOGIC                 equ $3
 DMX_OP_ADD                   equ $4
 DMX_OP_MIX                   equ $5
-DMX_OP_REGLIST               equ $6
 DMX_KIND_MEM                 equ $0
 DMX_KIND_PORT                equ $1
 DMX_KIND_NONE                equ $2

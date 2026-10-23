@@ -276,7 +276,6 @@ const DMX_OP_KEYCOPY 2
 const DMX_OP_LOGIC   3
 const DMX_OP_ADD     4
 const DMX_OP_MIX     5
-const DMX_OP_REGLIST 6
 const DMX_KIND_MEM   0
 const DMX_KIND_PORT  1
 const DMX_KIND_NONE  2

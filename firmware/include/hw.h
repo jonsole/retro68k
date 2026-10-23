@@ -1069,7 +1069,6 @@ _Static_assert(sizeof(dmxdesc_t) == 32, "DMXDESC layout");
 #define DMX_OP_LOGIC                       0x3u
 #define DMX_OP_ADD                         0x4u
 #define DMX_OP_MIX                         0x5u
-#define DMX_OP_REGLIST                     0x6u
 #define DMX_KIND_MEM                       0x0u
 #define DMX_KIND_PORT                      0x1u
 #define DMX_KIND_NONE                      0x2u

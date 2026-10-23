@@ -127,7 +127,7 @@ One block, the DMA controller (`fpga/rtl/dmac.v`, the equivalent of the Amiga's 
 | SPR | Sprites (spec 9): the 8 sprite FIFOs | Hard deadline |
 | AUD | Audio (spec 6, later) | Soft: has microseconds to spare |
 | COP | Copper (spec 10, later) | Best effort; COPCON.PRI can raise it to high (ahead of audio and non-urgent display) or nasty (may also take cycle 0) |
-| BLT | DMA engine / blitter (spec 11, later) | Best effort |
+| BLT | DMA engine / blitter (spec 11): its 4 channels take turns inside the engine | Best effort |
 | PORT | The DMA port: peripherals later; the tests use it now | Best effort |
 
 For each cycle, the first rule that finds a request wins:
@@ -187,7 +187,7 @@ The bits are where the Amiga has them:
 | 9 | DMAEN | Master enable for everything below |
 | 8 | BPLEN | Bitplane DMA for all layers (each plane also has its own enable in its layer's BPLDMA; spec 4, section 5.5) |
 | 7 | COPEN | Copper |
-| 6 | BLTEN | DMA engine / blitter (copy and fill; spec 11) |
+| 6 | BLTEN | DMA engine / blitter (spec 11) |
 | 5 | SPREN | Sprite DMA (spec 9) |
 | 4 | – | Unused |
 | 3–0 | AUD3EN–AUD0EN | Audio channels 3–0 (spec 6) |

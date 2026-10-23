@@ -49,8 +49,7 @@ Requests are **level-sensitive**: a source stays pending until its unit's flag i
 | 1 | 65 | LINE | Video: line compare (VIDSTAT.LINE) | 5 |
 | 2 | 66 | COPPER | The copper: COPSTAT.IRQ (raised by a write to COPINT) with COPCON.IRQEN; cleared by writing 1 to COPSTAT.IRQ (spec 10) | 5 |
 | 3 | 67 | VIDERR | Video: a layer ran short (VIDSTAT.OVERRUN, spec 4, section 5.3) | 5 |
-| 4 | 68 | DMA0 | DMA engine: job done (spec 11; version 1 has one channel) | 4 |
-| 5–7 | 69–71 | – | Not used in version 1 (were DMA1–DMA3) | 0 (off) |
+| 4–7 | 68–71 | DMA0–DMA3 | DMA engine channels 0–3: a descriptor with IRQ finished, or an error (DMXINT with DMXINTEN, spec 11) | 4 |
 | 8 | 72 | – | Not used in version 1 (was AUDSTR; there is no audio stream) | 0 (off) |
 | 9 | 73 | AUDIO | Audio: a channel took its registers, at its start or the end of a block (AUDSTAT with AUDINTEN, spec 6) | 4 |
 | 10 | 74 | – | Not used in version 1 (was AUDERR) | 0 (off) |
