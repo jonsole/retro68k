@@ -108,11 +108,6 @@ jobs:
         run: |
           sudo apt-get update || true
           sudo apt-get install -y verilator
-      - name: Install sv2v
-        run: |
-          curl -sSL -o sv2v.zip https://github.com/zachjs/sv2v/releases/download/v0.0.13/sv2v-Linux.zip
-          unzip -q sv2v.zip
-          echo "$PWD/sv2v-Linux" >> "$GITHUB_PATH"
       - name: No value cut short to fit (WIDTHTRUNC is an error)
         run: sh fpga/lint.sh
 

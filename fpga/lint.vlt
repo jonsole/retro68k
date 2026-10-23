@@ -1,5 +1,0 @@
-`verilator_config
-// The third-party CPU core (sv2v output) is not linted
-lint_off -file "*fx68k.v"
-lint_off -rule MULTIDRIVEN -file "*fx68k.v"
-lint_off -rule UNOPTFLAT -file "*fx68k.v"
