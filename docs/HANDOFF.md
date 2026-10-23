@@ -1,32 +1,32 @@
 # Handoff
 
-State of the project on 23 October 2026, after the per-layer palettes and the first Vivado build, for picking the work up in a new session (VS Code, or a fresh Claude session). Read this first, then `docs/design-plan.md` for the whole plan.
+State of the project on 23 October 2026 (evening): every unit of version 1 is built and tested in simulation, and the Vivado build meets timing. For picking the work up in a new session (VS Code, or a fresh Claude session). Read this first, then `docs/design-plan.md` for the whole plan.
 
 ## What retro68k is
 
-An Amiga-style 68000 computer on the ZX Spectrum Next KS3 board (Xilinx XC7A35T, 4 MB SRAM): fx68k at 20 MHz, 576p video over HDMI and VGA, a copper, sprites, 4-channel audio, serial over an FT232H. The specs are in `docs/spec/`, the programming guide (Amiga Hardware Reference Manual style) in `docs/guide/`.
+An Amiga-style 68000 computer on the ZX Spectrum Next KS3 board (Xilinx XC7A35T, 4 MB SRAM): fx68k at 20 MHz, 576p video over HDMI and VGA with three layers and 8 scalable sprites, a copper, 4-channel audio, a 4-channel DMA engine and blitter, an SD card, a PS/2 keyboard, and serial over an FT232H. The specs are in `docs/spec/`, the programming guide (Amiga Hardware Reference Manual style) in `docs/guide/`.
 
 ## Working rules
 
 - Commit and push straight to `main` of `jonsole/retro68k`. No pull requests unless asked.
 - Author: `Jon Sole <jon.sole@gmail.com>` (`git -c user.name="Jon Sole" -c user.email="jon.sole@gmail.com" commit ...`).
 - Claude's commits end with a `Co-Authored-By:` trailer (and the session link, if the session gives one). No model names anywhere else in the repo.
-- Check CI (GitHub Actions, `.github/workflows/checks.yml`) after each push. A full run takes about 35 minutes.
-- Every hardware change: spec first (`docs/spec/`), then RTL, then the test, then the guide.
+- Check CI (GitHub Actions, `.github/workflows/checks.yml`) after each push. A full run takes about 35–50 minutes.
+- Every hardware change: spec first (`docs/spec/`), then RTL, then the test, then the guide. Keep the specs matching the RTL: when the build differs, change the spec in the same commit.
 - Run the tests before pushing RTL; CI does not run the video tests (see below).
-- Keep the design under about 85% of the LUTs by Vivado's count, so it routes at 100 MHz. Yosys (the CI check) counts about 35% more than Vivado; it only fails CI past 100%.
-- Run the Vivado build after RTL changes: timing at 100 MHz is met with little margin (+0.26 ns).
+- Keep the design under about 85% of the LUTs by Vivado's count (17,680), so it routes at 100 MHz. Yosys (the CI check) counts more than Vivado (about 35% more when last compared); it only fails CI past 100%.
+- Run the Vivado build after RTL changes: timing at 100 MHz is met with very little margin (+0.09 ns).
 
 ## Tools
 
 | Tool | Notes |
 |------|-------|
-| Icarus Verilog 12 or 13 | `iverilog`, `vvp`. CI uses 12; 13 is stricter (no use before declaration) |
+| Icarus Verilog 12 or 13 | `iverilog`, `vvp`. CI uses Ubuntu's; 13 is stricter (no use before declaration) |
 | sv2v | Converts fx68k from SystemVerilog. Release v0.0.13 from github.com/zachjs/sv2v |
 | vasm | Build from the vendored copy: `tar xzf tools/vasm/vasm.tar.gz && make -C vasm CPU=m68k SYNTAX=mot`, then put `vasm/` on `PATH` (`vasmm68k_mot`) |
 | Python 3 | Pillow for the PNG output (optional) |
-| Yosys | For the size check (`fpga/ks3/yosys_check.sh`). Its LUT count runs high: Vivado's is about 25% lower |
-| Vivado | 2026.1. `VIVADO=/c/AMDDesignTools/2026.1/Vivado/bin/vivado.bat bash fpga/ks3/build.sh`. Builds a bitstream (`fpga/ks3/build/retro68k_ks3.bit`), about 13 minutes; timing met. Not tried on the board yet |
+| Yosys | For the size check (`fpga/ks3/yosys_check.sh`) |
+| Vivado | 2026.1. `VIVADO=/c/AMDDesignTools/2026.1/Vivado/bin/vivado.bat bash fpga/ks3/build.sh`. Builds a bitstream (`fpga/ks3/build/retro68k_ks3.bit`) in about 15 minutes; timing met. Not tried on the board yet (it arrives in early November) |
 
 ### Windows
 
@@ -39,67 +39,69 @@ All from `sim/` unless noted. See `sim/README.md` for more options.
 | Command | What it checks | Time | In CI |
 |---------|---------------|------|-------|
 | `python3 tools/regmap.py --verify` (repo root) | `fpga/regmap.def` against `docs/spec/registers.md` and the generated `hw.inc`, `hw.h`, `regmap.vh` | seconds | yes |
-| `make run ARGS=+serial` | Boot ROM self-test, serial echo, BREAK and RESET | 5–20 min | yes |
-| `make run ARGS=+dma` | Boot ROM with the DMA port busy | 5–20 min | yes |
-| `make ctest` | Copper: self-checking ROM, then 14 colour changes checked in the frame (`ctest/ccheck.py`) | 10–40 min | yes |
-| `make atest` | Audio: every output sample against a Python model | 10 min | yes |
-| `make vtest` | Video: four screens (`pal`, `direct`, `spr`, `share`) checked pixel by pixel against `vtest/vmodel.py`; `make vtest VTESTS=spr` runs one. Each palette gets different colours; `share` is `spr` with VIDCON.SHAREPAL | 10–45 min each | **no** |
+| `make run ARGS=+serial` | Boot ROM self-test, serial echo, BREAK and RESET | 5–50 min | yes |
+| `make run ARGS=+dma` | Boot ROM with the DMA port busy | 5–50 min | yes |
+| `make ctest` | Copper: self-checking ROM, then 14 colour changes checked in the frame (`ctest/ccheck.py`) | 10–80 min | yes |
+| `make atest` | Audio: every output sample against a Python model | 3–10 min | yes |
+| `make dtest` | DMA engine: 48 random jobs on 4 channels, every byte of 1 MB against `dtest/dmodel.py`; then 15 directed tests (palettes, ROM, registers, errors, STOP, PAUSE, ports, HIGH, a timer start). `SEED=n` picks other random jobs | 1 min | yes |
+| `make iotest` | SD card (start-up, a block read and written by DMA) and PS/2 keyboard (bytes, a bad frame, sending), against `sd_model.v` and `ps2_model.v` | 5 min | yes |
+| `make vtest` | Video: four screens (`pal`, `direct`, `spr`, `share`) checked pixel by pixel against `vtest/vmodel.py`; `make vtest VTESTS=spr` runs one. Each palette gets different colours; `spr` has the 8 sprites at many scales; `share` is `spr` with VIDCON.SHAREPAL | 45 min each | **no** |
 | `bash fpga/ks3/yosys_check.sh` (repo root) | Synthesis for the XC7A35T and the LUT count | 3 min | yes |
 
-`make BUILD=other_dir ...` builds into another directory, so a second set of runs can go alongside the first. Run long simulations in the background, one per directory: two runs in the same `build/vtest_x` directory overwrite each other's results. Edit `regmap.def`, then run `python3 tools/regmap.py` to regenerate the headers; never edit `hw.inc`, `hw.h` or `regmap.vh` by hand.
+`make BUILD=other_dir ...` builds into another directory, so a second set of runs can go alongside the first (`sim/build*/` is ignored by git). Run long simulations in the background, one per directory. The times above are for 7 runs side by side on a 16-core machine. Don't change `vtest/vmodel.py` or other test scripts while a suite that uses them is running. Edit `regmap.def`, then run `python3 tools/regmap.py` to regenerate the headers; never edit `hw.inc`, `hw.h` or `regmap.vh` by hand.
 
-Debug switches in `sim/tb.v`, added while bringing up sprites:
+Debug switches in `sim/tb.v`:
 - `+sprdbg`: sprite fetcher state at each frame start, and counts of acks, words and opaque pixels at the end.
 - `+xstop`: stops at the first unknown (`x`) value on the sprite channel to the scheduler, and dumps the state.
-- `+timeout=N`: the run's time limit in ps.
+- `+timeout=N`: the run's time limit in ns.
+- `+dumpram=FILE`: Chip RAM `0x0F0000`–`0x1FFFFF` at the end (the DMA test); `+dmxsend`: the PC sends 64 bytes (the DMA test's port job); `+iotest`: the keyboard sends its test bytes.
 
 ## Where things stand
 
-Done and tested:
+Done and tested in simulation:
 
 | Part | Files | Tests |
 |------|-------|-------|
-| CPU, bus, SRAM, scheduler (`dmac.v`), boot ROM | `fpga/rtl/`, `firmware/boot/boot.s` | boot |
+| CPU, bus, SRAM, scheduler (`dmac.v`, with HIGH and CPUSHARE), boot ROM (second port for DMA) | `fpga/rtl/`, `firmware/boot/boot.s` | boot |
 | Video: 3 layers, planar/chunky, scaling, scroll, BPLSTRIDE, priority, direct colour, a palette per layer and one for the sprites (SHAREPAL for one) | `video.v`, `bpldma.v`, `layer_pix.v` | vtest pal, direct, share |
-| Copper v1: MOVE/WAIT/SKIP/JUMP, MOVR, ALU, SKIPC, CALL/RET, RESUME | `copper.v`, `firmware/include/copper.inc` | ctest |
-| Audio v1: 4 channels, 8/16-bit, pan, interpolation, start/stop strobes | `audio.v` | atest |
-| Sprites v1: 8 sprites, any size, 2/4/8 bpp, ×1/2/4 magnify, depth, collisions, FIFO per sprite | `sprites.v`, `sprite_pix.v`, `video.v` | vtest spr |
-| Beam coordinates for every position | all of the above | all of the above |
+| Sprites: 8, any size, 2/4/8 bpp, fractional scaling across and down (SPRxSTEP, 5.11, 16× to 1/16), depth, collisions, FIFO per sprite | `sprites.v`, `sprite_pix.v`, `video.v` | vtest spr, share |
+| Copper: MOVE/WAIT/SKIP/JUMP, MOVR, ALU, SKIPC, CALL/RET, RESUME | `copper.v`, `firmware/include/copper.inc` | ctest |
+| Audio: 4 channels, 8/16-bit, pan, interpolation | `audio.v` | atest |
+| DMA engine and blitter: 4 channels, COPY/FILL/KEYCOPY/LOGIC/ADD at 1/2/4/8 bpp, 2D, DESC, descriptor chains or direct job registers, registers/palettes/ROM, ports 0 (SD) and 1 (serial), HIGH, timer starts | `dmx.v` | dtest |
+| SD card: SPI byte master, SDCOUNT for DMA port 0 | `sdspi.v` | iotest |
+| PS/2 keyboard: receive with FIFO, send | `ps2kb.v` | iotest |
 | Serial, interrupts, timers | `serial.v`, `intc.v`, `timers.v` | boot |
 
-Size: 12,771 LUTs (61%) by Vivado, 12.5 of 50 block RAMs; about 17,400 (84%) by Yosys. Timing met at 100 MHz, worst slack +0.26 ns (sprite deadlines, audio).
+Size (Vivado): 15,917 LUTs (76.5%), 12 block RAM tiles, 8 DSP slices. Timing met at 100 MHz, worst slack +0.09 ns, in the sprites' deadline calculation (`sprites.v`, `cs` to `dl`). Per unit: video 4,964 (sprites.v 1,809, the 8 sprite pixel units 779, bpldma.v 923), DMA engine 2,327, audio 1,225, copper 665, SD 66, keyboard 87.
 
 ### Recent decisions to know about
 
-- **Beam coordinates** (spec 4, section 3.3). (0, 0) is the start of the horizontal and vertical blanks, so the picture is beam pixels 144–863 and lines 49–624. `hw.inc` has `VID_X0` = 144, `VID_Y0` = 49, `VID_W`, `VID_H`, `BEAM_W`, `BEAM_H`. The frame starts at (0, 0), where the copper restarts, VBLANK fires and sprites restart. Copper positions only go up through a frame. `CWAIT n,0` is the start of line n's blank and `CWAITP 0` each line's. Layer settings (CTRL, window, scroll) for line n must be written before line n starts; colours, BGCOLOR and PRIO can still change in line n's blank.
-- **Sprites** have unsigned positions and are clipped by the hardware at all four edges (they can hang up to 144 px off the left and 49 lines off the top). They have no flips: HFLIP and VFLIP were dropped to save logic. SPRxPT must be written last, because any write to PT, H, V or CTL restarts the sprite from its pointer. A sprite should not start on beam lines 0–1.
-- **Area technique.** Per-channel state in distributed RAM, worked on one channel a clock (as in `bpldma.v` and `sprites.v`), rather than flip-flop arrays with wide muxes. Use it for anything with 8 copies.
+- **Beam coordinates** (spec 4, section 3.3). (0, 0) is the start of the horizontal and vertical blanks, so the picture is beam pixels 144–863 and lines 49–624. `hw.inc` has `VID_X0` = 144, `VID_Y0` = 49. Layer settings for line n must be written before line n starts; colours, BGCOLOR and PRIO can still change in line n's blank.
+- **Sprites** have unsigned positions and are clipped at all four edges. No flips. SPRxPT must be written last: a write to PT, H, V, CTL or STEP restarts the sprite. A sprite in manual mode (SPRxDAT) should not be shrunk across.
+- **Sprite scaling**: screen pixel i shows source pixel ⌊i × XSTEP ÷ 2048⌋; the image is ⌈window × step ÷ 2048⌉. Shrinking across fetches every word (costs memory cycles in proportion); shrinking down skips lines.
+- **DMA engine**: job registers laid out as a descriptor; RUN runs them, START loads CHDESC first; NEXT chains. Register targets keep the register rules (COPY/FILL, 8 bpp, long-aligned, forwards), and are written whole, so strobes fire once. REGLIST was dropped (a COPY into registers does it). LOGIC and ADD take memory or VALUE, not ports. Channels take turns by groups of 8 words.
+- **SD card**: software does the SPI-mode protocol; the hardware moves bytes, and DMA moves blocks. No interrupt.
+- **Area technique.** Per-channel state in distributed RAM, worked on one channel at a time (as in `bpldma.v`, `sprites.v`, `dmx.v`), rather than flip-flop arrays with wide muxes.
 
 ## Next jobs
 
 In rough order:
 
-1. **Try the bitstream on the board**: HDMI and VGA at 576p, the boot ROM's console, the serial link (`fpga/ks3/README.md` says what to expect). Timing was closed on 23 October 2026 by:
-   - `sprites.v`: the fetch pick is a registered "wants a word" check and a tree of pairs (a FIFO counts as full at 30 words, spec 9 section 4); the size calculator is two stages;
-   - `bpldma.v`: a fetch takes two clocks (pick and read the pointer, then update it), with a holding place so a word every 2 clocks is still possible;
-   - `audio.v`: each multiply has its own clock;
-   - `intc.v`: the pending requests are registered (10 ns more latency, spec 13) and the level search is parallel;
-   - `retro68k.v`: the system reset is copied by Vivado (`max_fanout`).
-2. **DMA engine**: spec 11 needs its v1 rewrite, then the RTL. The scheduler already has its channel (`blt_*` in `dmac.v`).
-3. **SD card and keyboard** (spec 16 for the keyboard).
-4. **Trims**, if room is needed (less pressing now that Vivado counts 62%): timers, the audio engine, the copper's storage registers.
-5. **Small items**:
+1. **Try the bitstream on the board** (early November): HDMI and VGA at 576p, the boot ROM's console, the serial link, then the SD card and keyboard (`fpga/ks3/README.md` says what to expect).
+2. **Boot ROM**: SD card start-up and a small FAT32 reader to load programs (spec 15, section 4); a keyboard decoder and layout table (spec 16); ROMLOCK.
+3. **Timing margin**: +0.09 ns is thin. The sprite deadline calculator (`dcalc` in `sprites.v`, one sprite a clock) is the closest path; registering its inputs or splitting it would give room before more is added.
+4. **Small items**:
    - wire the 68000 RESET instruction;
-   - ROMLOCK in the boot ROM;
-   - the serial link surviving a reset (spec).
-6. **Guide chapters** for audio, the DMA engine, SD and the keyboard.
+   - the serial link surviving a reset (spec);
+   - the SD card and keyboard on the board (spec 15, SD1; spec 16, K3).
+5. **Guide chapter** for audio (chapter 7 in the Amiga order).
+6. **Trims**, if room is needed: timers, the audio engine, the copper's storage registers.
 7. **Optional**: the TG68K 68020 option (`docs/tg68k-feasibility.md`).
 
 ### Known gaps
 
-- The video tests are not in CI: they are slow. Consider adding `make vtest VTESTS=spr` as its own CI job.
-- `fpga/ks3/README.md` still describes version 1 without sprites, copper and sound; bring it up to date with the first working bitstream.
-- Sprite open points (spec 9, section 9):
-  - S1: measure the memory budget table in simulation;
-  - S2: whether sprites' share of free cycles should be capped.
-- No sprite manual-mode (SPRxDAT) test yet, and no test of reusing a sprite down the screen.
+- The video tests are not in CI: they take 45 minutes each. Consider `make vtest VTESTS=spr` as its own CI job.
+- Sprite open points (spec 9, section 9): S1, measure the memory budget table in simulation; S2, whether sprites' share of free cycles should be capped.
+- No sprite manual-mode (SPRxDAT) test, and no test of reusing a sprite down the screen.
+- The DMA engine's speed figures (spec 11, section 7, open point D2) and the HIGH CPU shares are worked out, not measured.
+- The SD test covers single blocks; multi-block transfers (CMD18, CMD25) are left to software and untested.
