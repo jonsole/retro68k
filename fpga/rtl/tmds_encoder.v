@@ -42,10 +42,10 @@ module tmds_encoder (
                          : cnt + $signed({1'b0, n0}) - $signed({1'b0, n1});
         end else if ((cnt > 0 && n1 > n0) || (cnt < 0 && n0 > n1)) begin
             q   <= {1'b1, qm[8], ~qm[7:0]};
-            cnt <= cnt + $signed({4'd0, qm[8], 1'b0}) + $signed({1'b0, n0}) - $signed({1'b0, n1});
+            cnt <= cnt + $signed({3'd0, qm[8], 1'b0}) + $signed({1'b0, n0}) - $signed({1'b0, n1});
         end else begin
             q   <= {1'b0, qm[8], qm[7:0]};
-            cnt <= cnt - $signed({4'd0, ~qm[8], 1'b0}) + $signed({1'b0, n1}) - $signed({1'b0, n0});
+            cnt <= cnt - $signed({3'd0, ~qm[8], 1'b0}) + $signed({1'b0, n1}) - $signed({1'b0, n0});
         end
     end
 endmodule
