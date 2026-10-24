@@ -100,7 +100,9 @@ For a 4-bit sprite in colours 32–47 of the sprite palette (block 2), in front 
 
 ### Step 4: the pointer, and DMA on
 
-**SPRxPT** points at the image's first line. As a plane pointer does, it moves through the image as the hardware fetches it, so it must be written again for every frame: in each vertical blank, by the CPU or (more usually) by the copper. Write it **after** the window and CTL (see "Moving a Sprite").
+**SPRxPT** points at the image's first line. It moves on through the image line by line as the sprite is drawn, so it must be written again for every frame: in each vertical blank, by the CPU or (more usually) by the copper.
+
+**Writing SPRxCTL starts the sprite**, and the vertical blank stops every sprite. So each frame, write the sprite's registers with **CTL last** (see "Moving a Sprite").
 
 Sprite DMA needs three enables: the sprite's bit in **SPRDMA** (all eight are on after reset), and **SPREN** and **DMAEN** in DMACON:
 
@@ -110,7 +112,7 @@ Sprite DMA needs three enables: the sprite's bit in **SPRDMA** (all eight are on
 
 ### Example 4-1: A bouncing ball
 
-This program draws a ball into Chip RAM, shows it as sprite 0 over whatever the screen holds, and bounces it round the screen. It uses no interrupts and no copper: in each vertical blank, the CPU writes the sprite's window and then its pointer.
+This program draws a ball into Chip RAM, shows it as sprite 0 over whatever the screen holds, and bounces it round the screen. It uses no interrupts and no copper: in each vertical blank, the CPU writes the sprite's window and pointer, and then its CTL to start it.
 
 ```asm
 ; Example 4-1: a 32 x 24 ball on sprite 0, 4 bpp, in colours 33-47,
@@ -135,7 +137,6 @@ start:      move.w  #$2700,sr
             add.l   #$0C1000,d0
             dbra    d1,.col
 
-            move.l  #CTL_BALL,SPR0+SPR_CTL(a4)
             move.w  #DMACON_SETCLR_M|DMACON_DMAEN_M|DMACON_SPREN_M,DMACON+2(a4)
             move.l  #VIDCON_EN_M,VIDCON(a4)
 
@@ -149,7 +150,7 @@ start:      move.w  #$2700,sr
             beq.s   .frame
             move.l  #VIDSTAT_VBLANK_M,VIDSTAT(a4)
 
-            ; the window, then the pointer (always last)
+            ; the window and pointer, then CTL (always last: it starts the sprite)
             move.w  d6,d0
             add.w   #BW,d0
             swap    d0
@@ -161,6 +162,7 @@ start:      move.w  #$2700,sr
             move.w  d7,d0
             move.l  d0,SPR0+SPR_V(a4)
             move.l  #BALL,SPR0+SPR_PT(a4)
+            move.l  #CTL_BALL,SPR0+SPR_CTL(a4)
 
             ; move, bouncing half off each edge (unsigned: all positive)
             add.w   d4,d6
@@ -257,9 +259,9 @@ each rounded up. At normal size (XSTEP and YSTEP `$0800`, or never written) the 
 
 There is no limit on the size except the memory's speed (see "Sprite DMA"): a sprite can be 8 pixels or the whole screen wide, and as tall as the screen. Making a sprite bigger is just a matter of widening its window and storing a bigger image.
 
-A sprite shows in its window once per frame. If HSTOP is not greater than HSTART, or VSTOP not greater than VSTART, the window is empty and the sprite does not show. After reset all the windows are empty.
+A sprite shows in its window from when its CTL is written until the next vertical blank. If HSTOP is not greater than HSTART, or VSTOP not greater than VSTART, the window is empty and the sprite does not show. After reset all the windows are empty.
 
-To hide a sprite, turn its bit in SPRDMA off, or set VSTART to 625 (BEAM_H) or more.
+To hide a sprite, don't write its CTL this frame, turn its bit in SPRDMA off, or set VSTART to 625 (BEAM_H) or more.
 
 ---
 
@@ -273,8 +275,8 @@ HSTART, HSTOP, VSTART and VSTOP are **unsigned** 11-bit beam coordinates: beam p
 
 The hardware clips a sprite at all four edges:
 
-- **Left.** Pixels in the horizontal blank, before beam pixel 144, are not shown. They are still fetched, so the sprite costs the same memory. HSTART can be as low as 0, so a sprite can hang off the left edge by up to 144 pixels.
-- **Top.** Lines in the vertical blank, before beam line 49, are not shown. They are still fetched and used up, so the first line that shows is the right line of the image: there is nothing to do in software. VSTART can be as low as 0, so a sprite can hang off the top by up to 49 lines (but see below).
+- **Left.** Pixels in the horizontal blank, before beam pixel 144, are not shown. They are still fetched, so the sprite costs the same memory. **HSTART must be 16 or more**: the DMA fetches each line's words during that line, from its start, and needs a few pixels before the sprite's first. So a sprite can hang off the left edge by up to 128 pixels.
+- **Top.** Lines in the vertical blank, before beam line 49, are not shown. They are still fetched and used up, so the first line that shows is the right line of the image: there is nothing to do in software. VSTART can be as low as 1, so a sprite can hang off the top by up to 48 lines, as long as its CTL is written before its first line (the copper's first moves, at the top of its list, are in time for line 1).
 - **Right.** Pixels from beam pixel 864 on are not shown, and not fetched. An HSTOP above 864 counts as 864.
 - **Bottom.** Lines from beam line 625 on are not shown, and not fetched. A VSTOP above 625 counts as 625.
 
@@ -285,29 +287,25 @@ For a 24-line sprite whose top 10 lines are above the picture:
         move.l  #BALL,SPR0+SPR_PT(a4)       ; the whole image: lines 0-9 are fetched, not shown
 ```
 
-**Do not start a sprite on beam line 0 or 1.** The DMA needs a moment after the frame starts, and after SPRxPT is written, to fetch the sprite's first words. Those lines are in the vertical blank, so this matters only for a sprite that hangs more than 47 lines off the top.
-
 ---
 
 ## Moving a Sprite
 
 ### When writes take effect
 
-Writing a sprite's SPRxPT, SPRxH, SPRxV or SPRxCTL **starts the sprite again**: the hardware empties its FIFO, takes the new settings, and fetches the image afresh from SPRxPT's current value. The same happens to all eight sprites at the start of each frame (beam line 0, pixel 0, the start of the vertical blank). This makes the registers simple to use, but it brings two rules:
-
-1. **Write SPRxPT last.** SPRxPT moves as the image is fetched, and the DMA starts fetching as soon as the sprite is started (it fetches ahead, as "Sprite DMA" explains). If you write the pointer and then the window, the restart from the window write takes the pointer where the DMA had already moved it. Write the window and CTL first, then the pointer.
-2. **Change a sprite while it is not being drawn**: in the vertical blank, or after the sprite's last line. A write while the sprite is on the screen starts it again partway down, from wherever its pointer had got to.
-
-Writing SPRxDAT and SPRDMA does not restart the sprite.
+- **Writing SPRxCTL starts the sprite** (any write, even of the same value): the hardware empties its FIFO and shows the image from SPRxPT, from the next line inside its window. A CTL written after VSTART has gone by shows the image from its first line, from the next line down.
+- **The vertical blank stops every sprite** (beam line 0, pixel 0): nothing more is fetched or shown until its CTL is written again. So each frame, write each sprite's window, step and pointer, then **CTL last**.
+- **SPRxPT, SPRxH, SPRxV and SPRxSTEP act from the next line.** On a sprite that has been started, a write changes it from the next line that begins after the write, without starting it again. This is what makes the effects in "Changing a Sprite while it is Drawn" possible.
+- Writing SPRxDAT and SPRDMA does not start or stop a sprite. Turning a sprite's DMA off pauses its fetching; turning it on lets it carry on.
 
 ### Who writes the registers
 
 There are two common ways to move sprites each frame:
 
-- **The CPU**, in its vertical blank handler (or after polling VIDSTAT.VBLANK, as Example 4-1 does), writes each sprite's window and then its pointer.
-- **The copper**, at the top of its list, writes each sprite's window and pointer, and the CPU changes the values **in the copper list**: the data words of the `CMOVEL`s. This is the same technique as scrolling with the copper (see the Coprocessor Hardware chapter).
+- **The CPU**, in its vertical blank handler (or after polling VIDSTAT.VBLANK, as Example 4-1 does), writes each sprite's window and pointer, then its CTL.
+- **The copper**, at the top of its list, writes each sprite's window, pointer and CTL, and the CPU changes the values **in the copper list**: the data words of the `CMOVEL`s. This is the same technique as scrolling with the copper (see the Coprocessor Hardware chapter).
 
-Do not mix the two for one sprite in one frame: if the copper writes the pointer at the start of the vertical blank and the CPU then writes the window, rule 1 is broken.
+Either way, the sprite must be started (its CTL written) before its first line.
 
 ### Example 4-2: Sprites from the copper list
 
@@ -318,14 +316,19 @@ Do not mix the two for one sprite in one frame: if the copper writes the pointer
             include "hw.inc"
             include "copper.inc"
 
+BALL        equ     $040000
+CTL_BALL    equ     (1<<SPR_CTL_BPP_B)|(2<<SPR_CTL_PAL_B)
+
             cnop    0,4
 spr_list:
 spr0_h:     CMOVEL  SPR0+SPR_H,((VID_X0+232)<<16)|(VID_X0+200)  ; sprite 0: 200-231 across
 spr0_v:     CMOVEL  SPR0+SPR_V,((VID_Y0+124)<<16)|(VID_Y0+100)  ;           100-123 down
-            CMOVEL  SPR0+SPR_PT,BALL                ; pointer last
+            CMOVEL  SPR0+SPR_PT,BALL
+            CMOVEL  SPR0+SPR_CTL,CTL_BALL           ; CTL last: starts the sprite
 spr1_h:     CMOVEL  SPR1+SPR_H,((VID_X0+432)<<16)|(VID_X0+400)
 spr1_v:     CMOVEL  SPR1+SPR_V,((VID_Y0+324)<<16)|(VID_Y0+300)
             CMOVEL  SPR1+SPR_PT,BALL
+            CMOVEL  SPR1+SPR_CTL,CTL_BALL
             ; ... the rest of the list (plane pointers, colour changes)
             CSTOP
 
@@ -341,6 +344,27 @@ move1:      move.w  d0,spr1_h+6         ; HSTART (low half)
 ```
 
 Call `move1` when the copper is not reading those words: for example, once the picture has started (BEAMPOS line VID_Y0 or more), after the copper's work at the start of the frame is done. For many sprites, or to make the change exact, use two lists and swap them (see "Double-Buffered Lists" in the Coprocessor Hardware chapter).
+
+### Changing a sprite while it is drawn
+
+A started sprite takes its window, step and pointer afresh at the start of every line (pixel 0, the start of the horizontal blank). So the copper can change them from one line to the next, while the sprite is on the screen:
+
+- **Wobble or shear**: write SPRxH on every line, moving the sprite across.
+- **Zoom or perspective**: change XSTEP, with the window, on every line. The number of words each line takes follows the window and XSTEP of that line.
+- **Switch images** part way down: write SPRxPT. The next line shows the image line it points at, exactly (YSTEP does not move it that time), and the lines after move on from there.
+- **End it early or let it go on**: the window is checked on every line, so a VSTOP written while the sprite is drawn ends it, or lengthens it.
+
+A write acts from the next line that **starts** after it: a write during line n's picture acts from line n + 1. A `CWAIT` for pixel 0 of a line, then the moves, acts from the line after.
+
+```asm
+; A wobble: sprite 0 (32 pixels wide, lines 100-123) moves two pixels
+; right on each of its lines
+            CWAIT   VID_Y0+100,0
+            CMOVEL  SPR0+SPR_H,((VID_X0+202+32)<<16)|(VID_X0+202)  ; for line 101
+            CWAIT   VID_Y0+101,0
+            CMOVEL  SPR0+SPR_H,((VID_X0+204+32)<<16)|(VID_X0+204)  ; for line 102
+            ; ... one pair a line, or a loop stepping CMOVR through a table
+```
 
 ---
 
@@ -365,11 +389,10 @@ The hardware works out which source pixel each screen pixel shows: screen pixel 
         move.l  #((VID_Y0+100+48)<<16)|(VID_Y0+100),SPR0+SPR_V(a4)
         move.l  #($0400<<16)|$0400,SPR0+SPR_STEP(a4)
         move.l  #BALL,SPR0+SPR_PT(a4)
+        move.l  #CTL_BALL,SPR0+SPR_CTL(a4)    ; last: starts the sprite
 ```
 
-Writing SPRxSTEP starts the sprite again, as the other sprite registers do, so write SPRxPT last.
-
-**Zooming** an object in or out is a matter of changing the window and the steps together, once a frame: for a scale s, the window is 32 × s by 24 × s and the steps 2048 ÷ s. Because the steps are fractions, the size changes smoothly, a pixel at a time.
+**Zooming** an object in or out is a matter of changing the window and the steps together, once a frame (or, for a stretch down the sprite, on each line: see "Changing a sprite while it is drawn"): for a scale s, the window is 32 × s by 24 × s and the steps 2048 ÷ s. Because the steps are fractions, the size changes smoothly, a pixel at a time.
 
 **What it costs.** Bigger across is free: the same words are spread over more pixels. Smaller across costs memory cycles in proportion, because every pixel of the image's lines is still fetched, including those skipped: at half size across a sprite needs twice the words for the same screen width (see "Sprite DMA"). Down, it is the other way round: a line shown on several screen lines is fetched again for each, but lines skipped when the sprite is smaller are not fetched at all. Keep wide sprites that are shrunk across narrow on the screen, or use fewer bits per pixel.
 
@@ -398,7 +421,7 @@ Where two sprites overlap, the **lower-numbered** sprite is in front: sprite 0 i
 
 Depth is how a sprite goes behind scenery: in a dual-playfield screen with the scenery as the front layer and the sky as the back, a bird with DEPTH 1 flies behind trees but in front of the sky.
 
-Depth is per sprite and can be changed at any time with SPRxCTL (in the vertical blank: a CTL write restarts the sprite).
+Depth is per sprite, set with SPRxCTL. A CTL write starts the sprite again, so change it in the vertical blank, or when starting the sprite.
 
 In **direct colour** mode (VIDCON.DIRECT) the layers make one picture together, so there is nothing to go between: sprites are drawn in front of the whole picture, in their colours from SPRPALETTE, and DEPTH is not used.
 
@@ -406,13 +429,13 @@ In **direct colour** mode (VIDCON.DIRECT) the layers make one picture together, 
 
 ## Reusing a Sprite down the Screen
 
-Eight sprites can show at once on any line. To show more than eight objects on a screen, reuse a sprite further down: once its first use has been drawn, the copper writes the sprite's registers again for the next use. It is the same idea as the Amiga's, where the sprite's data holds more control words, but here the copper does it.
+Eight sprites can show at once on any line. To show more than eight objects on a screen, reuse a sprite further down: once its first use has been drawn, the copper writes the sprite's registers again for the next use, and starts it again with CTL. It is the same idea as the Amiga's, where the sprite's data holds more control words, but here the copper does it.
 
 The rules:
 
 - the new use must start on a line after the old one ends;
 - the copper's writes must come after the old use's last line has been drawn (WAIT for a position on a later line), and before the new use's first line;
-- as always, the window and CTL first, then the pointer.
+- as always, the window and pointer first, then CTL.
 
 ### Example 4-3: One sprite, three ships
 
@@ -431,24 +454,23 @@ CTL_SHIP    equ     (1<<SPR_CTL_BPP_B)|(3<<SPR_CTL_PAL_B)
 ships:      CMOVEL  SPR0+SPR_H,((VID_X0+232)<<16)|(VID_X0+200)  ; ship 1
             CMOVEL  SPR0+SPR_V,((VID_Y0+124)<<16)|(VID_Y0+100)  ; lines 100-123
             CMOVEL  SPR0+SPR_PT,SHIP
+            CMOVEL  SPR0+SPR_CTL,CTL_SHIP           ; start it
 
             CWAIT   VID_Y0+124,0                    ; ship 1 finished
             CMOVEL  SPR0+SPR_H,((VID_X0+532)<<16)|(VID_X0+500)  ; ship 2
             CMOVEL  SPR0+SPR_V,((VID_Y0+224)<<16)|(VID_Y0+200)  ; lines 200-223
-            CMOVEL  SPR0+SPR_CTL,CTL_SHIP|(4<<SPR_CTL_PAL_B)  ; other colours (palette block 7)
             CMOVEL  SPR0+SPR_PT,SHIP
+            CMOVEL  SPR0+SPR_CTL,CTL_SHIP|(4<<SPR_CTL_PAL_B)  ; other colours (palette block 7)
 
             CWAIT   VID_Y0+224,0                    ; ship 2 finished
             CMOVEL  SPR0+SPR_H,((VID_X0+392)<<16)|(VID_X0+360)  ; ship 3
             CMOVEL  SPR0+SPR_V,((VID_Y0+324)<<16)|(VID_Y0+300)
-            CMOVEL  SPR0+SPR_CTL,CTL_SHIP
             CMOVEL  SPR0+SPR_PT,SHIP2               ; another image
+            CMOVEL  SPR0+SPR_CTL,CTL_SHIP
             CSTOP
 ```
 
-The first ship's CTL is written once by the CPU (CTL_SHIP); the list sets it back at the third ship, so it is right again for the first ship of the next frame.
-
-Each restart empties the FIFO, and the sprite's DMA then has from the WAIT to the new ship's first line to fetch ahead. Leave at least a line between uses, as this example does, so that the new image is ready in time.
+Each start empties the FIFO; the sprite's DMA fetches each line's words during that line, so the new ship is ready as soon as its first line comes. The writes must still come before that line starts.
 
 ---
 
@@ -489,9 +511,9 @@ Collisions are found on each line as it is drawn, and reach SPRCOLL just after t
 
 Each sprite has a **FIFO** of 32 words: its data registers. The DMA fetches the image's words into the back of the FIFO, and the sprite takes them from the front as it is drawn. Because it is a FIFO, the image's lines can be any length: a line longer than 32 words simply streams through.
 
-The DMA fills a sprite's FIFO whenever it has room, using any memory cycle nobody else wants: in the horizontal blank, in quiet stretches of a line, in the vertical blank. So a sprite's words are mostly fetched **ahead**, before they are needed. Only when a FIFO is about to run dry does the sprite's fetch become urgent. Then it competes with the layers by deadline (whoever needs a word soonest goes first) and may take the CPU's memory cycle, exactly as a layer does (see "The Fetch Budget" in the Playfield Hardware chapter).
+The DMA fetches each line's words during that line, from its start (the horizontal blank), whenever the FIFO has room, using any memory cycle nobody else wants. It never fetches into the next line, whose settings may still change, so a sprite's words are fetched **ahead** within the line: in the horizontal blank, and in quiet stretches before the sprite's pixels. Only when a FIFO is about to run dry does the sprite's fetch become urgent. Then it competes with the layers by deadline (whoever needs a word soonest goes first) and may take the CPU's memory cycle, exactly as a layer does (see "The Fetch Budget" in the Playfield Hardware chapter).
 
-The FIFO is emptied, and the fetch starts again from SPRxPT, at the start of each vertical blank and whenever the sprite's registers are written (see "Moving a Sprite"). During the vertical blank each sprite fills its FIFO with up to 32 words of its first lines, so every sprite starts the frame with a lead.
+The FIFO is emptied when the sprite's CTL is written (and the fetch starts from SPRxPT), and at the start of each vertical blank, which stops the sprite (see "Moving a Sprite").
 
 ### How many sprites the memory can feed
 
@@ -500,7 +522,7 @@ Sprites and layers share one budget. The display's own memory cycles give about 
 - A **layer** needs, per 16 source pixels, 1 word for each plane (planar) or b words at b bits per pixel (chunky); scaled ×2 across, half that per 16 screen pixels.
 - A **sprite** needs, per 16 source pixels, 2, 4 or 8 words at 2, 4 or 8 bits per pixel, while the beam is over it; per 16 screen pixels, that × XSTEP ÷ 2048: half at twice the size across, twice at half the size.
 
-Sprites side by side do not add up: only sprites over the **same** pixels at the same time do. And each FIFO's lead of 32 words lets a sprite fetch ahead into quieter parts of the line, so short overlaps (up to about 64 pixels at 8 bpp, or 256 at 2 bpp) are smoothed out.
+Sprites side by side do not add up: only sprites over the **same** pixels at the same time do. And each FIFO (up to 30 words ahead) lets a sprite fetch ahead into quieter parts of the line before its pixels, so short overlaps (up to about 60 pixels at 8 bpp, or 240 at 2 bpp) are smoothed out. A sprite near the left edge has less time to get ahead: as little as 16 pixels at HSTART 16.
 
 How many sprites can be stacked over the same 16 screen pixels with only the guaranteed cycles:
 
@@ -516,7 +538,7 @@ These are worst cases: wide sprites stacked exactly on top of each other for lon
 
 ### Running out: SPRUNDER
 
-If the DMA cannot keep a sprite's FIFO filled, the sprite **underruns**: **VIDSTAT.SPRUNDER** (bit 7) is set, and the sprite shows nothing more until it next starts (the next vertical blank, or a write to its registers), because its words would no longer line up with its lines. SPRUNDER is sticky (clear it by writing a 1), and with its enable set in VIDINTEN it raises the VIDERR interrupt, as the layers' OVERRUN bits do.
+If the DMA cannot keep a sprite's FIFO filled, the sprite **underruns**: **VIDSTAT.SPRUNDER** (bit 7) is set, and the sprite shows nothing more until its CTL is written again, because its words would no longer line up with its lines. SPRUNDER is sticky (clear it by writing a 1), and with its enable set in VIDINTEN it raises the VIDERR interrupt, as the layers' OVERRUN bits do.
 
 An underrun means the screen asks too much of the memory at that point. Use fewer bits per pixel, scale a smaller image up across instead of using a wider image, spread the sprites out, or move one of them in front of fewer layers' fetches.
 
@@ -541,7 +563,7 @@ A sprite is fetched only while its SPRDMA bit, SPREN and DMAEN are all set. Turn
 With a sprite's DMA off (its SPRDMA bit clear), the CPU or the copper can feed the sprite itself, by writing words into its FIFO through **SPRxDAT**. The sprite shows as its window and CTL say, and takes its words from the FIFO as it is drawn, exactly as with DMA. Reading SPRxDAT gives the number of words in the FIFO (0–32).
 
 - Each write pushes one 16-bit word. Write the register's low half (`SPRxDAT+2`, or a whole long word); a write when the FIFO is full is ignored.
-- The FIFO is emptied at the start of each vertical blank, and when the sprite's PT, H, V or CTL is written, so push the frame's words after those.
+- The FIFO is emptied at the start of each vertical blank, and when the sprite's CTL is written, which starts it: so write CTL each frame, then push the frame's words.
 - If the FIFO is empty when the sprite needs a word, the sprite **waits**: it is transparent until a word arrives, and the rest of the line follows from there. A hand-fed sprite does not set SPRUNDER.
 
 This is useful for sprites whose image is computed rather than stored, and for effects that change a sprite line by line. The copper is the natural feeder, because it can push words at exact beam positions.
@@ -561,7 +583,7 @@ CTL_BEAM    equ     (0<<SPR_CTL_BPP_B)|(4<<SPR_CTL_PAL_B)
             cnop    0,4
 beam_list:  CMOVEL  SPR0+SPR_H,((VID_X0+360+16)<<16)|(VID_X0+360)  ; pixels 360-375
             CMOVEL  SPR0+SPR_V,((VID_Y0+400)<<16)|(VID_Y0+100)     ; lines 100-399
-            CMOVEL  SPR0+SPR_CTL,CTL_BEAM           ; (these empty the FIFO: write them first)
+            CMOVEL  SPR0+SPR_CTL,CTL_BEAM           ; starts it, emptying the FIFO: push after
             ; 15 lines' worth in the vertical blank: room for one more line
             CLDI    CY,$1B1B
             CLDI    CX,30
@@ -593,10 +615,10 @@ Offsets in the custom block at `$E00000`.
 |------|--------|--------|----------|
 | SPRDMA | `$500` | Set/clear | SPR (7–0): DMA on for sprite n; SETCLR (15). All on after reset. Low half at `$502` |
 | SPRCOLL | `$504` | W1C | SPR (7–0), L0 (15–8), L1 (23–16), L2 (31–24): collisions, sticky |
-| SPRxPT | SPRn + `$00` | RW | The next word of the image (22–1). Write it each frame, last |
+| SPRxPT | SPRn + `$00` | RW | Where the next image line starts (22–1; read: the start of the line being drawn). Write it each frame, before CTL |
 | SPRxH | SPRn + `$04` | RW | HSTART (10–0), HSTOP (26–16): unsigned beam pixels (0–863; the picture is 144–863) |
 | SPRxV | SPRn + `$08` | RW | VSTART (10–0), VSTOP (26–16): unsigned beam lines (0–624; the picture is 49–624). Start on beam line 2 or later |
-| SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), DEPTH (21–20), PAL (27–24) |
+| SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), DEPTH (21–20), PAL (27–24). Any write starts the sprite: write it each frame, last |
 | SPRxDAT | SPRn + `$10` | W, R | Write: push a word (15–0) into the FIFO (DMA off). Read: words in the FIFO (5–0) |
 | SPRxSTEP | SPRn + `$14` | RW | XSTEP (15–0), YSTEP (31–16): source pixels per screen pixel, 5.11 (`$0800` normal, `$0080`–`$8000`; 0 counts as `$0800`) |
 

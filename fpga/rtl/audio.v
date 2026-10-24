@@ -68,7 +68,8 @@ module audio (
 
     assign irq = |(stat & inten);
 
-    wire [2:0] chn = off[7:5] - 3'd2;                                    // channel n at 0x440 + n x 0x20
+    wire [2:0] chn = off[7:5] - 3'd2;
+    wire [1:0] cn  = chn[1:0];                                    // channel n at 0x440 + n x 0x20
     wire sel_c  = in_custom && off[15:8] == 8'h04 && off[7:5] >= 3'd2 && off[7:5] <= 3'd5;
 
     function [31:0] merge(input [31:0] old, input [31:0] new, input [3:0] be);
@@ -276,12 +277,12 @@ module audio (
             if (rb_wr && sel_c) begin : wr_ch
                 reg [31:0] v;
                 case (off[4:0])
-                    5'h00: if (rb_be[0]) ctrl[chn] <= rb_wdata[3:1];
-                    5'h04: begin v = merge({9'd0, lc[chn]}, rb_wdata, rb_be);  lc[chn]  <= v[22:0]; end
-                    5'h08: begin v = merge({9'd0, len[chn]}, rb_wdata, rb_be); len[chn] <= v[22:0]; end
-                    5'h0C: begin v = merge({12'd0, step[chn]}, rb_wdata, rb_be); step[chn] <= v[19:0]; end
-                    5'h10: begin v = merge({9'd0, vl[chn], 9'd0, vr[chn]}, rb_wdata, rb_be);
-                                 vl[chn] <= v[22:16]; vr[chn] <= v[6:0]; end
+                    5'h00: if (rb_be[0]) ctrl[cn] <= rb_wdata[3:1];
+                    5'h04: begin v = merge({9'd0, lc[cn]}, rb_wdata, rb_be);  lc[cn]  <= v[22:0]; end
+                    5'h08: begin v = merge({9'd0, len[cn]}, rb_wdata, rb_be); len[cn] <= v[22:0]; end
+                    5'h0C: begin v = merge({12'd0, step[cn]}, rb_wdata, rb_be); step[cn] <= v[19:0]; end
+                    5'h10: begin v = merge({9'd0, vl[cn], 9'd0, vr[cn]}, rb_wdata, rb_be);
+                                 vl[cn] <= v[22:16]; vr[cn] <= v[6:0]; end
                     default: ;
                 endcase
             end
@@ -296,12 +297,12 @@ module audio (
             default: ;
         endcase
         if (rb_rd && sel_c) case (off[4:0])
-            5'h00: rb_rdata <= {28'd0, ctrl[chn], 1'b0};
-            5'h04: rb_rdata <= {9'd0, lc[chn]};
-            5'h08: rb_rdata <= {9'd0, len[chn]};
-            5'h0C: rb_rdata <= {12'd0, step[chn]};
-            5'h10: rb_rdata <= {9'd0, vl[chn], 9'd0, vr[chn]};
-            5'h14: rb_rdata <= {9'd0, pos[chn][38:16]};
+            5'h00: rb_rdata <= {28'd0, ctrl[cn], 1'b0};
+            5'h04: rb_rdata <= {9'd0, lc[cn]};
+            5'h08: rb_rdata <= {9'd0, len[cn]};
+            5'h0C: rb_rdata <= {12'd0, step[cn]};
+            5'h10: rb_rdata <= {9'd0, vl[cn], 9'd0, vr[cn]};
+            5'h14: rb_rdata <= {9'd0, pos[cn][38:16]};
             default: ;
         endcase
     end

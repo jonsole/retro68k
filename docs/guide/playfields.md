@@ -54,7 +54,7 @@ Note that the planes are numbered from 0 here, not from 1. Plane 0 gives bit 0 o
           move.l  #40,L_BPLSTRIDE(a0)     ; layer 1's BPLSTRIDE
   ```
 
-- Write zero to a register with `MOVE.L #0`, never `CLR.L`. The 16-bit registers (BPLSTRIDE, BPLxDAT, SCROLLX, DMACON) sit in the low half of their long word: write them with `MOVE.L`, or with `MOVE.W` to the register's address + 2.
+- Write zero to a register with `MOVE.L #0` rather than `CLR.L`, which reads the register first. The 16-bit registers (BPLSTRIDE, BPLxDAT, SCROLLX, DMACON) sit in the low half of their long word: write them with `MOVE.L`, or with `MOVE.W` to the register's address + 2.
 - The complete examples run in supervisor mode with the vector table in Chip RAM at address 0, as the boot ROM leaves it. They take over the display, so they first turn off whatever the boot ROM left on the screen.
 
 ### About this chapter

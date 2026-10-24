@@ -102,12 +102,12 @@ In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers
 |--------|------|------|-------------|
 | `0x200` | SERCON | EN (0), CTLEN (1), CTLLOCK (2), TXDROP (3) | Link on; recognise control commands (on after reset); keep RESET and UPLOAD working when CTLEN is off; drop old data instead of filling up |
 | `0x204` | SERSTAT | RXCOUNT 27–16, TXSPACE 11–0 | Bytes waiting; room to send (0–2048) |
-| `0x208` | SERDATA | Read: EMPTY (8), byte 7–0. Write: byte 7–0 | Reading the low byte takes one byte; writing it sends one byte |
+| `0x208` | SERDATA | Read: EMPTY (8), byte 7–0. Write: byte 7–0 | Reading the low half takes one byte (a MOVE.L, high half then low, takes one; the high half alone takes nothing); writing the low byte sends one byte |
 | `0x20C` | SERLEVEL | RXLEVEL 27–16, TXLEVEL 11–0 | Interrupt thresholds |
 | `0x210` | SERTIME | 15–0 | RXTIMEOUT time, in microseconds |
 | `0x214` | SERIRQ | RXREADY (0), RXTIMEOUT (1), TXREADY (2), TXOVF (3) | Flags. RXREADY and TXREADY follow the FIFO levels; RXTIMEOUT and TXOVF are sticky, write 1 to clear |
 | `0x218` | SERIRQEN | Same layout as SERIRQ | Interrupt enables |
-| `0x21C` | SERDROP | 15–0 | Read: bytes dropped by TXDROP since last read (then cleared) |
+| `0x21C` | SERDROP | 15–0 | Read: bytes dropped by TXDROP since last read (reading the low half clears it) |
 
 ## 6. FPGA resources
 

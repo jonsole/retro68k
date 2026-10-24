@@ -130,13 +130,7 @@ MOVE writes its 16-bit data to the register half at its offset in the custom blo
 
 ### Registers are written in halves
 
-Every register is 32 bits, in two halves: the **high half** at the register's offset, the **low half** at offset + 2. The copper writes them by the same rule as the CPU (Rule 2 in the Introduction chapter):
-
-- A MOVE to the **high half** is held, not applied.
-- The next MOVE to the **low half** writes both halves together.
-- A MOVE to the low half on its own keeps the register's current high half.
-
-The copper has **its own** holding latch, separate from the CPU's, so a high half held by the copper is never mixed up with one held by the CPU, even when both write registers at the same moment.
+Every register is 32 bits, in two halves: the **high half** at the register's offset, the **low half** at offset + 2. A MOVE writes one half, at once, and keeps the other half, by the same rule as the CPU (Rule 2 in the Introduction chapter), as the Amiga's copper wrote its registers. **Palette entries** are the exception: a MOVE to an entry's high half is held until the copper's next MOVE to that entry's low half, so a colour changes all at once (the copper has its own hold, apart from the CPU's).
 
 This gives three kinds of write:
 
@@ -146,7 +140,7 @@ This gives three kinds of write:
           CMOVE   L0+L_BPLSTRIDE+2,-40    ; layer 0's stride = -40: step back a line
   ```
 
-- **A 32-bit register** (a plane pointer, CTRL, WINX, a palette entry, BGCOLOR, COP1LC) takes two MOVEs, the high half first. `CMOVEL` makes the pair for you, and the register changes all at once when the second MOVE is done, so it is never seen half-written:
+- **A 32-bit register** (a plane pointer, CTRL, WINX, a palette entry, BGCOLOR, COP1LC) takes two MOVEs, the high half first. `CMOVEL` makes the pair for you. Between the two MOVEs the register holds the new high half and the old low half, so write registers the hardware is using where it is not using them: plane pointers and layer settings in the vertical blank or before their line starts, as on the Amiga. (A palette entry changes all at once, when the second MOVE is done.)
 
   ```asm
           CMOVEL  L0+L_BPL0PT,$040000     ; = CMOVE L0+L_BPL0PT,$0004
@@ -155,7 +149,7 @@ This gives three kinds of write:
 
 - **The low half alone**, when the high half is to stay as it is. One MOVE is enough, and it is faster: see "Changing colours" below.
 
-Never write only the high half of a register and leave it: nothing happens until a low half follows, and the copper's next low-half write would complete it.
+Writing only the high half of a palette entry leaves it held: nothing happens until the copper's next MOVE to that entry's low half.
 
 ### Plane pointers
 
@@ -170,7 +164,7 @@ A plane pointer is 23 bits, so it always needs both halves: `CMOVEL`. Setting th
 
 ### Changing colours
 
-A palette entry is a 32-bit register, `$00RRGGBB`: layer 0's colour n is at `PALETTE0 + 4 × n` (layers 1 and 2 have PALETTE1 and PALETTE2, the sprites SPRPALETTE; Chapter 3). The examples here colour layer 0. The high half holds red (`$00RR`), the low half green and blue (`$GGBB`). BGCOLOR, the background colour, is laid out the same way.
+A palette entry is a 32-bit register, `$00RRGGBB`: layer 0's colour n is at `PALETTE0 + 4 × n` (layers 1 and 2 have PALETTE1 and PALETTE2, the sprites SPRPALETTE; Chapter 3). The examples here colour layer 0. The high half holds red (`$00RR`), the low half green and blue (`$GGBB`). BGCOLOR, the background colour, is laid out the same way, but is an ordinary register: each MOVE to it takes effect at once.
 
 - To set a whole colour, use `CMOVEL`:
 
@@ -186,7 +180,7 @@ A palette entry is a 32-bit register, `$00RRGGBB`: layer 0's colour n is at `PAL
 
 Palette writes take effect at once, from the next pixel, so the copper can change a colour in the middle of a line. BGCOLOR is read at the start of each line's picture, so a change made in a line's horizontal blank shows on that line, and one made during its picture shows from the next line. "Copper Timing" gives the details.
 
-**Tip:** Because the held high half waits for its low half, you can write the high half of a colour *before* a WAIT and the low half after it. The whole colour then changes with the one MOVE that follows the WAIT, which the copper has already fetched, so the change is exact to the pixel. Example 5-10 does this. Put nothing but the WAIT between the two MOVEs.
+**Tip:** Because a palette entry's held high half waits for its low half, you can write the high half of a colour *before* a WAIT and the low half after it. The whole colour then changes with the one MOVE that follows the WAIT, which the copper has already fetched, so the change is exact to the pixel. Example 5-10 does this. Put nothing but the WAIT between the two MOVEs.
 
 ---
 
@@ -305,7 +299,7 @@ A write to COP1LC does not move the copper by itself: the new address is used at
 
 ### Jump strobes
 
-**COPJMP1** and **COPJMP2** are **strobes**: writing to them makes something happen, and the value written does not matter. Write the low half (offset + 2), so that the write is not held as a high half.
+**COPJMP1** and **COPJMP2** are **strobes**: writing to them makes something happen, and the value written does not matter. Write the low half (offset + 2): the strobes act on a write to it.
 
 | Strobe | What it does |
 |--------|--------------|
@@ -764,7 +758,7 @@ The place saved is the instruction that was not finished: a WAIT that was still 
 A background list has to follow a few rules:
 
 - **No beam WAITs.** A WAIT for a beam position waits for it in the current frame, so after a resume it would wait for that position in the new frame. Use `CWAITB 0,0`: beam line 0, pixel 0 is the first position of every frame, and always passed, so this waits for the DMA engine only.
-- **Keep MOVE pairs together, and no strobes between them.** If the cut-off comes between the two halves of a `CMOVEL`, the copper runs again from the high half, so the pair is always written whole. Anything between the halves would run twice too.
+- **Mind a pair cut in two.** If the cut-off comes between the two halves of a `CMOVEL`, list 2 carries on from the low half after the frame's list 1: in between, the register holds the new high half and the old low half (a palette entry keeps the copper's held high half, unless list 1 writes a palette high half itself). Write the registers list 2 uses where that does no harm, or write them in list 1.
 - **End by pointing COP2LC at an idle list.** Otherwise the next COPJMP2 runs the list again from the last place saved.
 - **The CPU hands out work only when the copper is idle.** While a background list runs, the hardware may overwrite COP2LC at the next vertical blank. So the CPU writes COP2LC only when the copper is in the idle list: COPPC tells it where the copper is, or the idle list can raise a COPINT when it is reached.
 
@@ -929,7 +923,7 @@ The panel's picture runs down to the bottom of the window, line 543, which is 12
 Palette writes take effect at once, so the copper can change a colour partway across a line. This list changes two colours in the right half of the screen, from pixel 360, on lines 200 to 299, and puts them back in each horizontal blank. It shows the two ways to make a colour change exact:
 
 - Colour 1 goes from white `$FFFFFF` to yellow `$FFFF00`: only the low half changes, so **one MOVE** does it.
-- Colour 2 goes from red `$FF0000` to sky blue `$0080FF`, which changes both halves. The list writes the new high half **before** the WAIT, where it is held, and the low half after it. The MOVE straight after the WAIT is already fetched, so colour 2 changes exactly at pixel 360. Colour 1's MOVE needs its own fetch and lands a few pixels later.
+- Colour 2 goes from red `$FF0000` to sky blue `$0080FF`, which changes both halves. The list writes the new high half **before** the WAIT, where it is held (a palette entry), and the low half after it. The MOVE straight after the WAIT is already fetched, so colour 2 changes exactly at pixel 360. Colour 1's MOVE needs its own fetch and lands a few pixels later.
 
 ```asm
 ; Example 5-10: colours changed in the middle of a line. On lines 200-299,
@@ -943,7 +937,7 @@ copper_list:
             CMOVEL  L0+L_BPL2PT,SCREEN+2*PLANESIZE
             CMOVEL  L0+L_BPL3PT,SCREEN+3*PLANESIZE
             CWAIT   VID_Y0+200,0            ; the start of line 200
-midline:    CMOVE   PALETTE0+2*4,$0000       ; colour 2's new high half: held
+midline:    CMOVE   PALETTE0+2*4,$0000       ; colour 2's new high half: held (a palette entry)
             CWAITP  VID_X0+360              ; the middle of this line
             CMOVE   PALETTE0+2*4+2,$80FF     ; colour 2 = $0080FF, exactly here
             CMOVE   PALETTE0+1*4+2,$FF00     ; colour 1 = $FFFF00, a fetch later
@@ -1076,12 +1070,12 @@ None of them change the flags.
 
 ```
         CLDI    CX,PALETTE0+5*4  ; X = colour 5, high half
-        CMOVXP  $00FF           ; red = $FF (held); X = colour 5, low half
-        CMOVXRP CY              ; green, blue = Y: colour 5 written whole;
+        CMOVXP  $00FF           ; red = $FF (held: a palette entry); X = colour 5, low half
+        CMOVXRP CY              ; green, blue = Y: colour 5 changes all at once;
                                 ; X = colour 6, high half
 ```
 
-**The halves rule still holds.** A MOVR to a high half is held until a low-half write to the same register, which then writes both together, exactly as with CMOVE. Strobes (COPJMP1, COPJMP2, COPINT, a DMA engine start) act on a write to their low half, whether it comes from a MOVE or a MOVR. A MOVR can reach only the custom block, as a MOVE can.
+**The halves rule still holds.** A MOVR writes its half at once, exactly as a CMOVE does (a palette entry's high half is held until the copper's low-half write). Strobes (COPJMP1, COPJMP2, COPINT, a DMA engine start) act on a write to their low half, whether it comes from a MOVE or a MOVR. A MOVR can reach only the custom block, as a MOVE can.
 
 **How a MOVR is made up.** The macros build it; this is for reading a list in memory:
 
@@ -1221,7 +1215,7 @@ This list fills colours 16–47 with a gradient from black towards cyan: 32 colo
             cnop    0,4
 gradient:   CLDI    CX,PALETTE0+16*4     ; colour 16, high half
             CLDI    CY,$0000
-.loop:      CMOVXP  $0000               ; red = 0 (held), X on to the low half
+.loop:      CMOVXP  $0000               ; red = 0 (held: a palette entry), X on to the low half
             CMOVXRP CY                  ; green, blue = Y: the entry is written
             CADDI   CY,$0604            ; green + 6, blue + 4
             CCMPI   CX,PALETTE0+48*4     ; past colour 47?
@@ -1316,8 +1310,8 @@ list1:      CST     CR5,CX              ; save list 2's registers
 idle:       CSTOP
 
 jobs:       CLDI    CY,JOBS&$FFFF       ; the first descriptor
-.next:      CMOVE   DMX0+DMX_CHDESC,JOBS>>16    ; descriptor, high half (held) ...
-            CMOVR   DMX0+DMX_CHDESC+2,CY        ; ... low half: written whole
+.next:      CMOVE   DMX0+DMX_CHDESC,JOBS>>16    ; descriptor, high half ...
+            CMOVR   DMX0+DMX_CHDESC+2,CY        ; ... low half
             CMOVE   DMX0+DMX_CHCTRL+2,DMX_CHCTRL_START_M    ; start it
             CWAITB  0,0                 ; until the engine is idle
             CADDI   CY,JOBSIZE
@@ -1359,7 +1353,7 @@ While it waits, the copper has already fetched the next instruction. When the WA
 - The **first** MOVE after a WAIT is exact. Put the write that must be exact there.
 - The writes after it come one fetch apart each (see "How fast the copper runs" below).
 - A palette change shows within about 1–2 pixels of the WAIT position.
-- To change a whole palette entry exactly, write its high half before the WAIT (it is held) and its low half after it (Example 5-10).
+- To change a whole palette entry exactly, write its high half before the WAIT (a palette entry's high half is held) and its low half after it (Example 5-10). Other registers have no hold: write their halves where a half-changed value does no harm.
 
 The copper holds only one prefetched instruction. A SKIP that skips throws it away, and the copper fetches the instruction after it; a JUMP fetches its target.
 
@@ -1461,7 +1455,7 @@ Some consequences:
 
 | Instruction | Macro | Encoding (32 bits) | Does |
 |-------------|-------|--------------------|------|
-| MOVE | `CMOVE reg,value` | 0, offset (30–16, even), data (15–0) | Writes 16 bits to the register half at offset; a high half is held until its low half follows |
+| MOVE | `CMOVE reg,value` | 0, offset (30–16, even), data (15–0) | Writes 16 bits to the register half at offset, at once (a palette entry's high half is held until its low half follows) |
 | MOVE × 2 | `CMOVEL reg,value` | Two MOVEs: reg, then reg + 2 | Writes a whole 32-bit register |
 | WAIT | `CWAIT line,pixel` | `$80000000` + line << 16 + pixel | Waits until the beam reaches the position in this frame |
 | WAIT (P) | `CWAITP pixel` | `$88000000` + pixel | Waits for the pixel position on this line, or the next if passed |

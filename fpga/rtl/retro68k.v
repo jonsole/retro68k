@@ -166,6 +166,7 @@ module retro68k #(
     wire [23:2] rb_addr  = cw_go ? cw_addr  : dx_go ? dx_addr  : c_rb_addr;
     wire [31:0] rb_wdata = cw_go ? cw_wdata : dx_go ? dx_wdata : c_rb_wdata;
     wire [3:0]  rb_be    = cw_go ? cw_be    : dx_go ? dx_be    : c_rb_be;
+    wire [1:0]  rb_who   = cw_go ? 2'd1 : dx_go ? 2'd2 : 2'd0;          // for the palette's held high halves
     wire [31:0] rd_sys, rd_ser;
     wire        iack;
     wire [2:0]  iack_level;
@@ -284,7 +285,7 @@ module retro68k #(
     wire [10:0] beam_v, beam_h;
     video vid (
         .clk(clk100), .rst(sys_rst),
-        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be),
+        .rb_rd(rb_rd), .rb_wr(rb_wr), .rb_addr(rb_addr), .rb_wdata(rb_wdata), .rb_be(rb_be), .rb_who(rb_who),
         .rb_rdata(rd_vid),
         .irq_vblank(irq_vblank), .irq_line(irq_line), .irq_viderr(irq_viderr),
         .line_tick(line_tick), .frame_tick(frame_tick), .beam_v(beam_v), .beam_h(beam_h),

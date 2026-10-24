@@ -82,7 +82,7 @@ The watchdog is off after reset, so the boot ROM and simple programs need not kn
 
 ## 6. Registers
 
-In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers are 32-bit and follow the 16-bit-halves rule (spec 3, section 2): the low-half write updates the whole register.
+In the system area at `0xF00000`. Spec 3 sets the final addresses. All registers are 32-bit and follow the 16-bit-halves rules (spec 3, section 2): each half is written on its own. Write COUNT and RELOAD while the timer is stopped, or write COUNT's low half only, so a running timer never counts from half a new value.
 
 **Time counter:**
 

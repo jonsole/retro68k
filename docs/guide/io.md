@@ -157,7 +157,7 @@ Any PS/2 keyboard plugs into the KS3's PS/2 socket. It sends **scan codes** (set
 |------|--------|----------|
 | KBCON | `$400` | EN (0): on. Off empties the FIFO |
 | KBSTAT | `$404` | COUNT (4–0): bytes waiting (0–16). TXBUSY (8): a byte is going to the keyboard |
-| KBDATA | `$408` | Reading takes a byte (7–0). EMPTY (8): there was none |
+| KBDATA | `$408` | Reading the low half takes a byte (7–0); `MOVE.L` takes one. EMPTY (8): there was none |
 | KBSEND | `$40C` | Write a byte (7–0) to send it to the keyboard |
 | KBIRQ | `$410` | DATA (0): bytes waiting. PARITY (1), FRAME (2), OVERFLOW (3), TIMEOUT (4): errors, sticky, write 1 to clear |
 | KBIRQEN | `$414` | Interrupt enables, as KBIRQ |

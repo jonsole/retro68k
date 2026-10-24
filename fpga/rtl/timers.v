@@ -34,7 +34,7 @@ module timers (
 
     // ---------------------------------------------------------------- time counter
     reg [63:0] time_c;
-    reg [31:0] time_lo_cap;
+    reg [31:0] time_lo_cap, time_hi_cap;
     always @(posedge clk) time_c <= por ? 64'd0 : time_c + 1'b1;
 
     // ---------------------------------------------------------------- general timers
@@ -156,7 +156,13 @@ module timers (
                     default: ;
                 endcase
             end else case (off)
-                `RM_TIMEHI: begin rb_rdata <= time_c[63:32]; time_lo_cap <= time_c[31:0]; end
+                // the high half captures all 64 bits; the rest come from the capture
+                `RM_TIMEHI: if (rb_be[3:2] != 2'b00) begin
+                                rb_rdata    <= time_c[63:32];
+                                time_hi_cap <= time_c[63:32];
+                                time_lo_cap <= time_c[31:0];
+                            end else
+                                rb_rdata <= time_hi_cap;
                 `RM_TIMELO: rb_rdata <= time_lo_cap;
                 `RM_WDCTRL: rb_rdata <= {30'd0, wd_lock, wd_en};
                 `RM_WDTIME: rb_rdata <= {16'd0, wd_time};

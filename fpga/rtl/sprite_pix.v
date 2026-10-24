@@ -2,8 +2,8 @@
 //
 // The sprite's line runs from pixel 720 of the line before (x = -144, in
 // the horizontal blank) to pixel 719 of its own line, so that a sprite can
-// start up to 144 pixels left of the screen: those pixels go by in the
-// blank and are not shown. Inside its span the unit takes words from the
+// start left of the screen: those pixels go by in the blank and are not
+// shown. Its settings are taken at t = 12, so HSTART must be 16 or more. Inside its span the unit takes words from the
 // front of its FIFO (sprites.v writes them at the back, at 100 MHz) and
 // shows their pixels, scaled by XSTEP: screen pixel i shows source pixel
 // floor(i x XSTEP / 2048). Its place in the image is a pixel in the front
@@ -14,14 +14,15 @@
 // taken when it is passed, and the word in use after the span's last pixel
 // is taken then, used up or not. If the FIFO is empty when a word is
 // needed, a DMA sprite underruns: it shows nothing more until the FIFO is
-// flushed (each vertical blank). A sprite fed by the CPU (DMA off) just
-// shows nothing until a word comes.
+// flushed (its CTL written again). A sprite fed by the CPU (DMA off) just
+// shows nothing until a word comes. After a flush the sprite is off for
+// the rest of the line (the fetcher has dropped that line's words).
 module sprite_pix (
     input  wire               clk_pix,
     input  wire               en,              // video on
     input  wire [9:0]         t,               // the place on the sprite's line: 0 at pixel 720 of the line before, 144 at pixel 0
 
-    // This sprite line's settings (from video.v, taken at pixel 719)
+    // This sprite line's settings (from video.v, taken at t = 12)
     input  wire               act,             // the sprite shows on this line
     input  wire [9:0]         hs,              // first pixel, as t (0-864)
     input  wire [9:0]         xe,              // pixel after the last shown, as t (0-864)
@@ -63,7 +64,8 @@ module sprite_pix (
     wire [5:0] cnt   = wp - rp;
     wire       avail = cnt[5] ? (cnt == 6'd32) : (cnt != 6'd0);   // (more than 32: the reads have passed the writes)
 
-    wire in_span = act && (t >= hs) && (t < xe);
+    reg  skip;                         // flushed during this line: off until the next
+    wire in_span = act && !skip && (t >= hs) && (t < xe);
     wire last_px = (t + 1'b1 == xe);
 
     reg  [2:0]  p;                     // pixel in the word
@@ -85,6 +87,7 @@ module sprite_pix (
     wire [2:0]  np   = npix[2:0] & ppm1[2:0];
 
     always @(posedge clk_pix) begin
+        if (t == 10'd12) skip <= 1'b0;     // the next line's settings are taken
         if (!en) begin
             rp          <= 6'd0;
             p           <= 3'd0;
@@ -93,13 +96,15 @@ module sprite_pix (
             opaque      <= 1'b0;
             flush_ack_t <= fl_s[1];
             underrun_t  <= 1'b0;
+            skip        <= 1'b0;
         end else if (fl_s[1] != flush_ack_t) begin
-            // The FIFO was emptied: start again
+            // The FIFO was emptied: start again, from the next line
             rp          <= 6'd0;
             p           <= 3'd0;
             f           <= 11'd0;
             dead        <= 1'b0;
             opaque      <= 1'b0;
+            skip        <= 1'b1;
             flush_ack_t <= fl_s[1];
         end else if (in_span && !dead && avail) begin
             opaque <= (value != 8'd0) && (t >= 10'd144);

@@ -2,24 +2,30 @@
 //
 // Eight sprites. Each has a pointer into its image (SPRxPT), a window
 // (SPRxH, SPRxV) and settings (SPRxCTL), written by the CPU or copper, and
-// a 32-word FIFO: its data registers. The fetcher keeps each FIFO filled
-// while the sprite's window has lines to come this frame, one word at a
-// time through the scheduler's sprite channel (dmac.v), the sprite with the
-// nearest deadline first. The pixel side (sprite_pix.v) takes the words.
+// a 32-word FIFO: its data registers. The fetcher fetches each line's
+// words during that line, one word at a time through the scheduler's sprite
+// channel (dmac.v), the sprite with the nearest deadline first. The pixel
+// side (sprite_pix.v) takes the words.
 //
 // What one sprite line takes: the words that hold its shown pixels, from
 // HSTART to HSTOP or the end of the line (beam pixel 864), whichever
 // comes first: wv = ceil(ceil(shown width x XSTEP / 2048) x bpp / 16). An
 // image line in memory is wf words: the same for the whole window width.
-// The fetcher takes a line's first wv words. At the end of each screen line
-// the line's start moves on by k x wf words, k the source lines YSTEP moves
-// on (0 when a line shows again); a shared line-advance unit does the
-// multiply, holding that sprite's fetches for two clocks.
+// The fetcher takes a line's first wv words.
 //
-// A sprite starts again at each vertical blank, and when its PT, H, V,
-// CTL or STEP is written: its FIFO is emptied (both clock domains agree on it with
-// a handshake), reads still on their way are dropped, and fetching
-// restarts from the line start.
+// Each line's settings: the size calculator's results are written only in
+// a window near the end of each line (beam pixels 840-847), so they hold
+// still for the next line, and both the fetcher and the pixel side use the
+// same values. At the start of each line (beam pixel 0) a short pass visits
+// the sprites, one a clock: a running sprite whose window covers the line
+// shows on it; its line start moves on by k x wf words (k the source lines
+// YSTEP moves on, 0 when a line shows again; not on its first line or after
+// a PT write), and its words are fetched from there. The pixel side takes
+// which sprites show at beam pixel 12 (so HSTART must be 16 or more).
+//
+// A write to SPRxCTL starts a sprite; the vertical blank stops them all.
+// Either way its FIFO is emptied (both clock domains agree on it with a
+// handshake) and reads still on their way are dropped.
 //
 // Deadlines: one shared calculator visits a sprite each clock and works
 // out, from the beam, when its FIFO will run dry.
@@ -55,8 +61,7 @@ module sprites (
     // 144 = the picture's first pixel, 863 its last)
     output wire [79:0] p_hs,           // 8 x 10: first pixel (0-864)
     output wire [79:0] p_xe,           // 8 x 10: pixel after the last shown (0-864)
-    output wire [87:0] p_vs,           // 8 x 11: first line
-    output wire [87:0] p_ve,           // 8 x 11: line after the last, no higher than 625
+    output wire [7:0]  p_act,          // shows on this line (set at its start)
     output wire [15:0] p_lb,           // 8 x 2: log2 bits per pixel (1-3)
     output wire [127:0] p_xstep,       // 8 x 16: XSTEP, limited (5.11 source pixels per screen pixel)
     output wire [15:0] p_depth,
@@ -116,25 +121,23 @@ module sprites (
 
     // ================================================================ per-sprite sizes
     // Worked out from the registers by one shared calculator, a sprite a
-    // clock (cs), and kept in registers. A register write marks its sprite
-    // not fresh until the calculator has been round again; a restart waits
-    // for that.
+    // clock (cs), and kept in registers: written only in the window near
+    // the end of each line (upd), so they are the next line's settings.
     reg  [9:0]  hs_t [0:7], xe_t [0:7];        // the window across, on the line's timeline t
     reg  [10:0] ve_c [0:7];
     reg  signed [3:0] wsh [0:7];               // log2 of screen pixels per word, rounded down (for the deadlines)
     reg  [11:0] wf [0:7], wv [0:7];            // words per image line; per shown line
-    reg  [10:0] nl [0:7];                      // screen lines shown
-    reg  [7:0]  fresh = 8'd0;
     reg  [2:0]  cs = 3'd0;
+    wire        upd = (beam_h >= 11'd840) && (beam_h < 11'd848);
+    reg  [1:0]  upd_d;                         // ... two clocks on, for stage 3
+    always @(posedge clk) upd_d <= {upd_d[0], upd};
     // Three stages, for timing: 1 reads sprite cs's registers and clamps
     // its window; 2 multiplies the widths by XSTEP; 3 works out the word
-    // counts (sprite c3). The sprite is fresh after stage 3, unless its
-    // registers were written while stage 1 or 2 had it.
+    // counts (sprite c3). Stage 3 writes for the same visits as stage 1.
     reg  [2:0]  c2, c3;
-    reg         ok2, ok3;
     reg  [12:0] wfull2, wshow2;
     reg  [15:0] xs2;
-    reg  [10:0] vs2, vec2, vs3, vec3;
+    reg  [10:0] vs2, vec2;
     reg  [1:0]  bpp2, bpp3;
     reg  [28:0] pf3, ps3;              // widths x XSTEP
     // log2 of 2048 / XSTEP, rounded down (bigger across: positive)
@@ -144,7 +147,7 @@ module sprites (
             top = 7;
             for (b = 7; b <= 15; b = b + 1) if (s[b]) top = b;
             m   = (((s & (s - 1'b1)) == 16'd0) ? 11 : 10) - top;    // a power of two exactly, or between
-            mag = m;
+            mag = m[3:0];
         end
     endfunction
     always @(posedge clk) begin : sizes
@@ -158,20 +161,22 @@ module sprites (
         hs = m_h[cs][10:0]; he = m_h[cs][21:11]; vs = m_v[cs][10:0]; ve = m_v[cs][21:11];
         bpp = m_c[cs][1:0];
         xs  = lim(m_s[cs][15:0]);
-        r_vs[cs]    <= vs;
-        r_bpp[cs]   <= bpp;
-        r_depth[cs] <= m_c[cs][3:2];
-        r_pal[cs]   <= m_c[cs][7:4];
-        r_xs[cs]    <= xs;
-        r_ys[cs]    <= lim(m_s[cs][31:16]);
         // all in beam coordinates: the line is beam pixels 0-863, the frame lines 0-624
         hsc   = (hs > 11'd864) ? 11'd864 : hs;
         xec   = (he > 11'd864) ? 11'd864 : (he < hsc) ? hsc : he;
         vec   = (ve > 11'd625) ? 11'd625 : ve;
-        hs_t[cs]  <= hsc[9:0];
-        xe_t[cs]  <= xec[9:0];
-        wsh[cs]   <= $signed({2'b00, 2'd3 - bpp}) + mag(xs);
-        ve_c[cs]  <= vec;
+        if (upd) begin
+            r_vs[cs]    <= vs;
+            r_bpp[cs]   <= bpp;
+            r_depth[cs] <= m_c[cs][3:2];
+            r_pal[cs]   <= m_c[cs][7:4];
+            r_xs[cs]    <= xs;
+            r_ys[cs]    <= lim(m_s[cs][31:16]);
+            hs_t[cs]    <= hsc[9:0];
+            xe_t[cs]    <= xec[9:0];
+            wsh[cs]     <= $signed({2'b00, 2'd3 - bpp}) + mag(xs);
+            ve_c[cs]    <= vec;
+        end
         wfull2 <= (he > hs) ? {2'd0, he - hs} : 13'd0;
         wshow2 <= {2'd0, xec - hsc};
         xs2    <= xs;
@@ -179,34 +184,27 @@ module sprites (
         vec2   <= vec;
         bpp2   <= bpp;
         c2     <= cs;
-        ok2    <= !(rb_wr && sel_s && sn == cs);
         cs     <= cs + 1'b1;
         // stage 2
         pf3  <= wfull2 * xs2;
         ps3  <= wshow2 * xs2;
-        vs3  <= vs2;
-        vec3 <= vec2;
         bpp3 <= bpp2;
         c3   <= c2;
-        ok3  <= ok2 && !(rb_wr && sel_s && sn == c2);
         // stage 3: source pixels = ceil(width x XSTEP / 2048), then words
-        srcf  = (pf3 + 29'd2047) >> 11;
-        srcs  = (ps3 + 29'd2047) >> 11;
+        /* verilator lint_off WIDTHTRUNC */ srcf  = (pf3 + 29'd2047) >> 11; /* verilator lint_on WIDTHTRUNC */
+        /* verilator lint_off WIDTHTRUNC */ srcs  = (ps3 + 29'd2047) >> 11; /* verilator lint_on WIDTHTRUNC */
         bf    = ({3'd0, srcf} << (bpp3 + 1'b1)) + 21'd15;
         bs    = ({3'd0, srcs} << (bpp3 + 1'b1)) + 21'd15;
-        wf[c3]    <= (bf[20:4] > 17'd4095) ? 12'd4095 : bf[15:4];
-        wv[c3]    <= (srcs == 18'd0) ? 12'd0 : (bs[20:4] > bf[20:4]) ? ((bf[20:4] > 17'd4095) ? 12'd4095 : bf[15:4])
+        if (upd_d[1]) begin
+            wf[c3]  <= (bf[20:4] > 17'd4095) ? 12'd4095 : bf[15:4];
+            wv[c3]  <= (srcs == 18'd0) ? 12'd0 : (bs[20:4] > bf[20:4]) ? ((bf[20:4] > 17'd4095) ? 12'd4095 : bf[15:4])
                                      : (bs[20:4] > 17'd4095) ? 12'd4095 : bs[15:4];
-        nl[c3]    <= (vs3 < vec3) ? vec3 - vs3 : 11'd0;
-        fresh     <= (fresh | (ok3 ? (8'd1 << c3) : 8'd0)) & ~((rb_wr && sel_s) ? (8'd1 << sn) : 8'd0);
-        if (rst) fresh <= 8'd0;            // (cs keeps counting: reset clears the registers one a clock)
+        end
     end
 
     generate for (g = 0; g < 8; g = g + 1) begin : outs
         assign p_hs[10*g +: 10]  = hs_t[g];
         assign p_xe[10*g +: 10]  = xe_t[g];
-        assign p_vs[11*g +: 11]  = r_vs[g];
-        assign p_ve[11*g +: 11]  = ve_c[g];
         assign p_lb[2*g +: 2]    = r_bpp[g] + 1'b1;
         assign p_xstep[16*g +: 16] = r_xs[g];
         assign p_depth[2*g +: 2] = r_depth[g];
@@ -232,36 +230,56 @@ module sprites (
 
     // ================================================================ fetch state
     // Each sprite's place in its image, in distributed RAM (one write a clock):
-    // the next word, the line's start (SPRxPT reads it), the words of the
-    // line still to fetch, the lines still to fetch (counting this one), and
-    // the fraction of YSTEP. Writers, in order: a PT write (the line start),
-    // the line-advance unit, a flush done, a word asked for.
+    // the line's start (SPRxPT reads it), the next word, the words of the
+    // line still to fetch, and the fraction of YSTEP. Writers: a PT write
+    // (the line start), the line-start pass, a word asked for.
     reg  [22:0] m_lst [0:7];
     reg  [22:0] m_ptr [0:7];
     reg  [11:0] m_wl  [0:7];
-    reg  [10:0] m_ll  [0:7];
     reg  [10:0] m_yf  [0:7];
-    reg  [7:0]  lad;                           // waiting for the line-advance unit
-    reg  [7:0]  alive;                         // lines still to fetch this frame
+    reg  [7:0]  run;                           // started (a CTL write) this frame
+    reg  [7:0]  pend;                          // has shown a line since it started or PT was written
+    reg  [7:0]  line_act;                      // shows on this line
+    reg  [7:0]  alive;                         // this line's words still to fetch
     reg  [7:0]  epoch, flushing;
+    assign p_act = line_act;
     reg  [7:0]  fa_s1, fa_s2;
     reg  [6:0]  dl [0:7];                      // deadlines, in units of 8 clocks
 
-    // Restart requests: a register write (this clock) or the vertical blank
-    wire        w_reg   = rb_wr && sel_s && sr != 3'd4;          // PT, H, V, CTL, STEP
+    // Starting (a CTL write) and stopping (the vertical blank) both empty the FIFO
+    wire        w_ctl   = rb_wr && sel_s && sr == 3'd3;
     wire        w_pt    = rb_wr && sel_s && sr == 3'd0;
-    wire [7:0]  restart = (vblank ? 8'hFF : 8'd0) | (w_reg ? (8'd1 << sn) : 8'd0);
+    wire [7:0]  restart = (vblank ? 8'hFF : 8'd0) | (w_ctl ? (8'd1 << sn) : 8'd0);
 
-    // A flush done: the pixel side has emptied its end, and the sizes are fresh
-    wire        la_w;                          // the line-advance unit writes this clock
-    wire [7:0]  fdone = flushing & ~(fa_s2 ^ flush_t) & fresh & {8{!la_w}};
-    reg  [2:0]  fd;
-    always @(*) begin : fdsel
-        integer s;
-        fd = 3'd0;
-        for (s = 7; s >= 0; s = s - 1) if (fdone[s]) fd = s[2:0];
-    end
-    wire        fd_go = |fdone;
+    // A flush done: the pixel side has emptied its end
+    wire [7:0]  fdone = flushing & ~(fa_s2 ^ flush_t);
+
+    // The line-start pass: at beam pixel 0 of each line (not line 0, where
+    // the vertical blank stops every sprite), three stages, a sprite a clock:
+    // A whether it shows and how far its line start moves; B the multiply;
+    // C the writes. It holds still in a clock with a PT write (which has the
+    // line-start RAM), and fetching waits for it.
+    reg         bz;
+    always @(posedge clk) bz <= (beam_h == 11'd0);
+    wire        line_go = (beam_h == 11'd0) && !bz && (beam_v != 11'd0);
+    reg  [3:0]  ba;                            // stage A's sprite; 8: done
+    reg         b_v, cv, b_show, c_show, b_e, c_e;
+    reg  [2:0]  b_s, c_s;
+    reg  [4:0]  b_k;
+    reg  [10:0] b_yf, c_yf;
+    reg  [22:0] b_lst, c_lst;
+    reg  [11:0] b_wf, b_wv, c_wv;
+    reg  [16:0] c_p;
+    wire        bu_go   = !w_pt;
+    wire        bu_busy = !ba[3] || b_v || cv;
+    wire [2:0]  a       = ba[2:0];
+    wire        a_show  = run[a] && beam_v >= r_vs[a] && beam_v < ve_c[a] && wv[a] != 12'd0;
+    wire [11:0] a_sum   = {1'b0, m_yf[a]} + {1'b0, r_ys[a][10:0]};
+    wire [5:0]  a_kw    = {1'b0, r_ys[a][15:11]} + a_sum[11];
+    wire [4:0]  a_k     = pend[a] ? a_kw[4:0] : 5'd0;   // source lines to move on: 0-16
+    wire [10:0] a_yf    = pend[a] ? a_sum[10:0] : 11'd0;
+    wire        c_w     = cv && bu_go && c_e == epoch[c_s];
+    wire [22:0] c_next  = c_lst + {5'd0, c_p, 1'b0};
 
     // Who asks next (a clock ahead): of the sprites that want a word, the
     // nearest deadline, the lower number on a tie. For timing, which
@@ -278,7 +296,7 @@ module sprites (
     always @(posedge clk) begin : wants
         integer s;
         for (s = 0; s < 8; s = s + 1)
-            want[s] <= !rst && active[s] && !flushing[s] && alive[s] && !lad[s] && (fill[s] < 7'd30);
+            want[s] <= !rst && active[s] && !flushing[s] && alive[s] && (fill[s] < 7'd30);
     end
     // one pair: b wins only if it wants a word and a has none or a later deadline
     reg         t1v [0:3], t2v [0:1];
@@ -288,9 +306,9 @@ module sprites (
         integer k;
         for (k = 0; k < 4; k = k + 1)
             if (want[2*k+1] && (!want[2*k] || dl[2*k+1] < dl[2*k])) begin
-                t1v[k] = 1'b1; t1i[k] = 2*k+1; t1d[k] = dl[2*k+1];
+                t1v[k] = 1'b1; t1i[k] = {k[1:0], 1'b1}; t1d[k] = dl[2*k+1];
             end else begin
-                t1v[k] = want[2*k]; t1i[k] = 2*k; t1d[k] = dl[2*k];
+                t1v[k] = want[2*k]; t1i[k] = {k[1:0], 1'b0}; t1d[k] = dl[2*k];
             end
         for (k = 0; k < 2; k = k + 1)
             if (t1v[2*k+1] && (!t1v[2*k] || t1d[2*k+1] < t1d[2*k])) begin
@@ -308,32 +326,12 @@ module sprites (
     reg  [2:0]  req_s;
     assign mem_deadline = {dl[req_s], 3'b000};
     assign mem_urgent   = mem_req && (dl[req_s] < 7'd5);
-    wire        issue   = pk_v && active[pk] && !flushing[pk] && alive[pk] && !lad[pk] && !restart[pk]
-                          && (!mem_req || mem_ack) && !w_pt && !fd_go && !la_w;
+    wire        issue   = pk_v && active[pk] && !flushing[pk] && alive[pk] && !restart[pk]
+                          && (!mem_req || mem_ack) && !bu_busy;
 
-    // The picked sprite's next pointer and line
+    // The picked sprite's next word
     wire [22:0] p_cur   = m_ptr[pk];
-    wire [22:0] p_lst   = m_lst[pk];
     wire        endline = (m_wl[pk] == 12'd1);
-    wire [11:0] y_sum   = {1'b0, m_yf[pk]} + {1'b0, r_ys[pk][10:0]};
-    wire [4:0]  y_k     = {1'b0, r_ys[pk][15:11]} + y_sum[11];    // source lines to move on: 0-16
-
-    // The line-advance unit: line start + k x wf words, two clocks after
-    // the line's last word is asked for
-    reg         la_v1, la_v2;
-    reg  [2:0]  la_s;
-    reg  [4:0]  la_k;
-    reg  [10:0] la_yf;
-    reg  [22:0] la_lst;
-    reg  [11:0] la_wf;
-    reg  [16:0] la_p;
-    reg         la_e;                          // the sprite's epoch when it was asked
-    assign la_w = la_v2 && !w_pt && la_e == epoch[la_s];   // a PT write has the line-start RAM that clock
-    wire [22:0] la_next = la_lst + {5'd0, la_p, 1'b0};
-
-    // The flushed sprite's first word
-    wire [22:0] f_lst   = m_lst[fd];
-    wire [11:0] f_wv    = wv[fd];
 
     // Reads on their way: sprite and epoch
     reg  [2:0]  q_s [0:3];
@@ -368,7 +366,7 @@ module sprites (
     reg  [9:0]  bt, btr;                       // t; 864 - t
     always @(posedge clk) begin
         bt  <= beam_h[9:0];
-        btr <= 11'd864 - beam_h;
+        /* verilator lint_off WIDTHTRUNC */ btr <= 11'd864 - beam_h; /* verilator lint_on WIDTHTRUNC */
     end
     wire [2:0]  rr = cs;
     reg  [2:0]  d1_rr, d2_rr, d3_rr;
@@ -394,7 +392,7 @@ module sprites (
         d2_tot <= d1_dpx + wpx;
         d2_rr  <= d1_rr;
         // 3: x 3.5 / 8, less 2 units
-        c7 = {d2_tot[8:0], 3'b000} - {1'b0, d2_tot};
+        /* verilator lint_off WIDTHTRUNC */ c7 = {d2_tot[8:0], 3'b000} - {1'b0, d2_tot}; /* verilator lint_on WIDTHTRUNC */
         d3_dl <= (d2_tot >= 14'd292) ? 7'h7F : (c7[11:4] < 8'd2) ? 7'd0 : c7[10:4] - 2'd2;
         d3_rr <= d2_rr;
     end
@@ -403,7 +401,7 @@ module sprites (
     // The registers: written by halves (merged with the old value)
     wire [31:0] h_v = merge({5'd0, m_h[sn][21:11], 5'd0, m_h[sn][10:0]}, rb_wdata, rb_be);
     wire [31:0] v_v = merge({5'd0, m_v[sn][21:11], 5'd0, m_v[sn][10:0]}, rb_wdata, rb_be);
-    wire [31:0] c_v = merge({4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, 2'd0, m_c[sn][1:0], 12'd0}, rb_wdata, rb_be);
+    wire [31:0] c_v = merge({4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, m_c[sn][1:0], 12'd0}, rb_wdata, rb_be);
     wire [31:0] s_v = merge(m_s[sn], rb_wdata, rb_be);
     wire [2:0]  ra  = rst ? cs : sn;
     always @(posedge clk) begin
@@ -416,27 +414,26 @@ module sprites (
     // a PT write: the new line start, merged by halves
     wire [31:0] lst_v   = merge({9'd0, m_lst[sn]}, rb_wdata, rb_be);
     wire [22:0] lst_new = {lst_v[22:1], 1'b0};
+    wire        c_set = c_w && c_show;        // the line-start pass sets up a shown line
     always @(posedge clk) begin
         if (w_pt)
             m_lst[sn] <= lst_new;
-        else if (la_w)
-            m_lst[la_s] <= la_next;
+        else if (c_set)
+            m_lst[c_s] <= c_next;
     end
-    wire [2:0]  mwa = la_w ? la_s : fd_go ? fd : pk;
+    wire [2:0]  mwa = c_set ? c_s : pk;       // (no word is asked for during the pass)
     always @(posedge clk) begin
-        if (la_w || fd_go || issue)
-            m_ptr[mwa] <= la_w ? la_next : fd_go ? f_lst : p_cur + 23'd2;
-        if (fd_go || issue) begin
-            m_wl[mwa]  <= fd_go ? f_wv : endline ? wv[pk] : m_wl[pk] - 1'b1;
-            m_ll[mwa]  <= fd_go ? nl[fd] : endline ? m_ll[pk] - 1'b1 : m_ll[pk];
+        if (c_set || issue) begin
+            m_ptr[mwa] <= c_set ? c_next : p_cur + 23'd2;
+            m_wl[mwa]  <= c_set ? c_wv : m_wl[pk] - 1'b1;
         end
-        if (la_w || fd_go)
-            m_yf[mwa]  <= la_w ? la_yf : 11'd0;
+        if (c_set)
+            m_yf[c_s]  <= c_yf;
     end
     integer ii;
     initial for (ii = 0; ii < 8; ii = ii + 1) begin
         m_h[ii] = 22'd0; m_v[ii] = 22'd0; m_c[ii] = 8'd0; m_s[ii] = 32'd0;
-        m_lst[ii] = 23'd0; m_ptr[ii] = 23'd0; m_wl[ii] = 12'd0; m_ll[ii] = 11'd0; m_yf[ii] = 11'd0;
+        m_lst[ii] = 23'd0; m_ptr[ii] = 23'd0; m_wl[ii] = 12'd0; m_yf[ii] = 11'd0;
     end
 
     // ================================================================ main
@@ -457,9 +454,10 @@ module sprites (
             mem_req <= 1'b0;
             q_h <= 2'd0; q_t <= 2'd0;
             epoch <= 8'd0; flushing <= 8'd0; alive <= 8'd0;
+            run <= 8'd0; pend <= 8'd0; line_act <= 8'd0;
             flush_t <= 8'd0;
             pk_v <= 1'b0;
-            la_v1 <= 1'b0; la_v2 <= 1'b0; lad <= 8'd0;
+            ba <= 4'd8; b_v <= 1'b0; cv <= 1'b0;
             for (i = 0; i < 8; i = i + 1) begin
                 wp[i] <= 6'd0; infl[i] <= 4'd0;
                 dl[i] <= 7'h7F;
@@ -486,40 +484,31 @@ module sprites (
                 mem_addr <= p_cur[21:1];
                 q_s[q_t + (mem_ack ? 1'b1 : 1'b0)] <= pk;
                 q_e[q_t + (mem_ack ? 1'b1 : 1'b0)] <= epoch[pk];
-                if (endline && m_ll[pk] == 11'd1)
-                    alive[pk] <= 1'b0;         // the window's last line is fetched
-                else if (endline) begin
-                    // the next line's start: from the line-advance unit
-                    lad[pk] <= 1'b1;
-                    la_v1   <= 1'b1;
-                    la_s    <= pk;
-                    la_k    <= y_k;
-                    la_yf   <= y_sum[10:0];
-                    la_lst  <= p_lst;
-                    la_wf   <= wf[pk];
-                    la_e    <= epoch[pk];
-                end
-            end
-            // ---- the line-advance unit: multiply, then write (a PT write first)
-            if (la_v1) begin
-                la_p  <= la_k * la_wf;
-                la_v1 <= 1'b0;
-                la_v2 <= 1'b1;
-            end
-            if (la_w) begin
-                la_v2     <= 1'b0;
-                lad[la_s] <= 1'b0;
-            end
-            if (la_v2 && la_e != epoch[la_s]) begin
-                la_v2     <= 1'b0;             // the sprite started again: drop it
-                lad[la_s] <= 1'b0;
+                if (endline) alive[pk] <= 1'b0;   // the line's last word
             end
 
-            // ---- a flush done: all lines to come
-            if (fd_go) begin
-                flushing[fd] <= 1'b0;
-                alive[fd]    <= (f_wv != 12'd0) && (nl[fd] != 11'd0);
+            // ---- the line-start pass
+            if (line_go)
+                ba <= 4'd0;
+            else if (bu_go && !ba[3])
+                ba <= ba + 1'b1;
+            if (bu_go) begin
+                b_v <= !ba[3] && !line_go;
+                b_s <= a; b_show <= a_show; b_e <= epoch[a];
+                b_k <= a_k; b_yf <= a_yf; b_lst <= m_lst[a]; b_wf <= wf[a]; b_wv <= wv[a];
+                cv  <= b_v;
+                c_s <= b_s; c_show <= b_show; c_e <= b_e;
+                c_yf <= b_yf; c_lst <= b_lst; c_p <= b_k * b_wf; c_wv <= b_wv;
             end
+            if (c_w) begin
+                line_act[c_s] <= c_show;
+                alive[c_s]    <= c_show;
+                if (c_show) pend[c_s] <= 1'b1;
+            end
+            if (w_pt) pend[sn] <= 1'b0;        // the next line starts exactly there
+
+            // ---- flushes done
+            flushing <= flushing & ~fdone;
 
             // ---- register writes
             if (rb_wr && sel_g && off == `RM_SPRDMA && rb_be[1:0] == 2'b11) begin
@@ -531,15 +520,11 @@ module sprites (
                 case (sr)
                     3'd0: ;                    // the line start: in its RAM, above
                     3'd1, 3'd2, 3'd3: ;        // in their RAMs, below
-                    3'd4: if (rb_be[1:0] == 2'b11 && !active[sn] && !flushing[sn] && cnt[sn] < 6'd32) begin
-                        // manual mode: the CPU or copper pushes a word
-                        ;                      // written above (man_wr)
-                    end
-                    default: ;
+                            default: ;                 // SPRxDAT: written above (man_wr)
                 endcase
             end
 
-            // ---- starting again: empty the FIFO (after the writes above, so they win)
+            // ---- starting and stopping: empty the FIFO (after the writes above, so they win)
             for (i = 0; i < 8; i = i + 1)
                 if (restart[i]) begin
                     epoch[i]    <= ~epoch[i];
@@ -547,7 +532,9 @@ module sprites (
                     flush_t[i]  <= ~flush_t[i];
                     wp[i]       <= 6'd0;
                     alive[i]    <= 1'b0;
-                    lad[i]      <= 1'b0;
+                    line_act[i] <= 1'b0;
+                    pend[i]     <= 1'b0;
+                    run[i]      <= !vblank;    // a CTL write starts it; the vertical blank stops it
                 end
 
             // ---- collisions, a line at a time from the pixel side
@@ -563,7 +550,7 @@ module sprites (
             3'd0: rb_rdata <= {9'd0, m_lst[sn]};
             3'd1: rb_rdata <= {5'd0, m_h[sn][21:11], 5'd0, m_h[sn][10:0]};
             3'd2: rb_rdata <= {5'd0, m_v[sn][21:11], 5'd0, m_v[sn][10:0]};
-            3'd3: rb_rdata <= {4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, 2'd0, m_c[sn][1:0], 12'd0};
+            3'd3: rb_rdata <= {4'd0, m_c[sn][7:4], 2'd0, m_c[sn][3:2], 6'd0, m_c[sn][1:0], 12'd0};
             3'd4: rb_rdata <= {26'd0, cnt[sn]};
             3'd5: rb_rdata <= m_s[sn];
             default: ;

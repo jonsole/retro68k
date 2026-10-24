@@ -43,10 +43,9 @@ If you have programmed the Amiga, most of this will be familiar. The big differe
 
 Every register is 32 bits wide. The 68000 reaches it as two 16-bit halves, so the hardware follows these rules (they are the same for every unit):
 
-- A write to the **high half** is held, not applied. The next write to the **low half** of the same register writes both halves together. `MOVE.L` writes the high half first, so it always works.
-- A write to the low half on its own keeps the current high half.
-- Reading the high half captures the whole register, and the following low-half read returns the captured value, so `MOVE.L` always reads a matching pair.
-- **Never use `CLR.L` on a register.** The 68000's `CLR.L` writes the low half first, so the high half is held and never written. Use `MOVE.L #0,reg` instead.
+- Each half is written on its own, as soon as it is written, keeping the other half. `MOVE.L` writes the high half, then the low half.
+- Each half is read on its own, as it is at that moment. TIME is the exception: reading TIMEHI's high half captures all 64 bits (see "The Time Counter").
+- Don't use `CLR.L` on a FIFO data register such as SERDATA: it reads the register first, which takes a byte. `MOVE.L #0,reg` is always safe.
 - Sticky flags (Access W1C in the tables) are cleared by writing 1. Writing 0 leaves them alone.
 - Unused bits read as 0. Write them as 0.
 
@@ -259,7 +258,7 @@ There are 24 sources, more than fit in the Amiga's 15 bits, so INTENA has **two 
 
 - In each half, writing with the top bit (SET/CLR) = 1 **sets** the bits written as 1; with it = 0, it **clears** them.
 - Sources 0–14 are bits 14–0 of the low half. Sources 15–23 are bits 24–16, in the high half: source n is bit n + 1. `hw.inc` gives every source's bit as `INTB_name` (`INTB_VBLANK` = 0 … `INTB_SERIAL` = 16, `INTB_SOFT` = 19), so you never need to work it out.
-- Each half takes effect as soon as it is written. This is the one exception to the rule that a high-half write is held until the low half follows: you can write either half alone with `MOVE.W`, or both at once with `MOVE.L`.
+- Each half takes effect as soon as it is written, as for every register: you can write either half alone with `MOVE.W`, or both with `MOVE.L`.
 - INTPEND and INTRAW use exactly the same bit positions, so a mask built from `INTB_` names works on all three.
 - Reading INTENA gives the enables; bits 31 and 15 read as 0.
 

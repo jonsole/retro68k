@@ -112,7 +112,7 @@ Since every slot has a CPU cycle, there is no alignment to keep: each access sim
 
 Unused addresses inside a block (e.g. a gap in the custom registers) read as 0 and ignore writes. Only whole unmapped regions give bus errors, so the decoder stays small.
 
-**Byte and word access:** /UDS and /LDS give the bytes. Chip RAM passes them to the SRAM's /UB and /LB. A byte write to a register behaves like a 16-bit write that keeps the other byte; the 16-bit-halves rules then apply (spec 3, section 2).
+**Byte and word access:** /UDS and /LDS give the bytes. Chip RAM passes them to the SRAM's /UB and /LB. A byte write to a register writes that byte and keeps the others. Each 16-bit half is written and read on its own (spec 3, section 2); the register bus carries which half (its byte enables), on reads too, so the units with a read side effect (the FIFO data registers, TIMEHI) can act on the right half.
 
 ## 6. Bus errors
 

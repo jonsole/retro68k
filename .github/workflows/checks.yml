@@ -95,6 +95,20 @@ jobs:
       - name: SD card and PS/2 keyboard against their models
         run: make -C sim iotest
 
+  lint:
+    name: RTL lint (Verilator)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Verilator
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y verilator
+      - name: No value cut short to fit (WIDTHTRUNC is an error)
+        run: sh fpga/lint.sh
+
   ks3-synth:
     name: KS3 synthesis check (Yosys)
     runs-on: ubuntu-latest

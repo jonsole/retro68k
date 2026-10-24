@@ -61,7 +61,7 @@ module intc (
                 if (pending[n] && lvl(n) == l) at[l] = 1'b1;
         maxl = 3'd0;
         for (l = 1; l <= 6; l = l + 1)
-            if (at[l]) maxl = l;
+            if (at[l]) maxl = l[2:0];
     end
 
     // Vector for an acknowledge at iack_level: the lowest pending source at that level
@@ -73,7 +73,7 @@ module intc (
         for (n = 23; n >= 0; n = n - 1)
             if (pending[n] && lvl(n) == iack_level) begin
                 ack_found = 1'b1;
-                ack_src   = n;
+                ack_src   = n[4:0];
             end
         if (iack_level == 3'd7)
             iack_vector = nmi_pend ? 8'd31 : 8'd24;

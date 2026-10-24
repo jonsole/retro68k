@@ -20,12 +20,10 @@
 // Writes are pipelined so a request is ready as each one is taken.
 //
 // Every word access goes through one access unit, which sends it by address:
-//   Chip RAM                the scheduler's DMA engine channel (dmac.v)
-//   palettes, descriptor RAM the register bus, as memory: a word at a time
-//   other custom registers   the register bus, whole long words: a write
-//                            waits for its long word's second half, a read
-//                            keeps the second half for the next word
-//   boot ROM                 its second read port
+//   Chip RAM          the scheduler's DMA engine channel (dmac.v)
+//   the custom block  the register bus, a word (a register half) at a time,
+//                     as the CPU and copper write them (spec 3, section 2)
+//   boot ROM          its second read port
 // Reads come back in the order asked. The unit waits for reads of one kind
 // (Chip RAM or the rest) to come back before starting the other.
 //
@@ -192,7 +190,6 @@ module dmx #(
     reg  [1:0]  w_lb;                  // log2 of bits per pixel
     reg         w_desc, w_irq, w_high;
     reg  [1:0]  w_sk, w_dk;            // SRCKIND, DSTKIND
-    reg         w_regok;               // the job keeps the register rules: it may touch registers
     reg  [31:0] w_val;
     reg  [15:0] w_sstr, w_dstr;
     reg  [26:0] w_nbits;               // bits per row
@@ -209,8 +206,8 @@ module dmx #(
     reg  [3:0]  w_le;                  // bits used in the row's last word (0 = 16)
     reg  [15:0] w_carry;               // the last source word taken
 
-    localparam SW = 3+4+2+1+1+1+2+2+1+32+16+16+27+24+3+3 + 16+24+24 + 23+23+24+24+4+4+1+1+4+16;
-    wire [SW-1:0] w_pack = {w_op, w_fn, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_regok, w_val, w_sstr, w_dstr, w_nbits, w_next,
+    localparam SW = 3+4+2+1+1+1+2+2+32+16+16+27+24+3+3 + 16+24+24 + 23+23+24+24+4+4+1+1+4+16;
+    wire [SW-1:0] w_pack = {w_op, w_fn, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_val, w_sstr, w_dstr, w_nbits, w_next,
                             w_sbit, w_dbit, w_rows, w_srow, w_drow, w_dw, w_sw, w_dleft, w_sleft,
                             w_od, w_t, w_pre, w_first, w_le, w_carry};
     reg  [SW-1:0] st [0:3];
@@ -289,12 +286,12 @@ module dmx #(
     endfunction
 
     // What an address is (spec 11, section 4)
-    localparam C_CHIP = 3'd0, C_IMEM = 3'd1, C_REG = 3'd2, C_ROM = 3'd3, C_BAD = 3'd4;
+    localparam C_CHIP = 3'd0, C_IMEM = 3'd1, C_ROM = 3'd3, C_BAD = 3'd4;
     function [2:0] cls(input [22:0] w);        // a word address
         if (w < CHIP_WORDS)
             cls = C_CHIP;
         else if (w[22:15] == 8'hE0)            // the custom block
-            cls = (w[14:11] == 4'h2 || w[14:10] == 5'b01100) ? C_IMEM : C_REG;   // palettes, descriptor RAM
+            cls = C_IMEM;
         else if (w[22:14] == 9'b1111_1000_0)   // 0xF80000-0xF87FFF
             cls = C_ROM;
         else
@@ -331,7 +328,7 @@ module dmx #(
     always @(*) begin : drpick
         integer i;
         dr_j = 3'd0;
-        for (i = 7; i >= 0; i = i - 1) if (g_dneed[i]) dr_j = i;
+        for (i = 7; i >= 0; i = i - 1) if (g_dneed[i]) dr_j = i[2:0];
     end
     wire [22:0] dr_a = w_desc ? w_dw - dr_j : w_dw + dr_j;
 
@@ -377,41 +374,27 @@ module dmx #(
     end
 
     reg  [4:0]  chip_out;              // Chip RAM reads not yet back
-    reg         p_lo, p_reg;           // the register bus access waiting: its half, a register?
-    reg  [22:0] p_w;
-    reg         rr_v, rr_lo, rr_reg;   // a register bus read comes back this clock (taken from p_ when it went)
-    reg  [22:0] rr_w;
+    reg         p_lo;                  // the register bus access waiting: its half
+    reg         rr_v, rr_lo;           // a register bus read comes back this clock (its half taken from p_lo when it went)
     reg         rom_q, rom_v;          // a ROM read: address out, data back
-    reg         c_v;                   // a word from the read cache comes back this clock
-    reg  [15:0] c_out;
-    reg         rc_v;                  // the read cache: the second half of a register's long word
-    reg  [22:0] rc_w;
-    reg  [15:0] rc_d;
-    reg         hi_v;                  // a register write's first half, waiting for its second
-    reg  [15:0] hi_d;
 
     wire [2:0]  xq_c    = cls(xq_w);
-    wire        xq_bad  = xq_v && (xq_c == C_BAD || (xq_c == C_ROM && xq_we) || (xq_c == C_REG && !w_regok));
-    wire        int_ret = rr_v || rom_q || rom_v || c_v;                  // internal reads coming back
+    wire        xq_bad  = xq_v && (xq_c == C_BAD || (xq_c == C_ROM && xq_we));
+    wire        int_ret = rr_v || rom_q || rom_v;                         // internal reads coming back
     wire        chip_ok = (!mem_req || mem_ack) && !dx_req && !int_ret;
-    wire        bus_ok  = (!dx_req || dx_go) && chip_out == 5'd0 && !rom_q && !rom_v && !c_v;
+    wire        bus_ok  = (!dx_req || dx_go) && chip_out == 5'd0 && !rom_q && !rom_v;
     wire        idle_ok = !dx_req && chip_out == 5'd0 && !int_ret;
-    wire        xq_hit  = !xq_we && xq_c == C_REG && rc_v && rc_w == xq_w;   // the read cache has it
-    wire        xq_hold = xq_we && xq_c == C_REG && !xq_w[0];                // a register write's first half
     wire        xq_take = xq_v && !xq_bad &&
-                          ((xq_c == C_CHIP) ? chip_ok :
-                           (xq_c == C_ROM || xq_hit || (xq_c == C_REG && !xq_we)) ? idle_ok :
-                           xq_hold ? 1'b1 : bus_ok);
+                          ((xq_c == C_CHIP) ? chip_ok : (xq_c == C_ROM) ? idle_ok : bus_ok);
     assign psel      = (w_sk == 2'd1) ? w_srow[0] : w_drow[0];
     assign p_rxpop   = (es == S_PORT) && (w_sk == 2'd1) && xq_take;
     assign p_txpush  = (es == S_PORT) && (w_dk == 2'd1) && p_have && p_txr;
     assign blt_high  = w_high;
     assign blt_share = cpushare[cur];
     // Reads back, in order
-    wire        x_rv = mem_rvalid || rr_v || rom_v || c_v;
+    wire        x_rv = mem_rvalid || rr_v || rom_v;
     wire [15:0] x_rd = mem_rvalid ? mem_rdata :
-                       rr_v ? (rr_lo ? rb_rdall[15:0] : rb_rdall[31:16]) :
-                       rom_v ? rom_rdata : c_out;
+                       rr_v ? (rr_lo ? rb_rdall[15:0] : rb_rdall[31:16]) : rom_rdata;
 
     // ================================================================ the write pipeline
     wire        b_take   = b_v && (b_skip || xq_take);
@@ -446,20 +429,9 @@ module dmx #(
                            : (w_op == `RM_DMX_OP_COPY) ? (w_sk[1] || (w_sk == 2'd1 && w_dk == 2'd1))
                            : (w_op == `RM_DMX_OP_KEYCOPY) ? (w_sk != 2'd0 || w_dk != 2'd0)
                            : (w_sk == 2'd2 || w_sk == 2'd1 || w_dk != 2'd0));     // LOGIC, ADD: memory or VALUE
-    // A port job: linear, 8 bpp, port 0 or 1, its memory side not registers
-    wire [2:0]  pm_cls   = cls(w_sk == 2'd1 ? w_drow[23:1] : w_srow[23:1]);
+    // A port job: linear, 8 bpp, port 0 or 1 (its memory side is checked word by word)
     wire        bad_port = portjob && (w_lb != 2'd3 || w_rows != 16'd1 || w_desc
-                           || (w_sk == 2'd1 ? w_srow : w_drow) > 24'd1
-                           || pm_cls == C_REG || pm_cls == C_BAD || (w_sk == 2'd1 && pm_cls == C_ROM));
-    // The register rules (section 4): COPY or FILL (only COPY reads them),
-    // 8 bpp, forwards, long words: addresses, width and strides
-    wire        s_isreg  = srcmem && cls(w_srow[23:1]) == C_REG;
-    wire        d_isreg  = (w_dk == 2'd0) && cls(w_drow[23:1]) == C_REG;
-    wire        regok    = (!s_isreg || w_op == `RM_DMX_OP_COPY)
-                           && (w_op == `RM_DMX_OP_COPY || w_op == `RM_DMX_OP_FILL)
-                           && w_lb == 2'd3 && !w_desc && w_nbits[1:0] == 2'd0
-                           && (!s_isreg || (w_srow[1:0] == 2'd0 && w_sstr[1:0] == 2'd0))
-                           && (!d_isreg || (w_drow[1:0] == 2'd0 && w_dstr[1:0] == 2'd0));
+                           || (w_sk == 2'd1 ? w_srow : w_drow) > 24'd1);
 
     // Row start
     reg  [26:0] rs_sba, rs_dba;        // the row's first bits
@@ -472,8 +444,7 @@ module dmx #(
             eng_jw <= 1'b0;
             es <= S_IDLE;
             mem_req <= 1'b0; dx_req <= 1'b0; rom_en <= 1'b0;
-            chip_out <= 5'd0; rr_v <= 1'b0; rom_q <= 1'b0; rom_v <= 1'b0; c_v <= 1'b0;
-            rc_v <= 1'b0; hi_v <= 1'b0;
+            chip_out <= 5'd0; rr_v <= 1'b0; rom_q <= 1'b0; rom_v <= 1'b0;
             busy <= 4'd0; done <= 4'd0; err <= 4'd0; pause <= 4'd0; stopreq <= 4'd0;
             dint <= 4'd0; dinten <= 4'd0;
             last_ch <= 2'd3;
@@ -497,40 +468,19 @@ module dmx #(
                 mem_req <= 1'b0;
             chip_out <= chip_out + ((xq_take && xq_c == C_CHIP && !xq_we) ? 5'd1 : 5'd0)
                                  - (mem_rvalid ? 5'd1 : 5'd0);
-            // The register bus: palettes and the descriptor RAM a word at a
-            // time, registers a long word at a time
-            if (xq_take && (xq_c == C_IMEM || xq_c == C_REG) && !xq_hold && !xq_hit) begin
-                dx_req  <= 1'b1;
-                dx_we   <= xq_we;
-                dx_addr <= xq_w[22:1];
-                if (xq_c == C_REG) begin
-                    dx_wdata <= {hi_d, xq_wd};
-                    dx_be    <= 4'b1111;
-                    hi_v     <= 1'b0;
-                end else begin
-                    dx_wdata <= {xq_wd, xq_wd};
-                    dx_be    <= xq_w[0] ? {2'b00, xq_be} : {xq_be, 2'b00};
-                end
-                p_lo  <= xq_w[0];
-                p_reg <= (xq_c == C_REG);
-                p_w   <= xq_w;
-                if (xq_we) rc_v <= 1'b0;             // a write may change what the cache holds
+            // The register bus: a register half (or palette word) at a time,
+            // the half on the byte enables for reads too
+            if (xq_take && xq_c == C_IMEM) begin
+                dx_req   <= 1'b1;
+                dx_we    <= xq_we;
+                dx_addr  <= xq_w[22:1];
+                dx_wdata <= {xq_wd, xq_wd};
+                dx_be    <= xq_w[0] ? {2'b00, xq_we ? xq_be : 2'b11} : {xq_we ? xq_be : 2'b11, 2'b00};
+                p_lo     <= xq_w[0];
             end else if (dx_go)
                 dx_req <= 1'b0;
-            if (xq_take && xq_hold) begin
-                hi_v <= 1'b1;
-                hi_d <= xq_wd;
-            end
             rr_v <= dx_go && !dx_we;
-            if (dx_go) begin rr_lo <= p_lo; rr_reg <= p_reg; rr_w <= p_w; end
-            if (rr_v && rr_reg && !rr_lo) begin      // keep the long word's second half
-                rc_v <= 1'b1;
-                rc_w <= rr_w | 23'd1;
-                rc_d <= rb_rdall[15:0];
-            end
-            // The read cache
-            c_v <= xq_take && xq_hit;
-            if (xq_take && xq_hit) c_out <= rc_d;
+            if (dx_go) rr_lo <= p_lo;
             // The boot ROM
             rom_q <= xq_take && xq_c == C_ROM;
             if (xq_take && xq_c == C_ROM) rom_addr <= xq_w[13:0];
@@ -553,12 +503,11 @@ module dmx #(
             end
 
             S_REST: begin
-                {w_op, w_fn, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_regok, w_val, w_sstr, w_dstr, w_nbits, w_next,
+                {w_op, w_fn, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_val, w_sstr, w_dstr, w_nbits, w_next,
                  w_sbit, w_dbit, w_rows, w_srow, w_drow, w_dw, w_sw, w_dleft, w_sleft,
                  w_od, w_t, w_pre, w_first, w_le, w_carry} <= st[cur];
                 last_ch <= cur;
                 e_bad   <= 1'b0;
-                rc_v    <= 1'b0;
                 r_tot <= 5'd0; r_iss <= 5'd0; r_got <= 5'd0;
                 su_i  <= 3'd0;
                 case (mode[cur])
@@ -626,10 +575,9 @@ module dmx #(
 
             S_CHECK: begin
                 w_nbits <= w_nbits << w_lb;
-                w_regok <= s_isreg || d_isreg;
                 mul_s   <= $signed({1'b0, w_rows - 1'b1}) * $signed(w_sstr);
                 mul_d   <= $signed({1'b0, w_rows - 1'b1}) * $signed(w_dstr);
-                if (bad_op || bad_kind || bad_port || ((s_isreg || d_isreg) && !regok)) begin
+                if (bad_op || bad_kind || bad_port) begin
                     e_addr <= chdesc[cur];
                     e_bad  <= 1'b1;
                     es     <= S_SAVE;
@@ -670,9 +618,9 @@ module dmx #(
                     w_sw <= rs_sba[26:4];
                 end else begin
                     w_od <= 4'd0 - de[3:0];
-                    w_dw <= (de - 1'b1) >> 4;
+                    /* verilator lint_off WIDTHTRUNC */ w_dw <= (de - 1'b1) >> 4; /* verilator lint_on WIDTHTRUNC */
                     w_t  <= 4'd0 - se[3:0];
-                    w_sw <= (se - 1'b1) >> 4;
+                    /* verilator lint_off WIDTHTRUNC */ w_sw <= (se - 1'b1) >> 4; /* verilator lint_on WIDTHTRUNC */
                 end
                 es <= S_ROW3;
             end
@@ -723,7 +671,9 @@ module dmx #(
                     sbuf[r_got[3:0]] <= w_desc ? rev16(x_rd) : x_rd;
                     r_got <= r_got + 1'b1;
                 end
-                if (r_got == r_iss && !(xq_v && !xq_bad && !e_bad) && !mem_req && !dx_req) begin
+                // (a bad access sets e_bad the clock it is seen, so only
+                // "nothing left" or e_bad need looking at here: short paths)
+                if (r_got == r_iss && (r_iss == r_tot || e_bad) && !mem_req && !dx_req) begin
                     if (e_bad) es <= S_DRAIN;
                     else begin
                         w_sw    <= r_a;
@@ -744,7 +694,7 @@ module dmx #(
                     dbuf[q_j[r_got[2:0]]] <= x_rd;
                     r_got <= r_got + 1'b1;
                 end
-                if (r_got == r_iss && !(xq_v && !xq_bad && !e_bad) && !mem_req && !dx_req) begin
+                if (r_got == r_iss && (g_dneed == 8'd0 || e_bad) && !mem_req && !dx_req) begin
                     if (e_bad) es <= S_DRAIN;
                     else begin
                         wj <= 4'd0;
@@ -847,7 +797,6 @@ module dmx #(
             // ---------------------------------------------------- end of a group or job
             S_SAVE: begin
                 st[cur] <= w_pack;
-                hi_v    <= 1'b0;
                 es <= S_IDLE;
                 if (e_bad) begin
                     busy[cur]  <= 1'b0;
@@ -903,7 +852,7 @@ module dmx #(
                     mode[tmr_ch[2*i +: 2]]    <= M_LOAD;
                 end
             if (rb_wr && sel_dmx && rri == 4'd8 && !sel_int && !sel_inten && !busy[rch])
-                chdesc[rch] <= merge({8'd0, chdesc[rch]}, rb_wdata, rb_be);
+                /* verilator lint_off WIDTHTRUNC */ chdesc[rch] <= merge({8'd0, chdesc[rch]}, rb_wdata, rb_be); /* verilator lint_on WIDTHTRUNC */
         end
     end
 endmodule

@@ -26,11 +26,12 @@ An Amiga-style 68000 computer on the ZX Spectrum Next KS3 board (Xilinx XC7A35T,
 | vasm | Build from the vendored copy: `tar xzf tools/vasm/vasm.tar.gz && make -C vasm CPU=m68k SYNTAX=mot`, then put `vasm/` on `PATH` (`vasmm68k_mot`) |
 | Python 3 | Pillow for the PNG output (optional) |
 | Yosys | For the size check (`fpga/ks3/yosys_check.sh`) |
+| Verilator 5 | For the lint (`fpga/lint.sh`). MSYS2 UCRT64 package `verilator` (lint only needs no C++ build) |
 | Vivado | 2026.1. `VIVADO=/c/AMDDesignTools/2026.1/Vivado/bin/vivado.bat bash fpga/ks3/build.sh`. Builds a bitstream (`fpga/ks3/build/retro68k_ks3.bit`) in about 15 minutes; timing met. Not tried on the board yet (it arrives in early November) |
 
 ### Windows
 
-The tools are installed on Jon's Windows machine: MSYS2 (`C:/msys64`, UCRT64 packages: gcc, make, iverilog, yosys, python, python-pillow), sv2v in `C:/tools/sv2v/sv2v-Windows`, vasm built into `C:/tools/vasmsrc/vasm`. All are on the user PATH. Run the Makefiles from an MSYS2 shell (`C:/msys64/usr/bin/bash.exe -l`, with `/ucrt64/bin` first on the PATH), not with Chocolatey's `make`. The repo is checked out with `core.autocrlf=false`: the Python tools need LF files.
+The tools are installed on Jon's Windows machine: MSYS2 (`C:/msys64`, UCRT64 packages: gcc, make, iverilog, yosys, verilator, python, python-pillow), sv2v in `C:/tools/sv2v/sv2v-Windows`, vasm built into `C:/tools/vasmsrc/vasm`. All are on the user PATH. Run the Makefiles from an MSYS2 shell (`C:/msys64/usr/bin/bash.exe -l`, with `/ucrt64/bin` first on the PATH), not with Chocolatey's `make`. The repo is checked out with `core.autocrlf=false`: the Python tools need LF files.
 
 ## Building and testing
 
@@ -47,6 +48,7 @@ All from `sim/` unless noted. See `sim/README.md` for more options.
 | `make iotest` | SD card (start-up, a block read and written by DMA) and PS/2 keyboard (bytes, a bad frame, sending), against `sd_model.v` and `ps2_model.v` | 5 min | yes |
 | `make vtest` | Video: four screens (`pal`, `direct`, `spr`, `share`) checked pixel by pixel against `vtest/vmodel.py`; `make vtest VTESTS=spr` runs one. Each palette gets different colours; `spr` has the 8 sprites at many scales; `share` is `spr` with VIDCON.SHAREPAL | 45 min each | **no** |
 | `bash fpga/ks3/yosys_check.sh` (repo root) | Synthesis for the XC7A35T and the LUT count | 3 min | yes |
+| `sh fpga/lint.sh` (repo root) | Verilator lint: a value cut short to fit (WIDTHTRUNC) is an error; slice it or waive the line | 10 s | yes |
 
 `make BUILD=other_dir ...` builds into another directory, so a second set of runs can go alongside the first (`sim/build*/` is ignored by git). Run long simulations in the background, one per directory. The times above are for 7 runs side by side on a 16-core machine. Don't change `vtest/vmodel.py` or other test scripts while a suite that uses them is running. Edit `regmap.def`, then run `python3 tools/regmap.py` to regenerate the headers; never edit `hw.inc`, `hw.h` or `regmap.vh` by hand.
 
@@ -72,12 +74,12 @@ Done and tested in simulation:
 | PS/2 keyboard: receive with FIFO, send | `ps2kb.v` | iotest |
 | Serial, interrupts, timers | `serial.v`, `intc.v`, `timers.v` | boot |
 
-Size (Vivado): 15,917 LUTs (76.5%), 12 block RAM tiles, 8 DSP slices. Timing met at 100 MHz, worst slack +0.09 ns, in the sprites' deadline calculation (`sprites.v`, `cs` to `dl`). Per unit: video 4,964 (sprites.v 1,809, the 8 sprite pixel units 779, bpldma.v 923), DMA engine 2,327, audio 1,225, copper 665, SD 66, keyboard 87.
+Size (Vivado): 15,730 LUTs (75.6%), 12 block RAM tiles, 8 DSP slices. Timing met at 100 MHz, worst setup slack +0.247 ns (in the audio engine, channel select to sample position), hold +0.027 ns. Per-unit figures from before the sprite rework: video 4,964 (sprites.v 1,809, the 8 sprite pixel units 779, bpldma.v 923), DMA engine 2,327, audio 1,225, copper 665, SD 66, keyboard 87.
 
 ### Recent decisions to know about
 
 - **Beam coordinates** (spec 4, section 3.3). (0, 0) is the start of the horizontal and vertical blanks, so the picture is beam pixels 144–863 and lines 49–624. `hw.inc` has `VID_X0` = 144, `VID_Y0` = 49. Layer settings for line n must be written before line n starts; colours, BGCOLOR and PRIO can still change in line n's blank.
-- **Sprites** have unsigned positions and are clipped at all four edges. No flips. SPRxPT must be written last: a write to PT, H, V, CTL or STEP restarts the sprite. A sprite in manual mode (SPRxDAT) should not be shrunk across.
+- **Sprites** have unsigned positions and are clipped at all four edges. No flips. A write to SPRxCTL starts a sprite and the vertical blank stops them all, so each frame the registers are written with CTL last; PT, H, V and STEP act on a running sprite from the next line (wobbles, zooms, image switches). The fetcher works a line at a time (settings frozen at beam pixels 840-847, a line-start pass at pixel 0, the pixel side takes them at pixel 12), so HSTART must be 16 or more. A sprite in manual mode (SPRxDAT) should not be shrunk across.
 - **Sprite scaling**: screen pixel i shows source pixel ⌊i × XSTEP ÷ 2048⌋; the image is ⌈window × step ÷ 2048⌉. Shrinking across fetches every word (costs memory cycles in proportion); shrinking down skips lines.
 - **DMA engine**: job registers laid out as a descriptor; RUN runs them, START loads CHDESC first; NEXT chains. Register targets keep the register rules (COPY/FILL, 8 bpp, long-aligned, forwards), and are written whole, so strobes fire once. REGLIST was dropped (a COPY into registers does it). LOGIC and ADD take memory or VALUE, not ports. Channels take turns by groups of 8 words.
 - **SD card**: software does the SPI-mode protocol; the hardware moves bytes, and DMA moves blocks. No interrupt.
@@ -89,7 +91,7 @@ In rough order:
 
 1. **Try the bitstream on the board** (early November): HDMI and VGA at 576p, the boot ROM's console, the serial link, then the SD card and keyboard (`fpga/ks3/README.md` says what to expect).
 2. **Boot ROM**: SD card start-up and a small FAT32 reader to load programs (spec 15, section 4); a keyboard decoder and layout table (spec 16); ROMLOCK.
-3. **Timing margin**: +0.09 ns is thin. The sprite deadline calculator (`dcalc` in `sprites.v`, one sprite a clock) is the closest path; registering its inputs or splitting it would give room before more is added.
+3. **Timing margin**: +0.25 ns. The closest path is now in the audio engine (channel select to the sample position's enable); the sprite deadline calculator is pipelined.
 4. **Small items**:
    - wire the 68000 RESET instruction;
    - the serial link surviving a reset (spec);

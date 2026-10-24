@@ -25,6 +25,7 @@ module video (
     input  wire [23:2] rb_addr,
     input  wire [31:0] rb_wdata,
     input  wire [3:0]  rb_be,
+    input  wire [1:0]  rb_who,         // who writes: 0 the CPU, 1 the copper, 2 the DMA engine
     output wire [31:0] rb_rdata,
 
     output wire        irq_vblank,
@@ -235,14 +236,41 @@ module video (
 
     wire [9:0] pal_a = rb_addr[11:2];
     reg [23:0] pal_qa;
-    always @(posedge clk) if (rb_wr && sel_pal) begin
-        if (rb_be[2]) pal[pal_a][23:16] <= rb_wdata[23:16];
-        if (rb_be[1]) pal[pal_a][15:8]  <= rb_wdata[15:8];
-        if (rb_be[0]) pal[pal_a][7:0]   <= rb_wdata[7:0];
+
+    // A colour changes all at once (spec 3, section 2): a write to an
+    // entry's high half (red) alone is held, one for each writer, until
+    // that writer's next write to the same entry's low half, which writes
+    // red with green and blue. A write to both halves at once (or a low
+    // half alone, keeping red) goes in as it is.
+    reg        hv [0:2];               // a high half is held ...
+    reg  [9:0] ha [0:2];               // ... for this entry
+    reg  [7:0] hr [0:2];               // ... red
+    wire       w_hi  = rb_wr && sel_pal && rb_be[3:2] != 2'b00 && rb_be[1:0] == 2'b00;
+    wire       w_lo  = rb_wr && sel_pal && rb_be[1:0] != 2'b00;
+    wire       h_hit = (rb_who != 2'd3) && hv[rb_who] && ha[rb_who] == pal_a;
+    wire       w_r   = w_lo && (rb_be[2] || h_hit);                  // red is written
+    wire [7:0] w_rv  = rb_be[2] ? rb_wdata[23:16] : hr[rb_who];
+    initial begin hv[0] = 1'b0; hv[1] = 1'b0; hv[2] = 1'b0; end
+    always @(posedge clk) begin
+        if (rst) begin
+            hv[0] <= 1'b0; hv[1] <= 1'b0; hv[2] <= 1'b0;
+        end else if (rb_who != 2'd3) begin
+            if (w_hi) begin
+                hv[rb_who] <= rb_be[2];
+                ha[rb_who] <= pal_a;
+                hr[rb_who] <= rb_wdata[23:16];
+            end else if (w_lo && h_hit)
+                hv[rb_who] <= 1'b0;
+        end
+    end
+    always @(posedge clk) if (w_lo) begin
+        if (w_r)       pal[pal_a][23:16] <= w_rv;
+        if (rb_be[1])  pal[pal_a][15:8]  <= rb_wdata[15:8];
+        if (rb_be[0])  pal[pal_a][7:0]   <= rb_wdata[7:0];
     end
     always @(posedge clk) begin
-        if (rb_wr && sel_pal) begin
-            if (rb_be[2]) pal_c[pal_a][23:16] <= rb_wdata[23:16];
+        if (w_lo) begin
+            if (w_r)      pal_c[pal_a][23:16] <= w_rv;
             if (rb_be[1]) pal_c[pal_a][15:8]  <= rb_wdata[15:8];
             if (rb_be[0]) pal_c[pal_a][7:0]   <= rb_wdata[7:0];
         end
@@ -369,7 +397,7 @@ module video (
                 // a group is 16 source pixels in either format
                 fine = l_sx[n];
                 n_pos0[n]   <= fine;
-                n_groups[n] <= ({10'd0, fine} + {3'd0, srcpix} + 14'd15) >> 4;
+                /* verilator lint_off WIDTHTRUNC */ n_groups[n] <= ({10'd0, fine} + {3'd0, srcpix} + 14'd15) >> 4; /* verilator lint_on WIDTHTRUNC */
             end
         end else if (hc == HVIS + 2'd2) begin
             // 3: hand over
@@ -414,7 +442,7 @@ module video (
 
     // ---- sprites (spec 9): the fetcher and FIFOs (100 MHz), and a unit per sprite
     wire [79:0] sp_hs, sp_xe;
-    wire [87:0] sp_vs, sp_ve;
+    wire [7:0]  sp_act;
     wire [15:0] sp_lb, sp_depth;
     wire [127:0] sp_xstep;
     wire [7:0]  sp_dma;
@@ -431,24 +459,24 @@ module video (
         .dmacon(dmacon), .vblank(frame_tick), .beam_v(s_vc), .beam_h(s_hc),
         .mem_req(spr_req), .mem_addr(spr_addr), .mem_deadline(spr_deadline), .mem_urgent(spr_urgent),
         .mem_ack(spr_ack), .mem_rvalid(spr_rvalid), .mem_rdata(disp_rdata),
-        .p_hs(sp_hs), .p_xe(sp_xe), .p_vs(sp_vs), .p_ve(sp_ve), .p_lb(sp_lb),
+        .p_hs(sp_hs), .p_xe(sp_xe), .p_act(sp_act), .p_lb(sp_lb),
         .p_xstep(sp_xstep), .p_depth(sp_depth), .p_pal(sp_pal), .p_dma(sp_dma),
         .fifo_ra(sp_ra), .fifo_rd(sp_rd), .wp_g(sp_wpg), .rp_g(sp_rpg), .flush_t(sp_fl), .flush_ack_t(sp_fla),
         .coll_line(coll_line), .coll_t(coll_t)
     );
 
     // A sprite's line is a beam line: from the start of its horizontal blank
-    // (beam pixel 0); its settings are taken at beam pixel 863 of the line before
-    wire [10:0] ny = (bv == VTOT - 1'b1) ? 11'd0 : bv + 1'b1;
+    // (beam pixel 0); its settings are taken at beam pixel 12, after the
+    // sprite side's line-start pass (so HSTART must be 16 or more)
     reg  [7:0]  c_sact, c_sdma;
     reg  [9:0]  c_shs [0:7], c_sxe [0:7];
     reg  [1:0]  c_slb [0:7], c_sdep [0:7];
     reg  [15:0] c_sxs [0:7];
     reg  [3:0]  c_spal [0:7];
-    always @(posedge clk_pix) if (hc == HVIS - 1'b1 || !en_p) begin : sset
+    always @(posedge clk_pix) if (hc == HVIS + 11'd12 || !en_p) begin : sset
         integer n;
         for (n = 0; n < 8; n = n + 1) begin
-            c_sact[n]  <= en_p && ny >= sp_vs[11*n +: 11] && ny < sp_ve[11*n +: 11];
+            c_sact[n]  <= en_p && sp_act[n];
             c_shs[n]   <= sp_hs[10*n +: 10];
             c_sxe[n]   <= sp_xe[10*n +: 10];
             c_slb[n]   <= sp_lb[2*n +: 2];

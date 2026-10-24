@@ -129,15 +129,12 @@ A port job is a COPY moving one byte at a time: linear, BPP = 8, HEIGHT = 1, no 
 
 Anything else, including Chip RAM past the end on a 2 MB board and the system area at `0xF00000` (interrupt controller, timers, serial, SD card), stops the channel with an error. The system area is left out so a runaway job cannot disturb interrupts or the serial console; its devices are reached through ports instead.
 
-**Rules for registers** (the custom block outside the palettes and the descriptor RAM):
+**The custom block** (registers, palettes, descriptor RAM) is reached a 16-bit word at a time, as memory: any operation can use it, at any alignment. Each word written is a write of that register half (with byte selects for single bytes), exactly as a CPU or copper write of the same half (spec 3, section 2), including its timing rules (for example, layer settings for line n must be written before line n starts, spec 4, section 5.4):
 
-- Register accesses are 32-bit, so the addresses, the lengths in bytes and the strides must be multiples of 4, at BPP = 8 with no DESC. Anything else is an error.
-- Only COPY and FILL may write registers. A COPY from memory into a block of registers sets up a whole layer, or several, in one job; a COPY of one long word into another channel's CHCTRL starts that channel, just as a CPU write does, so one chain can start others. COPY can also read registers into memory, for example to save a screen setup or keep a log of beam positions.
+- A COPY from memory into a block of registers sets up a whole layer, or several, in one job; a COPY into another channel's CHCTRL starts that channel, just as a CPU write does, so one chain can start others. COPY can also read registers into memory, for example to save a screen setup or keep a log of beam positions (a 32-bit register is read as two halves, which can come from different moments if it is changing).
+- Palette entries keep their halves rule: the engine's high-half write is held until its low-half write to the same entry. So a job writing palette entries must run forwards (DESC clear), and cover whole entries.
 - Reading a register never changes anything, by design, so a DMA read is always safe. Sticky flags are cleared only by writing 1.
-- A DMA register write has exactly the same effect as a CPU write to the same register, including its timing rules (for example, layer settings for line n must be written before line n starts, spec 4, section 5.4).
-- Register, palette and descriptor RAM accesses take one 100 MHz clock each on the FPGA's internal register bus. The CPU goes first, then the copper, then the engine: a job waits a clock when either is using the bus. A register is read once per long word (the second half is kept for the next word), so a live register such as BEAMPOS is never torn. The boot ROM is read through a port of its own.
-
-The palettes and the descriptor RAM are memory: any operation can use them, at any alignment, a byte at a time.
+- Each word takes one 100 MHz clock on the FPGA's internal register bus. The CPU goes first, then the copper, then the engine: a job waits a clock when either is using the bus. The boot ROM is read through a port of its own.
 
 **Ports:**
 
@@ -243,7 +240,7 @@ The job registers keep the values of the last job loaded or written: the engine'
 
 **Interrupts:** each channel is its own source in the interrupt controller (spec 13), DMA0–DMA3 (sources 4–7), default level 4. A channel requests its interrupt while its DMXINT bit and DMXINTEN bit are both set.
 
-**Errors:** a bad address (section 4), a register access breaking the rules, a bad OP or a bad combination of kinds (section 3) stops the channel: ERR is set, CHERR holds the address, CHDESC the descriptor, and the channel's DMXINT bit is set. The other channels carry on.
+**Errors:** a bad address (section 4), a bad OP or a bad combination of kinds (section 3) stops the channel: ERR is set, CHERR holds the address, CHDESC the descriptor, and the channel's DMXINT bit is set. The other channels carry on.
 
 **Typical use:**
 
@@ -292,6 +289,6 @@ Software decides, but a sensible default:
 - **Channels:** all 4 running at once; a stalled port channel does not hold up the others; STOP and PAUSE.
 - **Priority:** normal jobs never delay the CPU; HIGH jobs leave the CPU at least its CPUSHARE of cycle 0s (all three settings), and every CPU delay is one slot.
 - **Errors:** a bad address (including the system area and past the end of a 2 MB board's RAM), a bad OP and a bad combination stop only that channel, set ERR and CHERR, and raise its interrupt.
-- **Registers:** a block COPY into a layer's registers gives exactly the same result as CPU writes; a COPY into CHCTRL that starts another channel works; register reads into memory; a misaligned register access is an error; a CPU register access is never delayed by the engine.
+- **Registers:** a block COPY into a layer's registers gives exactly the same result as CPU writes; a COPY into CHCTRL that starts another channel works; register reads into memory; a palette written by a job changes each entry whole; a CPU register access is never delayed by the engine.
 - **Ports:** a USB serial transfer each way, paced by the FIFOs (with the FT232H model in `sim/`).
 - **Speed:** the figures in section 7.

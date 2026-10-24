@@ -165,10 +165,10 @@ recvblk:
 .done:  rts
 ```
 
-Every read of SERDATA takes a byte, so take care how you read it:
+A read of SERDATA's low half takes a byte, so take care how you read it:
 
-- Read it with `MOVE.L SERDATA`, or with `MOVE.W` or `MOVE.B` of its low half (`SERDATA+2` or `SERDATA+3`). Each of these takes exactly one byte.
-- Do not read the high half on its own. That also takes a byte, and you would lose it.
+- Read it with `MOVE.L SERDATA` (the high half, then the low), or with `MOVE.W` or `MOVE.B` of its low half (`SERDATA+2` or `SERDATA+3`). Each of these takes exactly one byte.
+- A read of the high half alone takes nothing.
 - Do not use instructions that read a register before writing it, such as `CLR`, `TAS`, `BSET`, or `ADDQ` on memory, at SERDATA.
 
 ## Flow Control

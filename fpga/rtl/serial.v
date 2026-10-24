@@ -51,7 +51,7 @@ module serial (
 
     // ---------------------------------------------------------------- FIFOs
     reg         rx_push;  reg [7:0] rx_wdata;
-    wire        rx_cpu = rb_rd && sel && off == `RM_SERDATA;
+    wire        rx_cpu = rb_rd && sel && off == `RM_SERDATA && rb_be[0];   // the low half takes a byte
     wire        rx_pop = rx_cpu || p_rxpop;
     wire [7:0]  rx_rdata;
     wire [12:0] rx_count;
@@ -134,7 +134,7 @@ module serial (
                 `RM_SERIRQEN: if (rb_be[0]) irqen <= rb_wdata[3:0];
                 default: ;
             endcase
-            if (rb_rd && sel && off == `RM_SERDROP) dropcount <= 16'd0;
+            if (rb_rd && sel && off == `RM_SERDROP && rb_be[0]) dropcount <= 16'd0;   // the low half clears it
         end
 
         rb_rdata <= 32'd0;
