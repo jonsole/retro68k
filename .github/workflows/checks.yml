@@ -97,6 +97,31 @@ jobs:
       - name: SD card and PS/2 keyboard against their models
         run: make -C sim iotest
 
+  vtest-spr:
+    name: Sprite video test (the spr screen)
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install Icarus Verilog
+        run: |
+          sudo apt-get update || true
+          sudo apt-get install -y iverilog
+      - name: Install sv2v
+        run: |
+          curl -sSL -o sv2v.zip https://github.com/zachjs/sv2v/releases/download/v0.0.13/sv2v-Linux.zip
+          unzip -q sv2v.zip
+          echo "$PWD/sv2v-Linux" >> "$GITHUB_PATH"
+      - name: Build vasm (from the copy in tools/vasm)
+        run: |
+          tar xzf tools/vasm/vasm.tar.gz
+          make -C vasm CPU=m68k SYNTAX=mot -j4 > /dev/null
+          echo "$PWD/vasm" >> "$GITHUB_PATH"
+      - name: The 8 sprites at every depth and many scales, changed while drawn, one fed by hand, against the model
+        run: make -C sim vtest VTESTS=spr
+
   lint:
     name: RTL lint (Verilator)
     runs-on: ubuntu-latest
