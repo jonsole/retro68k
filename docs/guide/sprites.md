@@ -549,7 +549,7 @@ An underrun means the screen asks too much of the memory at that point. Use fewe
 | DMACON | SPREN (5), DMAEN (9) | All sprite DMA. Both must be set |
 | SPRDMA | SPR (7–0), SETCLR (15) | DMA per sprite. Set/clear, as DMACON. All on after reset |
 
-A sprite is fetched only while its SPRDMA bit, SPREN and DMAEN are all set. Turning a sprite's DMA off hides it (unless it is fed by hand: next section).
+A sprite is fetched only while its SPRDMA bit, SPREN and DMAEN are all set. Turning a sprite's DMA off pauses it: it shows the words already in its FIFO, then waits, transparent; turning it on lets it carry on. To hide a sprite, turn its DMA off before writing its CTL (the CTL write empties the FIFO), or don't write its CTL this frame. A sprite with its DMA off can be fed by hand (next section).
 
 ```asm
         move.w  #SPRDMA_SETCLR_M|$0C,SPRDMA+2(a4)  ; sprites 2 and 3 on
@@ -617,7 +617,7 @@ Offsets in the custom block at `$E00000`.
 | SPRCOLL | `$504` | W1C | SPR (7–0), L0 (15–8), L1 (23–16), L2 (31–24): collisions, sticky |
 | SPRxPT | SPRn + `$00` | RW | Where the next image line starts (22–1; read: the start of the line being drawn). Write it each frame, before CTL |
 | SPRxH | SPRn + `$04` | RW | HSTART (10–0), HSTOP (26–16): unsigned beam pixels (0–863; the picture is 144–863) |
-| SPRxV | SPRn + `$08` | RW | VSTART (10–0), VSTOP (26–16): unsigned beam lines (0–624; the picture is 49–624). Start on beam line 2 or later |
+| SPRxV | SPRn + `$08` | RW | VSTART (10–0), VSTOP (26–16): unsigned beam lines (0–624; the picture is 49–624). Start on beam line 1 or later |
 | SPRxCTL | SPRn + `$0C` | RW | BPP (13–12), DEPTH (21–20), PAL (27–24). Any write starts the sprite: write it each frame, last |
 | SPRxDAT | SPRn + `$10` | W, R | Write: push a word (15–0) into the FIFO (DMA off). Read: words in the FIFO (5–0) |
 | SPRxSTEP | SPRn + `$14` | RW | XSTEP (15–0), YSTEP (31–16): source pixels per screen pixel, 5.11 (`$0800` normal, `$0080`–`$8000`; 0 counts as `$0800`) |

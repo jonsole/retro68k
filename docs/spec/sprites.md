@@ -74,7 +74,7 @@ The image's size follows from the window and the scale (section 3.2): **source w
 - **A write to SPRxCTL starts the sprite** (any write: the CTL value may be the same as before). Its FIFO is emptied and reads still on their way are dropped. Its first line is the next beam line, after the write, that is inside its window; that line shows the image line at SPRxPT. (It is the copper's job to point SPRxPT at the image's first line, as for bitplanes, before it writes CTL.)
 - **The vertical blank stops every sprite** (beam line 0, pixel 0), in manual mode too: its FIFO is emptied and nothing is fetched or shown until its CTL is written again. So each frame the copper (or the CPU, in its VBLANK interrupt) writes each sprite's registers, CTL last.
 - A sprite whose CTL is written after its VSTART has gone by shows the image from its first line, from the next line, down to VSTOP.
-- To hide a sprite, don't write its CTL this frame, turn its DMA off, or set VSTART to 625 or more.
+- To hide a sprite, don't write its CTL this frame, turn its DMA off before writing its CTL (its FIFO is then empty, so it shows nothing), or set VSTART to 625 or more.
 
 **Each line.** At the start of every beam line (pixel 0, the start of its horizontal blank) each running sprite takes the line's settings: its window, its scale, its CTL settings. If the line is inside the window (VSTART ≤ line < VSTOP), the sprite shows on it, and the DMA fetches the line's words during the line. The window is checked on every line: a VSTOP made later lets the sprite go on, one made earlier ends it; a VSTART moved later leaves the sprite off until the window reaches it again.
 
@@ -155,7 +155,7 @@ Sprite n (0–7) at `0x520 + n × 0x20`:
 | Offset | Name | Access | Bits | Description |
 |--------|------|--------|------|-------------|
 | `+0x00` | SPRxPT | RW | 22–1 | Where the sprite's next image line starts. Read: the start of the line being drawn (it moves on line by line), or the value written. Written each frame before CTL |
-| `+0x04` | SPRxH | RW | HSTART (11–0), HSTOP (27–16), signed | The window across (section 3). Written by the CPU or copper |
+| `+0x04` | SPRxH | RW | HSTART (10–0), HSTOP (26–16), unsigned | The window across (section 3). Written by the CPU or copper |
 | `+0x08` | SPRxV | RW | VSTART (10–0), VSTOP (26–16) | The window down |
 | `+0x0C` | SPRxCTL | RW | as section 3 | Settings. Any write starts the sprite (section 3) |
 | `+0x14` | SPRxSTEP | RW | XSTEP (15–0), YSTEP (31–16) | Scale (section 3.2). 0 counts as `0x0800` (normal) |
