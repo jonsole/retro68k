@@ -563,7 +563,7 @@ A sprite is fetched only while its SPRDMA bit, SPREN and DMAEN are all set. Turn
 With a sprite's DMA off (its SPRDMA bit clear), the CPU or the copper can feed the sprite itself, by writing words into its FIFO through **SPRxDAT**. The sprite shows as its window and CTL say, and takes its words from the FIFO as it is drawn, exactly as with DMA. Reading SPRxDAT gives the number of words in the FIFO (0–32).
 
 - Each write pushes one 16-bit word. Write the register's low half (`SPRxDAT+2`, or a whole long word); a write when the FIFO is full is ignored.
-- The FIFO is emptied at the start of each vertical blank, and when the sprite's CTL is written, which starts it: so write CTL each frame, then push the frame's words.
+- The FIFO is emptied at the start of each vertical blank, and when the sprite's CTL is written, which starts it: so write CTL each frame, then push the frame's words. Emptying takes about 20 clocks, and words pushed meanwhile are dropped; a copper list has a few instructions in between anyway, as Example 4-4 does.
 - If the FIFO is empty when the sprite needs a word, the sprite **waits**: it is transparent until a word arrives, and the rest of the line follows from there. A hand-fed sprite does not set SPRUNDER.
 
 This is useful for sprites whose image is computed rather than stored, and for effects that change a sprite line by line. The copper is the natural feeder, because it can push words at exact beam positions.

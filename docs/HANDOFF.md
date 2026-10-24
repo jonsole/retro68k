@@ -67,7 +67,7 @@ Done and tested in simulation:
 |------|-------|-------|
 | CPU, bus, SRAM, scheduler (`dmac.v`, with HIGH and CPUSHARE), boot ROM (second port for DMA) | `fpga/rtl/`, `firmware/boot/boot.s` | boot |
 | Video: 3 layers, planar/chunky, scaling, scroll, BPLSTRIDE, priority, direct colour, a palette per layer and one for the sprites (SHAREPAL for one) | `video.v`, `bpldma.v`, `layer_pix.v` | vtest pal, direct, share |
-| Sprites: 8, any size, 2/4/8 bpp, fractional scaling across and down (SPRxSTEP, 5.11, 16× to 1/16), depth, collisions, FIFO per sprite | `sprites.v`, `sprite_pix.v`, `video.v` | vtest spr, share |
+| Sprites: 8, any size, 2/4/8 bpp, fractional scaling across and down (SPRxSTEP, 5.11, 16× to 1/16), depth, collisions, FIFO per sprite, changes while drawn, reuse down the screen, manual mode (SPRxDAT) | `sprites.v`, `sprite_pix.v`, `video.v` | vtest spr, share |
 | Copper: MOVE/WAIT/SKIP/JUMP, MOVR, ALU, SKIPC, CALL/RET, RESUME | `copper.v`, `firmware/include/copper.inc` | ctest |
 | Audio: 4 channels, 8/16-bit, pan, interpolation | `audio.v` | atest |
 | DMA engine and blitter: 4 channels, COPY/FILL/KEYCOPY/LOGIC/ADD at 1/2/4/8 bpp, 2D, DESC, descriptor chains or direct job registers, registers/palettes/ROM, ports 0 (SD) and 1 (serial), HIGH, timer starts | `dmx.v` | dtest |
@@ -105,6 +105,5 @@ In rough order:
 
 - The video tests are not in CI: they take 45 minutes each. Consider `make vtest VTESTS=spr` as its own CI job.
 - Sprite open points (spec 9, section 9): S1, measure the memory budget table in simulation; S2, whether sprites' share of free cycles should be capped.
-- No sprite manual-mode (SPRxDAT) test, and no test of reusing a sprite down the screen.
 - The DMA engine's speed figures (spec 11, section 7, open point D2) and the HIGH CPU shares are worked out, not measured.
 - The SD test covers single blocks; multi-block transfers (CMD18, CMD25) are left to software and untested.
