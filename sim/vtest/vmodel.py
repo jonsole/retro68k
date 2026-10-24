@@ -192,19 +192,32 @@ def render_sprites(regs, ram, W, H):
     very end of a line, after the settings were taken); a CTL write starts
     the sprite; the vertical blank stops every sprite. At the start of each
     line a running sprite whose window covers it shows, its image line
-    moved on by YSTEP (not on its first line, or after a PT write)."""
+    moved on by YSTEP (not on its first line, or after a PT write). A
+    sprite whose DMA is off (SPRDMA, logged as sprite 8) takes each line's
+    words from those pushed through SPRxDAT since its CTL write, in order
+    (the test keeps them ahead of the beam)."""
     word = lambda a: ram.get((a & 0x7FFFFF) >> 1, 0)
     grid = [[[] for _ in range(W)] for _ in range(H)]
     F = regs.get("frame", 0)
     R = [[0] * 6 for _ in range(8)]                # as written: PT, H, V, CTL, DAT, STEP
+    sprdma = 0xFF                                   # after reset: all on
+    def dma_write(cur, val, be):
+        if be & 3 != 3:
+            return cur
+        return (cur | (val & 0xFF)) if val & 0x8000 else (cur & ~val & 0xFF)
     ev = []
     for i, (fr, line, h, n, r, val, be) in enumerate(regs["sprlog"]):
         if fr < F:
-            R[n][r] = merge(R[n][r], val, be)
+            if n == 8:
+                sprdma = dma_write(sprdma, val, be)
+            elif r != 4:
+                R[n][r] = merge(R[n][r], val, be)
         elif fr == F:
+            # all from the next line, so they stay in order (pushes after the CTL that empties the FIFO)
             ev.append((line + 1 if h < 836 else line + 2, i, n, r, val, be))
     ev.sort()
     run, pend, yf = [False] * 8, [False] * 8, [0] * 8
+    fifo = [[] for _ in range(8)]                   # words pushed by hand, in order
     lst = [R[n][0] & 0x7FFFFE for n in range(8)]
     lim = lambda s: 0x800 if s == 0 else max(0x80, min(0x8000, s))
     j = 0
@@ -212,6 +225,13 @@ def render_sprites(regs, ram, W, H):
         while j < len(ev) and ev[j][0] <= y:
             _, _, n, r, val, be = ev[j]
             j += 1
+            if n == 8:
+                sprdma = dma_write(sprdma, val, be)
+                continue
+            if r == 4:
+                if be & 3 == 3 and not (sprdma >> n) & 1 and len(fifo[n]) < 32:
+                    fifo[n].append(val & 0xFFFF)
+                continue
             if r == 0:
                 lst[n] = merge(lst[n], val, be) & 0x7FFFFE
                 pend[n] = False
@@ -219,9 +239,11 @@ def render_sprites(regs, ram, W, H):
                 R[n][r] = merge(R[n][r], val, be)
             if r == 3:
                 run[n], pend[n] = True, False
+                fifo[n] = []
         for n in range(8):
-            if not run[n] or not regs["sprites"][n]["dma"]:
+            if not run[n]:
                 continue
+            manual = not (sprdma >> n) & 1
             Hr, Vr, Cr, Sr = R[n][1], R[n][2], R[n][3], R[n][5]
             # beam coordinates: the line is beam pixels 0-863, the picture 144-863
             hs, he = min(Hr & 0x7FF, 864) - X0, ((Hr >> 16) & 0x7FF) - X0
@@ -248,9 +270,13 @@ def render_sprites(regs, ram, W, H):
             pend[n] = True
             if y < Y0:
                 continue
+            if manual:
+                words = fifo[n][:wv]
+                del fifo[n][:wv]
+            else:
+                words = [word(lst[n] + 2 * k) for k in range(wv)]
             seq = []
-            for k in range(wv):
-                w = word(lst[n] + 2 * k)
+            for w in words:
                 seq += [(w >> (16 - bpp * (i + 1))) & bpp_mask(bpp) for i in range(ppw)]
             for x in range(max(hs_c, 0), min(xe, W)):
                 i = (x - hs_c) * xs >> 11
@@ -282,6 +308,10 @@ def main():
                 errors += 1
     if (regs["vidstat"] >> 4) & 15:
         print("vmodel: OVERRUN or SPRUNDER set: VIDSTAT %x" % regs["vidstat"])
+        errors += 1
+    # the sprite test's copper list ends by writing 0xC0DE to SPR7DAT: if the grabbed frame lacks it, the list went astray
+    if regs["sprlog"] and not any(e[0] == regs.get("frame") and e[3] == 7 and e[4] == 4 and (e[5] & 0xFFFF) == 0xC0DE for e in regs["sprlog"]):
+        print("vmodel: the copper list's end marker is missing from the frame")
         errors += 1
     if "sprcoll" in regs and regs["sprites"] and regs["sprcoll"] != regs["coll_model"]:
         print("vmodel: SPRCOLL is %08x, expected %08x" % (regs["sprcoll"], regs["coll_model"]))

@@ -118,7 +118,7 @@ Each sprite has a **FIFO of 32 words**, its data registers. The DMA pushes the i
 
 - **Fetching within the line.** A line's words are fetched during that line, from its start: never ahead into the next line, since the next line's settings are not known until it starts. The DMA pushes the line's words whenever the FIFO has room, up to 30 words ahead of the beam (it keeps two of the 32 places for words still on their way). Fetching becomes urgent only when the FIFO is about to run out: then the sprite takes part in the deadline-first order with the layers, and may take the CPU's cycle (spec 5, section 6).
 - **The lead** is the time from the line's start to the sprite's first pixel: at least 16 pixels (HSTART 16), and the whole horizontal blank, 144 pixels (5.3 µs), for a sprite at the picture's left edge.
-- **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper pushes the image's words into its FIFO by writing SPRxDAT. The sprite shows as its window and CTL say, taking a line's words from the FIFO on each line it shows. If the FIFO is empty when a word is needed, the sprite waits for it: it is transparent until a word is written, and the rest of the line follows from there. SPRUNDER is not set in manual mode. A sprite in manual mode should not be shrunk across (XSTEP above `0x0800`): words would be skipped before they are written.
+- **Manual mode.** With a sprite's DMA off (SPRDMA), the CPU or copper pushes the image's words into its FIFO by writing SPRxDAT. The sprite shows as its window and CTL say, taking a line's words from the FIFO on each line it shows. If the FIFO is empty when a word is needed, the sprite waits for it: it is transparent until a word is written, and the rest of the line follows from there. SPRUNDER is not set in manual mode. Push the frame's words after the CTL write: the FIFO takes a moment to empty (about 20 clocks), and words pushed meanwhile are dropped. A sprite in manual mode should not be shrunk across (XSTEP above `0x0800`): words would be skipped before they are written.
 - **Underrun.** If the DMA cannot keep a sprite's FIFO filled (section 5), VIDSTAT.SPRUNDER (bit 7) is set, and the sprite shows nothing more until its CTL is written again: its words would no longer line up with its lines. SPRUNDER can raise the VIDERR interrupt like OVERRUN.
 
 ## 5. Memory budget
@@ -238,7 +238,7 @@ To keep it small, the per-sprite state lives in distributed RAM, worked on one s
 
 - **Golden images:** sprites of many window sizes, at every depth and many scales (bigger, smaller, odd steps, different across and down, the limits), clipped at all four edges, changed while they are drawn (a copper list moving one across on every line, changing another's XSTEP and window, switching an image part way down, moving a VSTOP), reused down the screen, at every DEPTH against layers in different PRIO orders, over transparent layer pixels, compared pixel by pixel with the Python video model extended with sprites.
 - **Collisions:** known overlaps set exactly the expected SPRCOLL bits.
-- **Manual mode:** a sprite fed by the CPU through SPRxDAT; an underrun sets SPRUNDER.
+- **Manual mode:** a sprite reused part way down the frame with its DMA off, fed by the copper through SPRxDAT with a pattern that changes on every line, checked against the model; an empty FIFO makes it wait, without SPRUNDER.
 - **Stress:** sprites stacked over the same pixels with layers of each depth, to measure section 5's table.
 
 ## 11. Later versions

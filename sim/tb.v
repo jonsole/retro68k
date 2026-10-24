@@ -368,13 +368,19 @@ module tb;
                                  && {dut.rb_addr[15:2], 2'b00} < 16'h0620 && dut.rb_addr[4:2] == 3'd0)
         frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5] = dut.rb_be[0] ? {frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5][22:16], dut.rb_wdata[15:0]}
                                                                    : {dut.rb_wdata[22:16], frame_spt[({dut.rb_addr[15:2], 2'b00} - 16'h0520) >> 5][15:0]};
-    // Every write to a sprite's registers (not SPRxDAT), with the frame and
-    // the beam, so the model can replay changes made while sprites are drawn
+    // Every write to a sprite's registers (SPRxDAT too) and to SPRDMA (as
+    // sprite 8, register 6), with the frame and the beam, so the model can
+    // replay changes made while sprites are drawn and words pushed by hand
     integer slog = 0;
     initial if ($test$plusargs("frame")) slog = $fopen("vstate_spr.txt", "w");
-    always @(posedge clk100) if (slog != 0 && dut.vid.spr.rb_wr && dut.vid.spr.sel_s && dut.vid.spr.sr != 3'd4)
-        $fwrite(slog, "%0d %0d %0d %0d %0d %0d %0d\n", dut.vid.s_frames, dut.vid.s_vc, dut.vid.s_hc,
-                dut.vid.spr.sn, dut.vid.spr.sr, dut.vid.spr.rb_wdata, dut.vid.spr.rb_be);
+    always @(posedge clk100) if (slog != 0 && dut.vid.spr.rb_wr) begin
+        if (dut.vid.spr.sel_s)
+            $fwrite(slog, "%0d %0d %0d %0d %0d %0d %0d\n", dut.vid.s_frames, dut.vid.s_vc, dut.vid.s_hc,
+                    dut.vid.spr.sn, dut.vid.spr.sr, dut.vid.spr.rb_wdata, dut.vid.spr.rb_be);
+        if (dut.vid.spr.sel_g && dut.vid.spr.off == 16'h0500)   // SPRDMA
+            $fwrite(slog, "%0d %0d %0d 8 6 %0d %0d\n", dut.vid.s_frames, dut.vid.s_vc, dut.vid.s_hc,
+                    dut.vid.spr.rb_wdata, dut.vid.spr.rb_be);
+    end
     task write_state;
         integer f, i, n;
         begin

@@ -17,7 +17,8 @@
 ;              the CPU writes every sprite's registers in each vertical blank,
 ;              CTL last, and a copper list changes sprites while they are drawn
 ;              (a VSTOP made later and one made earlier, an image switched part
-;              way down, a sprite reused lower down, a zoom, a wobble)
+;              way down, a sprite reused lower down, a zoom, a wobble), and
+;              sprite 2, reused lower down with its DMA off, is fed by the copper
 ;   -DSPRITES -DSHARE   the same with VIDCON.SHAREPAL: everything uses PALETTE0
 ;
 ; Keep the layouts in step with vgen.py.
@@ -146,7 +147,9 @@ pointers:   dc.l    L0+L_BPL0PT, L0_DATA
             dc.l    L1+L_BPL0PT, L1_DATA+0*L1_PLANE
             dc.l    L1+L_BPL1PT, L1_DATA+1*L1_PLANE
             dc.l    L1+L_BPL2PT, L1_DATA+2*L1_PLANE
-            ; sprites, every frame: window, step, pointer, then CTL
+            ; sprites, every frame: DMA on for all (the copper turns sprite 2's off),
+            ; then window, step, pointer, then CTL
+            dc.l    SPRDMA,      SPRDMA_SETCLR_M|$FF
             SPRH    0,-20,12,-10,20             ; off the left edge and the top, normal size
             SPRC    0,1,$0800,$0800,0,3,$0000
             SPRH    1,100,148,50,90             ; 1.5x across, 2x down, behind sprite 4
@@ -166,7 +169,8 @@ pointers:   dc.l    L0+L_BPL0PT, L0_DATA
             dc.l    -1
 
 ; The copper: sprites changed while they are drawn. Each write is at pixel
-; 100 of a line, and acts from the next line.
+; 100 of a line, and acts from the next line. The list runs from its copy
+; in Chip RAM, so jumps go to RAMLIST+(label-clist).
             include "copper.inc"
             cnop    0,4
 clist:      CWAIT   VID_Y0+9,100                ; sprite 0 goes on to line 29 (VSTOP later)
@@ -175,6 +179,29 @@ clist:      CWAIT   VID_Y0+9,100                ; sprite 0 goes on to line 29 (V
             CMOVEL  SPR4+SPR_V,(VID_Y0+40)|((VID_Y0+80)<<16)
             CWAIT   VID_Y0+69,100               ; sprite 1 switches image from line 70
             CMOVEL  SPR1+SPR_PT,S_DATA+$8800
+            ; sprite 2 again, fed by hand: its DMA off, 16 pixels at 2 bpp (2 words
+            ; a line), lines 160-230, a pattern that changes on every line
+            CWAIT   VID_Y0+142,100
+            CMOVE   SPRDMA+2,1<<2               ; sprite 2's DMA off (SETCLR clear)
+            CMOVEL  SPR2+SPR_H,(VID_X0+600)|((VID_X0+616)<<16)
+            CMOVEL  SPR2+SPR_V,(VID_Y0+160)|((VID_Y0+231)<<16)
+            CMOVEL  SPR2+SPR_STEP,$0800|($0800<<16)
+            CMOVEL  SPR2+SPR_CTL,(0<<SPR_CTL_BPP_B)|(0<<SPR_CTL_DEPTH_B)|(5<<SPR_CTL_PAL_B)
+            CWAITP  300                         ; (the FIFO empties after the CTL write)
+            CLDI    CY,$1B1B                    ; 15 lines ahead: 30 words
+            CLDI    CX,30
+man_pre:    CMOVR   SPR2+SPR_DAT+2,CY
+            CADDI   CY,$0101
+            CSUBI   CX,1
+            CSKIPEQ
+            CJUMP   RAMLIST+(man_pre-clist)
+            CWAIT   VID_Y0+160,0                ; then a line's words at the start of each line
+man_loop:   CMOVR   SPR2+SPR_DAT+2,CY
+            CMOVR   SPR2+SPR_DAT+2,CY
+            CADDI   CY,$0101
+            CWAITP  0
+            CSKIP   VID_Y0+216,0                ; the last push (line 215) is line 230's
+            CJUMP   RAMLIST+(man_loop-clist)
             CWAIT   VID_Y0+232,100              ; sprite 5 again, lower down: 2x, lines 250-269
             CMOVEL  SPR5+SPR_H,(VID_X0+420)|((VID_X0+460)<<16)
             CMOVEL  SPR5+SPR_V,(VID_Y0+250)|((VID_Y0+270)<<16)
@@ -202,6 +229,8 @@ clist:      CWAIT   VID_Y0+9,100                ; sprite 0 goes on to line 29 (V
             CMOVEL  SPR6+SPR_H,(VID_X0+224)|((VID_X0+524)<<16)
             CWAIT   VID_Y0+408,100
             CMOVEL  SPR6+SPR_H,(VID_X0+227)|((VID_X0+527)<<16)
+            ; the end: a marker the model looks for (SPR7DAT with sprite 7 on DMA is ignored)
+            CMOVE   SPR7+SPR_DAT+2,$C0DE
             CSTOP
 clist_end:
     else
