@@ -48,7 +48,7 @@ Each machine's spec says which instructions and exceptions make "break" and "tra
 ### 2.3 Sign-on, prompt and lines
 
 ```
-retro-z80 boot ROM 1.0  Z80 at 20 MHz, 4 MB SRAM
+retro-z80 boot ROM <version>  Z80 at 20 MHz, 4 MB SRAM
 Reset: power-on.  Self-test ok.
 Monitor.  H for help.
 >
@@ -57,7 +57,7 @@ Monitor.  H for help.
 - The first line names the machine, the ROM version, the CPU, its speed and the RAM size. The second gives the reset cause (RESETWHY) and the self-test result.
 - The prompt is `> ` at the start of a line.
 - **Line editing:** typed characters are echoed; Backspace (or Delete from a terminal) rubs out; Enter runs the line; Esc drops it; Up brings back the last line.
-- **Enter on an empty line** after `D`, `I` or `S` carries on from where the last one stopped. After any other command it does nothing.
+- **Enter on an empty line** after `D`, `I` or `S` carries on from where the last one stopped: after `D`, another 80 (hex) bytes at the same size; after `I`, another 16 instructions; after `S`, the next 16 places, until the range has been searched to its end. After any other command, or after an `S` that has reached the end, it does nothing.
 - Upper or lower case, as you like. Spaces separate arguments; a comma also works.
 - Output lines end with CR LF.
 - An error prints `? ` and a short reason on its own line, and nothing is changed:
@@ -72,6 +72,7 @@ Monitor.  H for help.
 | `? no link` | The command needs the USB serial link (only where the machine can tell) |
 | `? no card`, `? no file`, `? bad image` | The SD card or file could not be used (section 7) |
 | `? locked` | The boot ROM is write-protected (ROMLOCK) |
+| `? not yet` | A command this machine's monitor does not have yet. Allowed only while a machine's monitor is incomplete; this line is removed once both monitors are complete |
 
 ## 3. Numbers, addresses and sizes
 
@@ -121,7 +122,7 @@ Monitor.  H for help.
 | **V** compare | `V addr count addr2` | Compare two ranges; list the first 16 differences, then how many there were | Yes | Yes |
 | **S** search | `Ss addr count value ...` | Find a string of values or a quoted string; list the first 16 places. Enter carries on | Yes | Yes |
 | **G** go | `G [addr [break]]` | Run from addr, or from PC as `R` shows it. With break, a breakpoint at that address (section 4.3) | Yes | Yes |
-| **R** registers | `R [name [value]]` | Show the program's registers; with a name and value, set one (section 4.2) | Yes | Yes |
+| **R** registers | `R [name [value]]` | Show the program's registers; with a name, show that one; with a name and value, set it (section 4.2) | Yes | Yes |
 | **P** ports | `P port [value]` | Read an I/O port, or write a byte to it | Yes: 16-bit ports, register (high byte) : page (low byte) | `? not on this machine` (no I/O space) |
 | **I** disassemble | `I [addr [count]]` | Show count instructions (16 by default) from addr. No address: carry on | Yes | Optional (retro68k decides) |
 | **T** memory test | `T [addr count]` | Test RAM with patterns, **destroying** its contents. No range: all RAM the monitor does not use itself | Yes | Yes |
@@ -131,15 +132,22 @@ Monitor.  H for help.
 | **X** resident | `X` | Start the resident image (BASIC), loading it from the SD card first if it is not in RAM (section 5.3) | Yes | Optional |
 | **H**, **?** help | `H` | List the commands, one line each | Yes | Yes |
 
+**What D, V and S print.** Addresses are shown at the machine's width (section 3.2: 4 or 6 digits, after a `P` for a physical address).
+
+- **D** prints a line for each 16 bytes: the address, two spaces, the items, then the characters. Each item is 2, 4 or 8 hex digits (`.B`, `.W`, `.L`) and a space, with one more space after the eighth byte. The characters start **two spaces after the last item of a full line**, whatever the size. A shorter line (the last of a dump) is padded with spaces, so the characters are in the same column on every line of a dump.
+- **V** prints each difference on a line of its own, `addr: xx  addr2: yy` (the byte in each range), for the first 16 differences; then `Differences: n`, the count in hex with at least 4 digits.
+- **S** prints the places it finds, 8 to a line, each address followed by two spaces. After 16 places it prints `Enter for more.` and stops; Enter on an empty line goes on with the next 16 (section 2.3). If it reaches the end of the range without finding a place since the command or the last Enter, it prints `Not found.`
+
 Letters not in the table (A, J, K, M, N, O, Q, W, Y, Z) are kept free. A command that only one machine needs takes one of them, and is listed in this table first, so the two monitors never give a letter two meanings.
 
 ### 4.2 Registers
 
-`R` shows the **program's** registers: those of the program that was stopped, or those the next `G` will start with. Loading a program sets PC to its entry point and the other registers to the machine's defaults (each machine's spec). `R name value` sets one; `G` uses them all.
+`R` shows the **program's** registers: those of the program that was stopped, or those the next `G` will start with. Loading a program sets PC to its entry point and the other registers to the machine's defaults (each machine's spec). `R name` shows that one register, as the full display shows it. `R name value` sets one; `G` uses them all.
 
 | | retro-z80 | retro68k |
 |---|-----------|----------|
 | Shown | AF BC DE HL IX IY SP PC, AF' BC' DE' HL', I R, IFF, IM, and the flags decoded | D0–D7, A0–A7, SR (and its flags decoded), PC, USP, SSP |
+| Shown one at a time | `R HL` gives `HL=1234`; `R AF` also shows the flags decoded, as the full display does | `R D0` gives `D0=00001234`; `R SR` also shows the flags decoded, as the full display does |
 | Set with | `R HL 1234`, `R AF' 0`, `R IFF 1`, `R IM 2` | `R D0 1234`, `R SR 2700`, `R PC 1000` |
 | Limits | R is only roughly kept (it counts as the monitor runs). The Z80 cannot read its interrupt mode, so IM shows the mode the program was started in, with a `?` once the program has run (each machine's spec) | A7 is USP or SSP, as SR's S bit says |
 
@@ -174,9 +182,9 @@ Memory, sizes and physical addresses:
 > D 8000 10
 8000  21 06 80 DF C9 00 48 65  6C 6C 6F 0D 0A 00 FF FF  !.....Hello.....
 > D.W 8000 8
-8000  0621 DF80 00C9 6548                                !.....He
+8000  0621 DF80 00C9 6548                       !.....He
 > D P1FC000 8
-P1FC000  72 02 65 02 74 02 72 02                          r.e.t.r.
+P1FC000  72 02 65 02 74 02 72 02                           r.e.t.r.
 > F.W 9000 100 E5E5
 > P 7000
 7000: 5A
@@ -493,7 +501,7 @@ Each machine's own boot ROM spec covers what this spec leaves to it:
 
 ## 13. Test plan
 
-- **Commands:** each command and size on both machines, in simulation, typed on the keyboard and over the serial link; the dumps match the examples' format; Enter after `D`, `I` and `S` carries on; Up brings back the last line; Esc drops it.
+- **Commands:** each command and size on both machines, in simulation, typed on the keyboard and over the serial link; the dumps match the examples' format, with the characters two spaces after a full line's last item at every size and address width; V and S print as section 4.1 says; `R name` shows one register; Enter after `D`, `I` and `S` carries on; Up brings back the last line; Esc drops it.
 - **Sizes:** `.W` and `.L` give the machine's byte order; on the 68000 an odd word or long address gives `? alignment` and no address error; on the Z80 any address works.
 - **Addresses:** plain and `P` addresses reach the same memory where they should; forbidden ranges give `? address`.
 - **Registers:** `R` shows and sets every register of each machine; `G` starts with them.
