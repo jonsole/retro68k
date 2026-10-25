@@ -126,7 +126,7 @@ Monitor.  H for help.
 | **R** registers | `R [name [value]]` | Show the program's registers; with a name, show that one; with a name and value, set it (section 4.2) | Yes | Yes |
 | **P** ports | `P port [value]` | Read an I/O port, or write a byte to it | Yes: 16-bit ports, register (high byte) : page (low byte) | `? not on this machine` (no I/O space) |
 | **I** disassemble | `I [addr [count]]` | Show count instructions (16 by default) from addr. No address: carry on | Yes | Optional (retro68k decides) |
-| **T** memory test | `T [addr count]` | Test RAM with patterns, **destroying** its contents. No range: all RAM the monitor does not use itself | Yes | Yes |
+| **T** memory test | `T [addr count]` | Test RAM with patterns, **destroying** its contents. No range: all RAM the monitor does not use itself (section 4.4) | Yes | Yes |
 | **U** upload | `U` | Wait for an upload over the USB serial link (section 6). Esc on the keyboard goes back to the monitor | Yes | Yes |
 | **L** load | `L [name]` | Load an image file from the SD card (section 7) without running it; PC is set to its entry point | Yes | Yes |
 | **B** boot | `B [name]` | Load an image file from the SD card and run it. No name: the boot file | Yes | Yes |
@@ -158,7 +158,22 @@ Letters not in the table (A, J, K, M, O, Q, W, Y, Z) are kept free. A command th
 
 Code addresses (ENTRY, G, break): any on retro-z80; even on retro68k (`? alignment`; an odd ENTRY is refused with code 3).
 
-### 4.4 Example sessions
+### 4.4 Memory test
+
+`T addr count` tests count bytes of RAM from addr; `T` alone tests all the RAM the monitor does not use itself, and first prints the ranges it will test, at the machine's address width (retro-z80: `Testing P000000-P1FBFFF`; retro68k: `Testing 000000-1FFFFF` less the monitor's own RAM). A range that takes in ROM, registers, the monitor's own RAM or memory the board does not have gives `? address` before anything is written.
+
+- **Passes:** four, each writing the whole range and then reading it all back: `55`, `AA`, a pattern made from each byte's physical address (address bits 7–0 XOR 15–8 XOR 23–16), then that pattern inverted.
+- **Access width:** a machine may write and read in wider accesses for speed, as long as at least one pass is by bytes and every error is reported for a byte (on the 68000 the byte passes exercise the upper and lower byte strobes separately).
+- **What it prints:** the number of each pass as it finishes, after `Pass`; a line `addr: wrote xx read yy` for each of the first 16 bad bytes; then `Errors: nnnn`: the count of bad bytes in all passes, in hex, 4 digits or more when it needs them.
+- **Stopping:** Esc (BREAK) stops it with `Stopped.`.
+
+```
+> T 9000 1000
+Pass 1 2 3 4
+Errors: 0000
+```
+
+### 4.5 Example sessions
 
 A program typed in by hand on retro-z80 (`RST 18h` prints the string at HL; spec 16 there):
 
@@ -506,6 +521,7 @@ Each machine's own boot ROM spec covers what this spec leaves to it:
 - **Sizes:** `.W` and `.L` give the machine's byte order; on the 68000 an odd word or long address gives `? alignment` and no address error; on the Z80 any address works.
 - **Addresses:** plain and `P` addresses reach the same memory where they should; forbidden ranges give `? address`.
 - **Registers:** `R` shows and sets every register of each machine; `G` starts with them.
+- **Memory test:** `T` on a range and alone prints as section 4.4 says, finds a byte forced bad in simulation, refuses forbidden ranges before writing, and stops on Esc.
 - **Breakpoints:** `G addr break` stops at break with the program's memory as it was; a breakpoint in ROM works on retro-z80 and is refused on retro68k.
 - **Upload:** a program, a resident image and a boot ROM image, each with ACTION 0 and 1; resends after CRC and frame errors; a lost reply; every refusal code; PING before and after HEADER; ABORT; a frame cut short (the 1 s drop); ICRC wrong in memory at END (code 6). In simulation against the FT232H model, and on the board.
 - **Boot file:** `BOOT.Z80` and `BOOT.68K` on one card, each machine starting its own; a bad header, a bad ICRC and a missing file go to the monitor with a message; a TARGET 1 boot file is not run at start-up.
