@@ -40,6 +40,7 @@ retro-z80 wrote the first draft (its design plan, branch 16); retro68k reviews a
 | A program returns, or calls the ROM's "exit" | `Program ended.` | Registers, prompt |
 | A program calls the ROM's "break" | `Break at <addr>` | Registers, prompt; `G` goes on after the call |
 | A breakpoint set by `G` is reached | `Breakpoint at <addr>` | Registers, prompt |
+| A step by `N` is done | `Step at <addr>` | Registers, prompt; Enter steps again |
 | NMI: the Multiface button, or BREAK from the PC | `NMI (button) at <addr>` or `NMI (USB) at <addr>` | Registers, prompt; `G` goes on where the program was |
 | A trap: a CPU exception or a runaway program caught by the machine | `Trap <what> at <addr>` | Registers, prompt |
 
@@ -57,7 +58,7 @@ Monitor.  H for help.
 - The first line names the machine, the ROM version, the CPU, its speed and the RAM size. The second gives the reset cause (RESETWHY) and the self-test result.
 - The prompt is `> ` at the start of a line.
 - **Line editing:** typed characters are echoed; Backspace (or Delete from a terminal) rubs out; Enter runs the line; Esc drops it; Up brings back the last line.
-- **Enter on an empty line** after `D`, `I` or `S` carries on from where the last one stopped: after `D`, another 80 (hex) bytes at the same size; after `I`, another 16 instructions; after `S`, the next 16 places, until the range has been searched to its end. After any other command, or after an `S` that has reached the end, it does nothing.
+- **Enter on an empty line** after `D`, `I`, `S` or `N` carries on from where the last one stopped: after `D`, another 80 (hex) bytes at the same size; after `I`, another 16 instructions; after `S`, the next 16 places, until the range has been searched to its end; after `N`, one more step. After any other command, or after an `S` that has reached the end, it does nothing.
 - Upper or lower case, as you like. Spaces separate arguments; a comma also works.
 - Output lines end with CR LF.
 - An error prints `? ` and a short reason on its own line, and nothing is changed:
@@ -122,7 +123,7 @@ Monitor.  H for help.
 | **V** compare | `V addr count addr2` | Compare two ranges; list the first 16 differences, then how many there were | Yes | Yes |
 | **S** search | `Ss addr count value ...` | Find a string of values or a quoted string; list the first 16 places. Enter carries on | Yes | Yes |
 | **G** go | `G [addr [break]]` | Run from addr, or from PC as `R` shows it. With break, a breakpoint at that address (section 4.3) | Yes | Yes |
-| **N** step | `N` | Run one instruction, then show the registers and the prompt | Yes | Yes |
+| **N** step | `N` | Run one instruction, then say `Step at <addr>` and show the registers and the prompt. Enter steps again | Yes | Yes |
 | **R** registers | `R [name [value]]` | Show the program's registers; with a name, show that one; with a name and value, set it (section 4.2) | Yes | Yes |
 | **P** ports | `P port [value]` | Read an I/O port, or write a byte to it | Yes: 16-bit ports, register (high byte) : page (low byte) | `? not on this machine` (no I/O space) |
 | **I** disassemble | `I [addr [count]]` | Show count instructions (16 by default) from addr. No address: carry on | Yes | Optional (retro68k decides) |
@@ -517,7 +518,7 @@ Each machine's own boot ROM spec covers what this spec leaves to it:
 
 ## 13. Test plan
 
-- **Commands:** each command and size on both machines, in simulation, typed on the keyboard and over the serial link; the dumps match the examples' format, with the characters two spaces after a full line's last item at every size and address width; V and S print as section 4.1 says; `R name` shows one register; Enter after `D`, `I` and `S` carries on; Up brings back the last line; Esc drops it.
+- **Commands:** each command and size on both machines, in simulation, typed on the keyboard and over the serial link; the dumps match the examples' format, with the characters two spaces after a full line's last item at every size and address width; V and S print as section 4.1 says; `R name` shows one register; Enter after `D`, `I`, `S` and `N` carries on; Up brings back the last line; Esc drops it.
 - **Sizes:** `.W` and `.L` give the machine's byte order; on the 68000 an odd word or long address gives `? alignment` and no address error; on the Z80 any address works.
 - **Addresses:** plain and `P` addresses reach the same memory where they should; forbidden ranges give `? address`.
 - **Registers:** `R` shows and sets every register of each machine; `G` starts with them.
