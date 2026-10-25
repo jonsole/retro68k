@@ -471,7 +471,7 @@ They are read from the machine's keyboards; each machine's spec says which and h
 
 **ROMLOCK.** The boot ROM decides ROMLOCK at power-on only (RESETWHY.POWER): with D held it leaves it clear; otherwise it sets it. ROMLOCK then stays as it is until the next power-on.
 
-**A long press of the reset button:** does it do more than a short one (an UPLOAD, say)? retro-z80: no (decided); retro68k: to be confirmed (its SY3). The way into the loader from the PC is the UPLOAD control command.
+**A long press of the reset button** does nothing more than a short one, on both machines (decided; retro68k's SY3). The way into the loader from the PC is the UPLOAD control command.
 
 If the boot file or BASIC fails (a bad image, a read error), the boot ROM reports it and goes to the monitor.
 
@@ -526,7 +526,7 @@ Each machine's own boot ROM spec covers what this spec leaves to it:
 - **Breakpoints:** `G addr break` stops at break with the program's memory as it was; a breakpoint in ROM works on retro-z80 and is refused on retro68k.
 - **Upload:** a program, a resident image and a boot ROM image, each with ACTION 0 and 1; resends after CRC and frame errors; a lost reply; every refusal code; PING before and after HEADER; ABORT; a frame cut short (the 1 s drop); ICRC wrong in memory at END (code 6). In simulation against the FT232H model, and on the board.
 - **Boot file:** `BOOT.Z80` and `BOOT.68K` on one card, each machine starting its own; a bad header, a bad ICRC and a missing file go to the monitor with a message; a TARGET 1 boot file is not run at start-up.
-- **Start-up:** each start-up key; RESETWHY.UPLOAD reaches the loader; D at power-on leaves ROMLOCK clear across later resets, and D at a later reset changes nothing; on retro-z80, a long reset press is a plain reset.
+- **Start-up:** each start-up key; RESETWHY.UPLOAD reaches the loader; D at power-on leaves ROMLOCK clear across later resets, and D at a later reset changes nothing; on both machines, a long reset press is a plain reset.
 - **Tool:** `tools/test/test_rlink.py` (section 8.3); `rlink.py upload` works the same against both machines' simulations.
 - **The two copies:** a check in each repo's CI compares this file and `rlink.py` with the other repo's latest copy (open point M6).
 
