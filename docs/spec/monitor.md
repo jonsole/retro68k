@@ -270,7 +270,7 @@ A resident image stays in RAM across resets other than power-on, so a warm reset
 ### 6.1 Getting the loader ready
 
 1. The PC tool sends the **UPLOAD** control command (each machine's serial spec, section 4). The machine resets with RESETWHY.UPLOAD set; the boot ROM sets up the console and the link and starts the loader. The `U` command, or U held at reset, starts the same loader without the control command.
-2. The loader shows `Waiting for upload.  Esc for the monitor.` on the screen, and sends this ready line on the serial link:
+2. The loader shows `Waiting for upload.  BREAK for the monitor.` on the screen, and sends this ready line on the serial link:
 
    ```
    LOAD Z80 1<CR><LF>          (retro68k: LOAD 68K 1)
