@@ -7,16 +7,22 @@
 // progress, runs one group of up to 8 destination words, saves the progress
 // and picks again.
 //
-// A job is rows of pixels, each row a stream of bits. For each destination
-// word of a row the source bits are lined up with a barrel shifter fed by
-// the previous and the current source word, as in the Amiga's blitter.
+// A job is rows of pixels, each row a stream of bits. Each destination
+// pixel D is MINTERM(A, B, C) bit by bit (BLIT), or C + B (ADD): A the mask
+// (a 1 bpp image, B compared with a key colour, or all ones), B the image or
+// VALUE, C the destination's old contents. For each destination word of a
+// row the B bits are lined up with a barrel shifter fed by the previous and
+// the current B word, as in the Amiga's blitter; the A bits come from a
+// 32-bit shift register, taking one bit per destination pixel, widened to
+// the pixel's bits.
 // A backwards (DESC) job uses the same shifter: words are bit-reversed on
 // the way in and back again before the combine stage, so only the
 // addresses and the edge masks run the other way.
 //
-// A group is three phases: read up to 9 source words, read the destination
-// words that are needed (LOGIC and ADD, KEYCOPY below 8 bpp, and edge words
-// that cover part of a byte), then work out and write each destination word.
+// A group is four phases: read up to 9 B words, read up to 9 A words (a mask
+// image), read the C words that are needed (when the minterm or ADD uses C,
+// and edge words that cover part of a byte), then work out and write each
+// destination word.
 // Writes are pipelined so a request is ready as each one is taken.
 //
 // Every word access goes through one access unit, which sends it by address:
@@ -186,13 +192,16 @@ module dmx #(
     // ================================================================ the working job
     // The channel being worked on. Saved to st[] between groups.
     reg  [2:0]  w_op;
-    reg  [3:0]  w_fn;
+    reg  [7:0]  w_mt;                  // MINTERM
+    reg  [1:0]  w_as;                  // ADD: SIGNED, SAT
+    reg  [1:0]  w_mask;                // MASK: 0 none, 1 image at APT, 2 key compare
     reg  [1:0]  w_lb;                  // log2 of bits per pixel
     reg         w_desc, w_irq, w_high;
     reg  [1:0]  w_sk, w_dk;            // SRCKIND, DSTKIND
     reg  [31:0] w_val;
     reg  [15:0] w_sstr, w_dstr;
     reg  [26:0] w_nbits;               // bits per row
+    reg  [15:0] w_apx;                 // pixels per row (the mask's bits)
     reg  [23:0] w_next;
     reg  [2:0]  w_sbit, w_dbit;
     reg  [15:0] w_rows;                // rows still to do, this one included
@@ -205,19 +214,41 @@ module dmx #(
     reg         w_first;               // the next word is the row's first
     reg  [3:0]  w_le;                  // bits used in the row's last word (0 = 16)
     reg  [15:0] w_carry;               // the last source word taken
+    // The mask image A (MASK = 1): a 1 bpp stream with B's stride
+    reg  [23:0] w_arow;                // this row's first byte
+    reg  [2:0]  w_abit;
+    reg  [22:0] w_aw;                  // next word to read
+    reg  [15:0] w_aleft;               // words of this row still to read
+    reg  [3:0]  w_ao;                  // the row's first bit in its word (from the start side)
+    reg  [31:0] w_areg;                // bits not yet used, from bit 31
+    reg  [4:0]  w_acnt;                // how many
 
-    localparam SW = 3+4+2+1+1+1+2+2+32+16+16+27+24+3+3 + 16+24+24 + 23+23+24+24+4+4+1+1+4+16;
-    wire [SW-1:0] w_pack = {w_op, w_fn, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_val, w_sstr, w_dstr, w_nbits, w_next,
+    localparam SW = 3+8+2+2+2+1+1+1+2+2+32+16+16+27+16+24+3+3 + 16+24+24 + 23+23+24+24+4+4+1+1+4+16
+                    + 24+3+23+16+4+32+5;
+    wire [SW-1:0] w_pack = {w_op, w_mt, w_as, w_mask, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_val, w_sstr, w_dstr,
+                            w_nbits, w_apx, w_next,
                             w_sbit, w_dbit, w_rows, w_srow, w_drow, w_dw, w_sw, w_dleft, w_sleft,
-                            w_od, w_t, w_pre, w_first, w_le, w_carry};
+                            w_od, w_t, w_pre, w_first, w_le, w_carry,
+                            w_arow, w_abit, w_aw, w_aleft, w_ao, w_areg, w_acnt};
     reg  [SW-1:0] st [0:3];
     reg  [1:0]    cur;
     initial for (k = 0; k < 4; k = k + 1) st[k] = {SW{1'b0}};
 
     // ================================================================ the datapath
     wire        srcmem  = (w_sk == 2'd0);
-    wire        op_rd   = (w_op == `RM_DMX_OP_LOGIC) || (w_op == `RM_DMX_OP_ADD)
-                          || (w_op == `RM_DMX_OP_KEYCOPY && w_lb != 2'd3);    // reads every destination word
+    wire        maskimg = (w_mask == 2'd1);
+    // Does a minterm nibble (the four B, C combinations) depend on C?
+    function cdep(input [3:0] n);
+        cdep = (n[3] ^ n[2]) | (n[1] ^ n[0]);
+    endfunction
+    // Where A is 0 and the minterm's low nibble is 0xA (D = C), or for ADD,
+    // the pixel is left alone: at 8 bpp a byte not written, C not read
+    wire        keep0   = (w_op == `RM_DMX_OP_ADD) || (w_mt[3:0] == 4'hA);
+    // Reads every C word: ADD, or the minterm uses C where A can be 1 (the
+    // high nibble), or where A can be 0 (the low nibble, or keeping C in
+    // part of a byte)
+    wire        op_rd   = (w_op == `RM_DMX_OP_ADD) || cdep(w_mt[7:4])
+                          || (w_mask != 2'd0 && (keep0 ? (w_lb != 2'd3) : cdep(w_mt[3:0])));
 
     function [15:0] rev16(input [15:0] v);
         integer i;
@@ -247,6 +278,19 @@ module dmx #(
             for (i = 1; i < 8; i = i + 1)
                 if (i < (1 << lb)) smear = smear | (f >> i);
         end
+    endfunction
+    // A's bits for a destination word: bit i of t (from bit 15) to the
+    // whole of pixel i
+    function [15:0] widen(input [15:0] t, input [1:0] lb);
+        integer i;
+        for (i = 0; i < 16; i = i + 1) widen[15 - i] = t[15 - (i >> lb)];
+    endfunction
+    // The Amiga's minterm: each bit of the result is m[a*4 + b*2 + c]
+    function [15:0] minterm(input [7:0] m, input [15:0] a, input [15:0] b, input [15:0] c);
+        minterm = ({16{m[7]}} &  a &  b &  c) | ({16{m[6]}} &  a &  b & ~c)
+                | ({16{m[5]}} &  a & ~b &  c) | ({16{m[4]}} &  a & ~b & ~c)
+                | ({16{m[3]}} & ~a &  b &  c) | ({16{m[2]}} & ~a &  b & ~c)
+                | ({16{m[1]}} & ~a & ~b &  c) | ({16{m[0]}} & ~a & ~b & ~c);
     endfunction
     // Pixels of s that are not the key colour (all their bits set)
     function [15:0] notkey(input [15:0] s, input [7:0] key, input [1:0] lb);
@@ -300,17 +344,25 @@ module dmx #(
 
     // ================================================================ group buffers
     reg  [15:0] sbuf [0:8];            // source words, in the order read
+    reg  [15:0] abuf [0:8];            // mask words, in the order read
+    reg  [3:0]  g_na;                  // mask words to read
     reg  [15:0] dbuf [0:7];            // destination words, by position in the group
     reg  [3:0]  g_n;                   // destination words in this group (1-8)
     reg  [3:0]  g_nr;                  // source words to read
     reg  [7:0]  g_dneed;               // destination words to read
     reg  [3:0]  g_last;                // the row's last word in this group (8: none)
+    // Known contents from the start: a C word not read still goes through
+    // the minterm (its result does not depend on it), and the simulator
+    // would carry the unknown bits through
+    initial for (k = 0; k < 9; k = k + 1) begin sbuf[k] = 16'd0; abuf[k] = 16'd0; end
+    initial for (k = 0; k < 8; k = k + 1) dbuf[k] = 16'd0;
 
     // ================================================================ engine state
-    localparam S_IDLE = 4'd0, S_REST = 4'd1, S_DESC = 4'd2, S_SETUP = 4'd3, S_CHECK = 4'd4,
-               S_MUL = 4'd5, S_ROW1 = 4'd6, S_ROW2 = 4'd7, S_ROW3 = 4'd8, S_GRP = 4'd9,
-               S_RD = 4'd10, S_DR = 4'd11, S_WR = 4'd12, S_SAVE = 4'd13, S_DRAIN = 4'd14, S_PORT = 4'd15;
-    reg  [3:0]  es;
+    localparam S_IDLE = 5'd0, S_REST = 5'd1, S_DESC = 5'd2, S_SETUP = 5'd3, S_CHECK = 5'd4,
+               S_MUL = 5'd5, S_ROW1 = 5'd6, S_ROW2 = 5'd7, S_ROW3 = 5'd8, S_GRP = 5'd9,
+               S_RD = 5'd10, S_DR = 5'd11, S_WR = 5'd12, S_SAVE = 5'd13, S_DRAIN = 5'd14, S_PORT = 5'd15,
+               S_RA = 5'd16;
+    reg  [4:0]  es;
     reg  [1:0]  last_ch;
     wire        en = dmacon[`RM_DMACON_DMAEN] && dmacon[`RM_DMACON_BLTEN];
     wire [3:0]  runnable = busy & ~pause & {4{en}};
@@ -334,9 +386,9 @@ module dmx #(
 
     // S_WR pipeline: stage A (line up), stage B (combine), then the request
     reg  [3:0]  wj;                    // next word to start
-    reg  [3:0]  sptr;
+    reg  [3:0]  sptr, aptr;
     reg         a_v, b_v;
-    reg  [15:0] a_s, a_m, a_d;
+    reg  [15:0] a_s, a_m, a_d, a_a;
     reg  [22:0] a_w, b_w;
     reg  [15:0] b_out;
     reg  [1:0]  b_be;
@@ -356,7 +408,7 @@ module dmx #(
         xq_v = 1'b0; xq_we = 1'b0; xq_w = r_a; xq_wd = b_out; xq_be = b_be;
         case (es)
             S_DESC: xq_v = (r_iss < 5'd16) && !e_bad;
-            S_RD:   xq_v = (r_iss < r_tot) && !e_bad;
+            S_RD, S_RA: xq_v = (r_iss < r_tot) && !e_bad;
             S_DR:   begin xq_v = (g_dneed != 8'd0) && !e_bad; xq_w = dr_a; end
             S_WR:   begin xq_v = b_v && !b_skip && !e_bad; xq_we = 1'b1; xq_w = b_w; end
             S_PORT: if (w_sk == 2'd1) begin            // port to memory: a byte at a time
@@ -412,29 +464,35 @@ module dmx #(
     wire [22:0] a_wa     = w_desc ? w_dw - wj : w_dw + wj;
     wire [15:0] a_st     = srcmem ? (w_desc ? rev16(a_shp) : a_shp) : pattern(w_val, w_lb, a_wa[0]);
     wire [15:0] a_mt     = w_desc ? rev16(a_mp) : a_mp;
+    // the mask image: take 16 >> BPP bits (one a pixel), adding a word first if short
+    wire [4:0]  a_k      = 5'd16 >> w_lb;
+    wire        a_ins    = (w_acnt < a_k);
+    wire [15:0] a_word   = (aptr < g_na) ? abuf[aptr] : 16'd0;
+    wire [31:0] a_regi   = a_ins ? (w_areg | ({a_word, 16'd0} >> w_acnt)) : w_areg;
+    wire [15:0] a_wide   = widen(a_regi[31:16], w_lb);
+    wire [15:0] a_at     = w_desc ? rev16(a_wide) : a_wide;
 
     // Stage B
-    wire [15:0] kmask    = (w_op == `RM_DMX_OP_KEYCOPY) ? notkey(a_s, w_val[7:0], w_lb) : 16'hFFFF;
-    wire [15:0] fnr      = ({16{w_fn[3]}} &  a_s &  a_d) | ({16{w_fn[2]}} &  a_s & ~a_d)
-                         | ({16{w_fn[1]}} & ~a_s &  a_d) | ({16{w_fn[0]}} & ~a_s & ~a_d);
-    wire [15:0] res      = (w_op == `RM_DMX_OP_LOGIC) ? fnr
-                         : (w_op == `RM_DMX_OP_ADD)   ? padd(a_d, a_s, w_lb, w_fn[0], w_fn[1]) : a_s;
-    wire [15:0] mfin     = a_m & kmask;
+    wire [15:0] b_A      = (w_mask == 2'd2) ? notkey(a_s, w_val[7:0], w_lb)
+                         : (w_mask == 2'd1) ? a_a : 16'hFFFF;
+    wire [15:0] res      = (w_op == `RM_DMX_OP_ADD) ? padd(a_d, a_s, w_lb, w_as[0], w_as[1])
+                         : minterm(w_mt, b_A, a_s, a_d);
+    wire [15:0] mfin     = a_m & ~(keep0 ? ~b_A : 16'd0);
 
     // Job setup: checks
-    wire        bad_op   = (w_op > `RM_DMX_OP_ADD);
+    wire        bad_op   = (w_op > `RM_DMX_OP_ADD) || (w_mask == 2'd3);
     wire        portjob  = (w_sk == 2'd1) || (w_dk == 2'd1);
-    wire        bad_kind = w_dk[1]                                                      // DSTKIND 2, 3
-                         || ((w_op == `RM_DMX_OP_FILL) ? (w_sk != 2'd2 || w_dk != 2'd0)
-                           : (w_op == `RM_DMX_OP_COPY) ? (w_sk[1] || (w_sk == 2'd1 && w_dk == 2'd1))
-                           : (w_op == `RM_DMX_OP_KEYCOPY) ? (w_sk != 2'd0 || w_dk != 2'd0)
-                           : (w_sk == 2'd2 || w_sk == 2'd1 || w_dk != 2'd0));     // LOGIC, ADD: memory or VALUE
+    // DKIND 2 and 3 and BKIND 2 are reserved. A port job is a plain copy:
+    // BLIT 0xCC, no mask, memory to port or port to memory
+    wire        bad_kind = w_dk[1] || (w_sk == 2'd2)
+                         || (portjob && (w_op != `RM_DMX_OP_BLIT || w_mt != 8'hCC || w_mask != 2'd0
+                                         || w_sk == 2'd3 || (w_sk == 2'd1 && w_dk == 2'd1)));
     // A port job: linear, 8 bpp, port 0 or 1 (its memory side is checked word by word)
     wire        bad_port = portjob && (w_lb != 2'd3 || w_rows != 16'd1 || w_desc
                            || (w_sk == 2'd1 ? w_srow : w_drow) > 24'd1);
 
     // Row start
-    reg  [26:0] rs_sba, rs_dba;        // the row's first bits
+    reg  [26:0] rs_sba, rs_dba, rs_aba;  // the row's first bits
     reg  [32:0] mul_s, mul_d;
 
     integer i;
@@ -503,9 +561,11 @@ module dmx #(
             end
 
             S_REST: begin
-                {w_op, w_fn, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_val, w_sstr, w_dstr, w_nbits, w_next,
+                {w_op, w_mt, w_as, w_mask, w_lb, w_desc, w_irq, w_high, w_sk, w_dk, w_val, w_sstr, w_dstr,
+                 w_nbits, w_apx, w_next,
                  w_sbit, w_dbit, w_rows, w_srow, w_drow, w_dw, w_sw, w_dleft, w_sleft,
-                 w_od, w_t, w_pre, w_first, w_le, w_carry} <= st[cur];
+                 w_od, w_t, w_pre, w_first, w_le, w_carry,
+                 w_arow, w_abit, w_aw, w_aleft, w_ao, w_areg, w_acnt} <= st[cur];
                 last_ch <= cur;
                 e_bad   <= 1'b0;
                 r_tot <= 5'd0; r_iss <= 5'd0; r_got <= 5'd0;
@@ -559,12 +619,14 @@ module dmx #(
                 reg [31:0] v;
                 v = jr[{cur, su_i}];
                 case (su_i)
-                    3'd0: begin w_op <= v[2:0]; w_fn <= v[7:4]; w_lb <= v[9:8]; w_desc <= v[10];
-                                w_high <= v[11]; w_irq <= v[12]; w_sk <= v[14:13]; w_dk <= v[16:15]; end
-                    3'd1: w_srow  <= v[23:0];
-                    3'd2: w_drow  <= v[23:0];
-                    3'd3: w_nbits <= {3'd0, v[23:0]};                 // the width, for now
-                    3'd4: begin w_rows <= v[15:0]; w_sbit <= v[18:16]; w_dbit <= v[22:20]; end
+                    3'd0: begin w_op <= v[2:0]; w_as <= v[5:4]; w_lb <= v[9:8]; w_desc <= v[10];
+                                w_high <= v[11]; w_irq <= v[12]; w_sk <= v[14:13]; w_dk <= v[16:15];
+                                w_mask <= v[18:17]; w_mt <= v[31:24]; end
+                    3'd1: begin w_srow <= v[23:0]; w_sbit <= v[26:24]; end
+                    3'd2: begin w_drow <= v[23:0]; w_dbit <= v[26:24]; end
+                    3'd3: begin w_nbits <= {11'd0, v[15:0]};          // the width, for now
+                                w_apx <= v[15:0]; w_rows <= v[31:16]; end
+                    3'd4: begin w_arow <= v[23:0]; w_abit <= v[26:24]; end
                     3'd5: begin w_sstr <= v[31:16]; w_dstr <= v[15:0]; end
                     3'd6: w_val   <= v;
                     3'd7: w_next  <= v[23:0];
@@ -596,6 +658,7 @@ module dmx #(
                 // backwards: start from the last row
                 if (w_desc) begin
                     w_srow <= w_srow + mul_s[23:0];
+                    w_arow <= w_arow + mul_s[23:0];
                     w_drow <= w_drow + mul_d[23:0];
                 end
                 es <= S_ROW1;
@@ -605,12 +668,21 @@ module dmx #(
             S_ROW1: begin
                 rs_sba <= {w_srow, 3'b000} + ({24'd0, w_sbit} << w_lb);
                 rs_dba <= {w_drow, 3'b000} + ({24'd0, w_dbit} << w_lb);
+                rs_aba <= {w_arow, 3'b000} + {24'd0, w_abit};
                 es <= S_ROW2;
             end
             S_ROW2: begin : row2
-                reg [26:0] se, de;
+                reg [26:0] se, de, ae;
                 se = rs_sba + w_nbits;
                 de = rs_dba + w_nbits;
+                ae = rs_aba + {11'd0, w_apx};
+                if (!w_desc) begin
+                    w_ao <= rs_aba[3:0];
+                    w_aw <= rs_aba[26:4];
+                end else begin
+                    w_ao <= 4'd0 - ae[3:0];
+                    /* verilator lint_off WIDTHTRUNC */ w_aw <= (ae - 1'b1) >> 4; /* verilator lint_on WIDTHTRUNC */
+                end
                 if (!w_desc) begin
                     w_od <= rs_dba[3:0];
                     w_dw <= rs_dba[26:4];
@@ -634,6 +706,8 @@ module dmx #(
                 w_t     <= srcmem ? w_t - w_od : 4'd0;
                 w_le    <= w_od + w_nbits[3:0];
                 w_first <= 1'b1;
+                /* verilator lint_off WIDTHTRUNC */ w_aleft <= ({4'd0, w_apx} + w_ao + 20'd15) >> 4; /* verilator lint_on WIDTHTRUNC */
+                w_acnt  <= 5'd0;
                 mode[cur] <= M_RUN;
                 es <= S_GRP;
             end
@@ -647,10 +721,17 @@ module dmx #(
             end else begin : grp
                 reg [3:0] n, nr;
                 reg [24:0] want;
+                reg [7:0] need, avail, extra, na;
                 integer j;
                 n    = (w_dleft > 24'd8) ? 4'd8 : w_dleft[3:0];
                 want = n + w_pre;
                 nr   = (want > w_sleft) ? w_sleft[3:0] : want[3:0];
+                // mask words: the row's first, then enough for n words of pixels
+                need  = {4'd0, n} << (3'd4 - {1'b0, w_lb});
+                avail = w_first ? {4'd0, w_od >> w_lb} + 8'd16 - {4'd0, w_ao} : {3'd0, w_acnt};
+                extra = (need > avail) ? (need - avail + 8'd15) >> 4 : 8'd0;
+                na    = extra + (w_first ? 8'd1 : 8'd0);
+                g_na  <= !maskimg ? 4'd0 : ({8'd0, na} > w_aleft) ? w_aleft[3:0] : na[3:0];
                 g_n  <= n;
                 g_nr <= nr;
                 g_last <= (w_dleft > 24'd8) ? 4'd8 : w_dleft[3:0] - 1'b1;
@@ -678,6 +759,29 @@ module dmx #(
                     else begin
                         w_sw    <= r_a;
                         w_sleft <= w_sleft - g_nr;
+                        r_iss <= 5'd0; r_got <= 5'd0;
+                        r_tot <= {1'b0, g_na};
+                        r_a   <= w_aw;
+                        es    <= (g_na != 4'd0) ? S_RA : S_DR;
+                    end
+                end
+            end
+
+            // the mask image's words, as S_RD
+            S_RA: begin
+                if (xq_take) begin
+                    r_a   <= w_desc ? r_a - 1'b1 : r_a + 1'b1;
+                    r_iss <= r_iss + 1'b1;
+                end
+                if (x_rv) begin
+                    abuf[r_got[3:0]] <= w_desc ? rev16(x_rd) : x_rd;
+                    r_got <= r_got + 1'b1;
+                end
+                if (r_got == r_iss && (r_iss == r_tot || e_bad) && !mem_req && !dx_req) begin
+                    if (e_bad) es <= S_DRAIN;
+                    else begin
+                        w_aw    <= r_a;
+                        w_aleft <= w_aleft - g_na;
                         r_tot <= 5'd0; r_iss <= 5'd0; r_got <= 5'd0;
                         es <= S_DR;
                     end
@@ -700,6 +804,16 @@ module dmx #(
                         wj <= 4'd0;
                         sptr <= w_pre ? 4'd1 : 4'd0;
                         if (w_pre) w_carry <= sbuf[0];
+                        // the row's first mask word: its first bit lined up
+                        // with the destination's first pixel
+                        aptr <= 4'd0;
+                        if (w_first && maskimg) begin : apre
+                            reg [3:0] pd;
+                            pd = w_od >> w_lb;
+                            w_areg <= ({abuf[0], 16'd0} << w_ao) >> pd;
+                            w_acnt <= 5'd16 + pd - w_ao;
+                            aptr   <= 4'd1;
+                        end
                         a_v <= 1'b0; b_v <= 1'b0;
                         es <= S_WR;
                     end
@@ -723,7 +837,13 @@ module dmx #(
                     a_s <= a_st;
                     a_m <= a_mt;
                     a_d <= dbuf[wj[2:0]];
+                    a_a <= a_at;
                     a_w <= a_wa;
+                    if (maskimg) begin
+                        w_areg <= a_regi << a_k;
+                        w_acnt <= (a_ins ? w_acnt + 5'd16 : w_acnt) - a_k;
+                        if (a_ins) aptr <= aptr + 1'b1;
+                    end
                     if (a_hasn) begin
                         w_carry <= a_B;
                         sptr    <= sptr + 1'b1;
@@ -743,6 +863,7 @@ module dmx #(
                         // the row is done
                         w_rows <= w_rows - 1'b1;
                         w_srow <= w_desc ? w_srow - {{8{w_sstr[15]}}, w_sstr} : w_srow + {{8{w_sstr[15]}}, w_sstr};
+                        w_arow <= w_desc ? w_arow - {{8{w_sstr[15]}}, w_sstr} : w_arow + {{8{w_sstr[15]}}, w_sstr};
                         w_drow <= w_desc ? w_drow - {{8{w_dstr[15]}}, w_dstr} : w_drow + {{8{w_dstr[15]}}, w_dstr};
                         mode[cur] <= M_ROW;
                     end
