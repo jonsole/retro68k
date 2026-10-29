@@ -239,7 +239,7 @@ Jobs that read the destination (a minterm that uses C, ADD) need 3 cycles per 2 
 
 For comparison, a 68000 at 20 MHz copies about 4 MB/s (`MOVE.L (A0)+,(A1)+` or `MOVEM.L`). Clearing a full-screen 720 × 576 8 bpp picture (405 KB) takes about 6–8 ms with the engine, well within one 50 Hz frame (20 ms), with the CPU busy.
 
-These figures are worked out from the slot rules; open point D2 is to measure them in simulation.
+These figures are worked out from the slot rules; open point D2 is to measure them in simulation. They are probably optimistic. retro-z80 measured its port of this engine on its KS2 board: fills and copies took 25–35% longer than its own estimates, turning layer DMA off sped jobs up by only 8–13%, and a job reading C cost only 5% more than a copy. So the engine does not use every free cycle it is offered, and its own pipeline, not the memory, sets the speed.
 
 ## 8. Channels and registers
 
@@ -252,8 +252,8 @@ Offsets in the custom register block at `0xE00000` (spec 3, section 3.5).
 | `+0x00`–`+0x1C` | CTRL, BPT, DPT, SIZE, APT, STRIDE, VALUE, NEXT | As in section 3 | The job to run, or running. Writes are ignored while the channel is BUSY |
 | `+0x20` | CHDESC | 23–0 | The descriptor START loads (long-word aligned). Read: the descriptor now running, or the last one loaded. Writes are ignored while the channel is BUSY |
 | `+0x24` | CHCTRL | START (0), RUN (1), STOP (2), PAUSE (3), CPUSHARE (5–4) | START (strobe): load the descriptor at CHDESC into the job registers and run it. RUN (strobe): run the job already in the job registers. Either way, at the end of the job the channel loads the descriptor at NEXT and runs it, until NEXT is 0. Both are ignored while BUSY. STOP (strobe) ends the chain after the current group of cycles. PAUSE holds it while set. CPUSHARE: the cycle 0s the CPU keeps during this channel's HIGH jobs: 0 = 1 in 2, 1 = 1 in 4 (default), 2 = 1 in 8 |
-| `+0x28` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | BUSY: a chain is running (or paused). DONE: a chain reached its end (NEXT = 0) or was stopped. ERR: a job stopped with an error. DONE and ERR are sticky, write 1 to clear |
-| `+0x2C` | CHERR | 23–0 | The address that caused the error, or the descriptor's address for a bad descriptor |
+| `+0x28` | CHSTAT | BUSY (0), DONE (1), ERR (2), PAUSED (3) | BUSY: a chain is running (or paused). DONE: a chain reached its end (NEXT = 0) or was stopped. ERR: a job stopped with an error (DONE stays clear). DONE and ERR are sticky, write 1 to clear |
+| `+0x2C` | CHERR | 23–0 | The address that caused the error, or the descriptor's address (CHDESC) for a bad descriptor. A job started with RUN has no descriptor, so a bad CTRL then gives whatever CHDESC holds (0 after reset) |
 
 The job registers keep the values of the last job loaded or written: the engine's progress through a job is kept inside it, not in them. So after a job, writing only the fields that change (for example BPT and DPT) and RUN starts a similar one, which suits the copper: a few MOVEs set up and start a blit with nothing in memory.
 
@@ -305,7 +305,7 @@ Software decides, but a sensible default:
 | # | Item |
 |---|------|
 | D1 | Check the engine fits and meets timing at 100 MHz |
-| D2 | Measure the speed figures of section 7 in simulation |
+| D2 | Measure the speed figures of section 7 in simulation; retro-z80's board measurements (section 7) suggest they are 25–35% optimistic |
 | D3 | Line drawing and area fill (Amiga blitter features), and scaling or rotating blits: version 2 |
 | D4 | MIX (section 3.4): on hold until it has proper resampling |
 | D5 | OP 6 span fill and OP 7 triangle, for flat-shaded 3D: the codes are agreed with retro-z80 (28 October 2026, its D6), and neither project gives them another meaning without asking the other. Their layouts come with a 3D design |
