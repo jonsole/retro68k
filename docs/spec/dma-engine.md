@@ -306,7 +306,7 @@ Software decides, but a sensible default:
 |---|------|
 | D1 | Check the engine fits and meets timing at 100 MHz |
 | D2 | Measure the speed figures of section 7 in simulation; retro-z80's board measurements (section 7) suggest they are 25–35% optimistic |
-| D3 | Line drawing and area fill (Amiga blitter features), and scaling or rotating blits: version 2 |
+| D3 | Line drawing and area fill (Amiga blitter features), and scaling or rotating blits: version 2. retro-z80 plans a line job next (its spec 15, G1); the starting sketch is OP 2 LINE, with software working out the octant and Bresenham terms, the pixel going through the minterm, and a per-pixel clip rectangle. Nothing is decided. The line job and the triangle job (D5) are separate jobs with their own layouts, sharing the engine's address units, minterm and memory access (agreed with retro-z80, 30 October 2026) |
 | D4 | MIX (section 3.4): on hold until it has proper resampling |
 | D5 | OP 6 span fill and OP 7 triangle, for flat-shaded 3D: the codes are agreed with retro-z80 (28 October 2026, its D6), and neither project gives them another meaning without asking the other. Their layouts come with a 3D design |
 | D6 | The mask shares B's stride (section 3.3), to keep the descriptor at eight long words: at 8 bpp seven eighths of a mask sheet with B's row length is unused. As retro-z80's D13 |
