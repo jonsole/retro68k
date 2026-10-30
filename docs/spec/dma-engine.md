@@ -174,7 +174,7 @@ A LINE job draws a straight line of pixels from a first pixel, the Amiga way: so
 
 **The clip rectangle** (section 8, CLIPX and CLIPY) is one for all channels. A pixel whose (LX, LY) is outside it is neither read nor written and costs no memory cycle, so software only needs to drop lines wholly off the screen. DPT's address is checked (section 4) only for pixels drawn, so a line may start off the screen. After reset the rectangle is the whole range, −32,768 to 32,767.
 
-**Memory cycles:** one read and one write per pixel; at 8 bpp with a minterm that doesn't use C, the write only.
+**Memory cycles:** one read and one write per pixel. A pixel costs no memory cycle when it is clipped, or when its pattern bit A is 0 and MINTERM's low nibble is `0xA` (D = C, so the pixel is left alone). At 8 bpp the read is also skipped when the minterm doesn't use C for that pixel's A (the high nibble for A = 1, the low nibble for A = 0).
 
 **Errors:** besides the usual ones, DESC, MASK or DKIND not 0, WIDTH over 32,768, or HEIGHT over WIDTH − 1 stop the channel.
 
