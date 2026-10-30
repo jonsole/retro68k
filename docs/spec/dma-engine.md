@@ -56,7 +56,7 @@ A WIDTH or HEIGHT of 0 makes the job do nothing (except HEIGHT in a LINE job, se
 
 | Bits | Name | Meaning |
 |------|------|---------|
-| 2–0 | OP | 0 BLIT, 1 ADD, 2 LINE (version 2, section 3.5), 3–4 reserved, 5 MIX (on hold), 6 span fill and 7 triangle (reserved for 3D, open point D5). All but 0 and 1 are an error in version 1 |
+| 2–0 | OP | 0 BLIT, 1 ADD, 2 LINE (version 2, section 3.5), 3 reserved for EDGES (retro-z80's wireframe job, its spec 14 section 3.5; not adopted here), 4 reserved, 5 MIX (on hold), 6 span fill and 7 triangle (reserved for 3D, open point D5). All but 0 and 1 are an error in version 1 |
 | 3 | YMAJOR | LINE: the longer axis is y (steps of a row) instead of x |
 | 4 | SAT | ADD: saturate instead of wrapping |
 | 5 | SIGNED | ADD: pixels are two's complement |
